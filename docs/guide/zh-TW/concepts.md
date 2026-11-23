@@ -53,7 +53,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 1.4 之前，主控台也能執行**應用程式（app）**：你自己的程式（容器或行程、服務或一次性任務），跑在你的機器上，也可以公開在 `/x/<name>` 讓 API 金鑰呼叫。Forgeyard 的重點是執行和管理模型，所以 1.4 起應用程式離開主控台，**1.5 會移除**它們：API 裡屬於應用程式的部分（`/api/workloads`）、範本，以及閘道的 `/x/`。在那之前，它們只能透過 API 使用，並會明白告知：每個回應都帶 `Deprecation` 標頭，伺服器紀錄會警告（每小時最多一次），只要還有任何應用程式，**Setup health** 就會警告。細節在[參考資料](reference.md#apps-deprecated)。
 
 - 要提供模型，請在 **服務中** 部署它。物件偵測、影像分割和深度估計從 1.4 起是[視覺模型](#vision-models)。
-- 內建引擎跑不了的模型，可以加一個**自訂引擎**（**Models → Engines → Add a custom engine**）：和內建的一樣是一份 recipe，指向它的容器映像檔或程式。
+- 內建引擎跑不了的模型，可以加一個**自訂引擎**（**模型 → 引擎 → 加入自訂引擎**）：和內建的一樣是一份 recipe，指向它的容器映像檔或程式。
 
 **機器** 仍會列出佔用顯示卡的應用程式名稱，所以使用中的卡不會被顯示成空閒。模型部署也以 workload（runtime 為 `model`）執行：模型就是這樣跑的，這部分沒有淘汰。
 
@@ -61,16 +61,16 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 模型放在兩個頁面。**服務中** 是現在正在執行的：依種類（chat、多模態 chat、嵌入、重排序、文字分類、語音轉文字、文字轉語音、圖片、影片、視覺）把部署分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**部署模型** 也在這裡，每個部署的頁面在 `/serving/<id>`。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。
 
-**Models** 是模型庫，也就是可以部署的東西，分成三個分頁：**Catalog**（目錄，預設）、**Engines**（引擎），以及管理員才有的 **Sources**（來源）。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.3 的連結（`/models/deployments/<id>`、`/models/deploy`、`/models?tab=routes`、`/models/routes/<id>`、`/providers`）會打開新的位置。
+**模型**是模型庫，也就是可以部署的東西，分成三個分頁：**目錄**（預設）、**引擎**，以及管理員才有的**來源**。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.3 的連結（`/models/deployments/<id>`、`/models/deploy`、`/models?tab=routes`、`/models/routes/<id>`、`/providers`）會打開新的位置。
 
-- **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。每一列都有 **Deploy** 和 **Download to…**。
+- **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。每一列都有**部署**和**下載到…**。
 - **模型的用途**來自它在 Hugging Face 上的任務，再用它的 `config.json` 核對。很多 reranker 標的是 *text classification*，文字分類模型也是；用 vLLM 的規則分辨：只有一個輸出（`num_labels` 為 1：bge-reranker、ms-marco 的 cross-encoder）是 reranker，兩個以上標籤（情緒、語言、有害內容）是[文字分類模型](#text-classification)（1.4.4），絕不會被當成 reranker。語言模型型的 reranker（例如 Qwen3-Reranker）不受影響。
-- **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入、重排序與文字分類）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
+- **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在**引擎**分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入、重排序與文字分類）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - 目錄裡的每個模型都有**自己的頁面**（1.4.3），點它的名稱就會打開：`/models/<name>`。頁面上有模型的資訊（來源與版本、授權、任務、架構）、**哪些機器的模型快取裡有它**、用引擎的預設值現在**放不放得下**每台機器、它的部署、能執行它的引擎，以及它的檔案和大小。每個引擎也有自己的頁面 `/models/engines/<name>`：它的變體（每種硬體用的映像檔或程式，以及是否以 digest 釘選）、**哪些機器已經有那個映像檔或程式**、它的參數，以及使用它的部署和模型。主控台裡所有模型和引擎的名稱都連到這些頁面。管理員可以在模型頁面設定**顯示名稱**；模型的名稱本身不變，因為部署記錄的是它，所以 `deploy`、`deployments`、`routes`、`engines`、`catalog`、`sources`、`recommended`、`search` 和 `inspect` 不能當模型名稱。（[查看模型或引擎](how-to.md#look-at-a-model-or-an-engine)）
-- **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
+- **來源**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。KV cache 依每一層實際保存的內容計算（1.4.5）：滑動視窗層（Gemma、gpt-oss、Mistral 7B）最多只存視窗長度（vLLM 上再加兩個處理中的步驟，每個 2,048 個 token，Gemma 4 是 2,496；配方會明確傳這個值，所以每張卡都一樣），MLA 模型（DeepSeek、Kimi）每個 token 只存一個壓縮的 latent，混合模型（Qwen3-Next、Granite 4、Falcon-H1）只有注意力層會隨上下文長度增加，另外每個請求有固定大小的 *Recurrent state*。留在 CPU 上的 GGUF 層也會在那台機器的 RAM 預留記憶體；每次放置副本時，部署的估算都會依引擎目前的設定重新計算。
-- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。1.4.1 起，模型檔會先從快取裡已經有它的另一台機器取得（仍然經由伺服器），之後才用網際網路。有釘選的引擎映像檔也會這樣一層一層送過去，管理員也可以從機器的頁面上傳任何映像檔，或從另一台機器的引擎複製映像檔（1.4.1）；完整流程請看[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
-- **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Models → Sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
+- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**下載到…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。1.4.1 起，模型檔會先從快取裡已經有它的另一台機器取得（仍然經由伺服器），之後才用網際網路。有釘選的引擎映像檔也會這樣一層一層送過去，管理員也可以從機器的頁面上傳任何映像檔，或從另一台機器的引擎複製映像檔（1.4.1）；完整流程請看[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
+- **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **模型 → 來源** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
 
 ## 部署與閘道
 

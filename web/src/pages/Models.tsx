@@ -6,15 +6,16 @@ import { useAuth } from "../auth";
 import { DownloadDialog, DownloadList } from "../components/DownloadTo";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
+import { useT } from "../i18n/react";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
 import { isActive, recentDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { HARDWARE_LABEL, engineHardware, freeName, renameRecipe } from "../lib/engines";
+import { HARDWARE_LABEL, engineDescription, engineHardware, freeName, renameRecipe } from "../lib/engines";
 import { engineHref, modelHref } from "../lib/pages";
-import { TASK_LABEL, mediaText, params, shortSource } from "../lib/models";
+import { TASK_LABEL, mediaText, params, shortSource, taskLabel } from "../lib/models";
 import type { CatalogModel, CatalogResponse, DownloadsResponse, ModelDownload, ModelSources, Recipe, RecipeVariant } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -46,35 +47,36 @@ function Library({ tab }: { tab: LibraryTab }) {
   const [, setSearch] = useSearchParams();
   const { user } = useAuth();
   const admin = user?.role === "admin";
+  const t = useT();
   const cat = useApi<CatalogResponse>("/models");
   const tabs: { id: LibraryTab; label: string }[] = [
-    { id: "catalog", label: `Catalog${cat.data ? ` (${cat.data.models.length})` : ""}` },
-    { id: "engines", label: "Engines" },
-    ...(admin ? [{ id: "sources" as const, label: "Sources" }] : []),
+    { id: "catalog", label: cat.data ? t("library.tab.catalogCount", { count: String(cat.data.models.length) }) : t("library.tab.catalog") },
+    { id: "engines", label: t("library.tab.engines") },
+    ...(admin ? [{ id: "sources" as const, label: t("library.tab.sources") }] : []),
   ];
   return (
     <>
       <PageHeader
-        index="03 · Models"
-        title="Models"
-        lead="The model library: the models you can deploy, the engines that run them and, for admins, where models may come from. What runs now is on Serving."
+        index={t("library.index")}
+        title={t("library.title")}
+        lead={t("library.lead")}
         actions={cat.data?.can_deploy && (
-          <Link to="/serving/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
+          <Link to="/serving/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> {t("library.deploy")}</Link>
         )}
       />
       <HelpLinks>
-        <HelpLink page="quick-start" anchor="5-add-a-recommended-model">How do I deploy my first model?</HelpLink>
-        <HelpLink page="concepts" anchor="models-engines-and-estimates">Models, engines and estimates</HelpLink>
-        <HelpLink page="how-to" anchor="download-a-model-before-deploying-it">Download a model before deploying it</HelpLink>
+        <HelpLink page="quick-start" anchor="5-add-a-recommended-model">{t("library.help.first")}</HelpLink>
+        <HelpLink page="concepts" anchor="models-engines-and-estimates">{t("library.help.concepts")}</HelpLink>
+        <HelpLink page="how-to" anchor="download-a-model-before-deploying-it">{t("library.help.download")}</HelpLink>
       </HelpLinks>
-      <div className="tabs" role="tablist" aria-label="Models">
-        {tabs.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""}
-            onClick={() => setSearch(t.id === "catalog" ? {} : { tab: t.id })}>{t.label}</button>
+      <div className="tabs" role="tablist" aria-label={t("library.title")}>
+        {tabs.map((x) => (
+          <button key={x.id} type="button" role="tab" aria-selected={tab === x.id} className={tab === x.id ? "on" : ""}
+            onClick={() => setSearch(x.id === "catalog" ? {} : { tab: x.id })}>{x.label}</button>
         ))}
       </div>
       {cat.error ? <Notice tone="error">{cat.error}</Notice>
-        : !cat.data ? <p className="muted">Loading…</p>
+        : !cat.data ? <p className="muted">{t("common.loading")}</p>
           : tab === "catalog" ? <Catalog data={cat.data} reload={cat.reload} />
             : tab === "engines" ? <Engines data={cat.data} reload={cat.reload} />
               : cat.data.sources ? <Sources sources={cat.data.sources} onSaved={cat.reload} /> : null}
@@ -86,6 +88,7 @@ function Library({ tab }: { tab: LibraryTab }) {
 const DOWNLOADS_POLL_MS = 2000;
 
 function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }) {
+  const t = useT();
   const dl = useApi<DownloadsResponse>("/downloads");
   const [dialog, setDialog] = useState<CatalogModel | null>(null);
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -93,8 +96,8 @@ function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }
   const reloadDl = dl.reload;
   useEffect(() => {
     if (!running) return;
-    const t = window.setInterval(() => { if (document.visibilityState !== "hidden") reloadDl(); }, DOWNLOADS_POLL_MS);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") reloadDl(); }, DOWNLOADS_POLL_MS);
+    return () => window.clearInterval(timer);
   }, [running, reloadDl]);
   const byModel = (id: number): ModelDownload[] => recentDownloads((dl.data?.downloads ?? []).filter((d) => d.model?.id === id), "machine");
   const said = (tone: "ok" | "error") => (text: string) => { setNote({ tone, text }); reloadDl(); };
@@ -104,15 +107,14 @@ function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }
       {dialog && <DownloadDialog model={dialog} onClose={() => setDialog(null)} onStarted={said("ok")} />}
       {data.can_manage && <AddModel onAdded={reload} empty={data.models.length === 0} />}
       <section className="panel" aria-labelledby="catalog-title">
-        <div className="panel-head"><h2 id="catalog-title">Catalog</h2><span className="muted small">{data.models.length} model{data.models.length === 1 ? "" : "s"}</span></div>
+        <div className="panel-head"><h2 id="catalog-title">{t("library.tab.catalog")}</h2><span className="muted small">{t.plural("library.models", data.models.length)}</span></div>
         {data.models.length === 0 ? (
-          <p className="muted small catalog-empty">{data.can_manage
-            ? "The catalog lists the models that can be deployed. It is empty: pick one of the recommended models above, or search Hugging Face."
-            : "The catalog lists the models that can be deployed. It is empty: an admin adds models."}</p>
+          <p className="muted small catalog-empty">{data.can_manage ? t("library.catalog.emptyManage") : t("library.catalog.emptyUser")}</p>
         ) : (
           <div className="table-wrap catalog-wrap">
             <table className="table catalog-table">
-              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Engines</th><th /></tr></thead>
+              <thead><tr><th>{t("library.col.model")}</th><th>{t("library.col.task")}</th><th>{t("library.col.format")}</th><th>{t("library.col.size")}</th>
+                <th>{t("library.col.architecture")}</th><th>{t("library.col.licence")}</th><th>{t("library.col.engines")}</th><th /></tr></thead>
               <tbody>{data.models.map((m) => (
                 <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload}
                   downloads={byModel(m.id)} onDownload={() => setDialog(m)} onChanged={said("ok")} onError={said("error")} />
@@ -130,6 +132,7 @@ function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }
 type EngineFormFor = { mode: "add" } | { mode: "edit"; name: string };
 
 function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }) {
+  const t = useT();
   const [form, setForm] = useState<EngineFormFor | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const done = (text: string) => { setForm(null); setNote(text); reload(); };
@@ -139,14 +142,14 @@ function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }
       {data.can_manage && !form && (
         <p className="add-model-open">
           <button type="button" className="btn" onClick={() => { setNote(null); setForm({ mode: "add" }); }}>
-            <IconPlus size={16} aria-hidden="true" /> Add a custom engine
+            <IconPlus size={16} aria-hidden="true" /> {t("library.addEngine")}
           </button>
         </p>
       )}
       {form && <EngineForm key={form.mode === "edit" ? form.name : "add"} edit={form.mode === "edit" ? form.name : null}
         recipes={data.recipes} onDone={done} onCancel={() => setForm(null)} />}
       <section className="panel" aria-labelledby="engines-title">
-        <div className="panel-head"><h2 id="engines-title">Engines</h2><span className="muted small">how each kind of model runs, per hardware</span></div>
+        <div className="panel-head"><h2 id="engines-title">{t("library.tab.engines")}</h2><span className="muted small">{t("library.engines.lead")}</span></div>
         <div className="recipes">{data.recipes.map((r) => (
           <EngineCard key={r.name} r={r} canManage={data.can_manage}
             onEdit={() => { setNote(null); setForm({ mode: "edit", name: r.name }); }} onDeleted={done} />
@@ -160,10 +163,11 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
   m: CatalogModel; canManage: boolean; canDeploy: boolean; reload: () => void; downloads: ModelDownload[];
   onDownload: () => void; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
   const src = shortSource(m);
   const remove = async () => {
-    if (!window.confirm(`Remove ${m.name} from the catalog? Machines keep their cached copy.`)) return;
+    if (!window.confirm(t("library.removeConfirm", { name: m.name }))) return;
     try {
       await api(`/models/${m.id}`, { method: "DELETE" });
       reload();
@@ -174,47 +178,47 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
   return (
     <>
     <tr className={downloads.length ? "has-dl" : undefined}>
-      <td data-label="Model">
+      <td data-label={t("library.col.model")} className="cat-model">
         <div className="cell-stack">
         <div className="strong"><Link to={modelHref(m.name)} className="name-link">{m.title ?? m.name}</Link></div>
-        <div className="mono small muted catalog-src" title={src.full}>{src.text}{m.mmproj ? " + projector" : ""}</div>
+        <div className="mono small muted catalog-src" title={src.full}>{src.text}{m.mmproj ? t("library.projector") : ""}</div>
         {error && <div className="field-error">{error}</div>}
         </div>
       </td>
-      <td data-label="Task">
+      <td data-label={t("library.col.task")} className="cat-task">
         <div className="chip-row">
-          <span className="chip">{m.task_label}</span>
+          <span className="chip">{taskLabel(m)}</span>
           {m.modalities && m.modalities.length > 0 && (
-            <span className="chip chip-tone-run" title="What it takes in chat besides text"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>
+            <span className="chip chip-tone-run" title={t("library.takesTitle")}><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>
           )}
         </div>
       </td>
-      <td data-label="Format" className="mono small">{m.format}</td>
-      <td data-label="Size" className="small">{bytes(m.size_bytes)}</td>
-      <td data-label="Architecture" className="small">
-        {m.summary.architecture ?? "—"}{m.summary.params ? ` · ${params(m.summary.params)} params` : ""}
-        {m.vision?.zero_shot ? <div className="muted" title="A zero-shot detector: each request names what to find">Finds what you name</div>
-          : m.vision?.labels ? <div className="muted" title={m.vision.label_examples?.join(", ")}>{m.vision.labels} classes</div> : null}
-        {m.summary.layers ? <div className="muted">{m.summary.layers} layers{m.summary.kv_heads ? `, ${m.summary.kv_heads} KV heads` : ""}{m.summary.max_context ? `, ${m.summary.max_context} ctx` : ""}</div> : null}
+      <td data-label={t("library.col.format")} className="mono small cat-format">{m.format}</td>
+      <td data-label={t("library.col.size")} className="small cat-size">{bytes(m.size_bytes)}</td>
+      <td data-label={t("library.col.architecture")} className="small cat-arch">
+        {m.summary.architecture ?? "—"}{m.summary.params ? t("library.paramsSuffix", { params: params(m.summary.params) }) : ""}
+        {m.vision?.zero_shot ? <div className="muted" title={t("library.zeroShotTitle")}>{t("library.findsWhatYouName")}</div>
+          : m.vision?.labels ? <div className="muted" title={m.vision.label_examples?.join(", ")}>{t("library.classes", { count: String(m.vision.labels) })}</div> : null}
+        {m.summary.layers ? <div className="muted">{t("library.layers", { count: String(m.summary.layers) })}{m.summary.kv_heads ? t("library.kvHeads", { count: String(m.summary.kv_heads) }) : ""}{m.summary.max_context ? t("library.ctx", { count: String(m.summary.max_context) }) : ""}</div> : null}
       </td>
-      <td data-label="Licence" className="small">
+      <td data-label={t("library.col.licence")} className="small cat-licence">
         <div className="cell-stack">
-          <span className="mono nowrap" title={m.license_from ? `The licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : undefined}>{m.license ?? "—"}{m.license_from ? "*" : ""}</span>
-          {m.gated && <span className="muted"><IconLock size={11} aria-hidden="true" /> gated</span>}
+          <span className="mono nowrap" title={m.license_from ? t("library.licenceFrom", { source: m.license_from.replace("hf://", "") }) : undefined}>{m.license ?? "—"}{m.license_from ? "*" : ""}</span>
+          {m.gated && <span className="muted"><IconLock size={11} aria-hidden="true" /> {t("library.gated")}</span>}
         </div>
       </td>
-      <td data-label="Engines" className="mono small">{m.recipes.length
-        ? m.recipes.map((r, i) => <span key={r}>{i ? ", " : ""}<Link to={engineHref(r)}>{r}</Link></span>) : "none fits"}</td>
+      <td data-label={t("library.col.engines")} className="mono small cat-engines">{m.recipes.length
+        ? m.recipes.map((r, i) => <span key={r}>{i ? ", " : ""}<Link to={engineHref(r)}>{r}</Link></span>) : t("library.noneFits")}</td>
       <td className="cell-actions">
         {/* One column of actions at desktop widths, so the table never clips them (1.4, #92). */}
-        <div className="catalog-actions" role="group" aria-label={`Actions for ${m.name}`}>
-        {canDeploy && m.recipes.length > 0 && <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}`}>Deploy</Link>}
+        <div className="catalog-actions" role="group" aria-label={t("library.actionsFor", { name: m.name })}>
+        {canDeploy && m.recipes.length > 0 && <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}`}>{t("library.deployShort")}</Link>}
         {canDeploy && m.kind !== "local" && (
           <button type="button" className="btn btn-quiet btn-small" onClick={onDownload}
-            title={`Download ${m.name} to machines now, so a deployment there starts without waiting`}>Download to…</button>
+            title={t("library.downloadToTitle", { name: m.name })}>{t("library.downloadTo")}</button>
         )}
         {canManage && <button type="button" className="btn btn-quiet btn-small" disabled={m.deployments > 0}
-          title={m.deployments ? "Deployed: delete its deployments first" : undefined} onClick={() => void remove()}>Remove</button>}
+          title={m.deployments ? t("library.deployedFirst") : undefined} onClick={() => void remove()}>{t("library.remove")}</button>}
         </div>
       </td>
     </tr>
@@ -232,42 +236,45 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
 // 1.4 (#92): a short card (name, version, what it is, the hardware it runs on, what it serves); the
 // variants, their images and requirements, and the offline commands are behind Details.
 function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage: boolean; onEdit: () => void; onDeleted: (text: string) => void }) {
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
+  const desc = engineDescription(r);
+  const serves = t("library.serves", { tasks: r.tasks.map((x) => TASK_LABEL[x]).join(t("library.listSep")) });
   const remove = async () => {
-    if (!window.confirm(`Delete the engine ${r.name}? A deployment that uses it must be deleted first.`)) return;
+    if (!window.confirm(t("library.deleteEngineConfirm", { name: r.name }))) return;
     setError(null);
     try {
       await api(`/recipes/${encodeURIComponent(r.name)}`, { method: "DELETE" });
-      onDeleted(`Engine ${r.name} deleted.`);
+      onDeleted(t("library.engineDeleted", { name: r.name }));
     } catch (e) { setError(errorText(e)); }
   };
   return (
-    <article className="recipe engine-card" aria-label={`Engine ${r.name}`}>
+    <article className="recipe engine-card" aria-label={t("library.engineLabel", { name: r.name })}>
       {/* Every closed card has the same height (1.4, #92): one header row, two lines of description, one
           row of chips, one line of tasks, and the Details row at the bottom. Only an open card grows. */}
       <header className="engine-head">
         <h3 className="mono" title={r.name}><Link to={engineHref(r.name)} className="name-link">{r.name}</Link></h3>
         <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
-        {!r.builtin && <span className="chip chip-tone-run engine-custom">custom</span>}
+        {!r.builtin && <span className="chip chip-tone-run engine-custom">{t("library.custom")}</span>}
       </header>
-      <p className="small engine-desc" title={r.description}>{r.description}</p>
-      <div className="engine-facts" aria-label={`Runs on: ${engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ")}`}>
+      <p className="small engine-desc" title={desc}>{desc}</p>
+      <div className="engine-facts" aria-label={t("library.runsOn", { list: engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ") })}>
         {engineHardware(r).map((h) => (
           <span key={h} className={`vendor vendor-${h}`}>{h === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{HARDWARE_LABEL[h]}</span>
         ))}
-        {r.share === "vram" && <span className="chip chip-tone-wait">shares a GPU</span>}
+        {r.share === "vram" && <span className="chip chip-tone-wait">{t("library.sharesGpu")}</span>}
       </div>
-      <p className="small muted engine-serves" title={`Serves ${r.tasks.map((t) => TASK_LABEL[t]).join(", ")}`}>Serves {r.tasks.map((t) => TASK_LABEL[t]).join(", ")}</p>
+      <p className="small muted engine-serves" title={serves}>{serves}</p>
       <div className="engine-foot">
         <details className="engine-details">
-          <summary className="small">Details</summary>
-          <p className="small muted">Formats: {r.formats.join(", ")} · estimate: {r.estimate}</p>
-          <ul className="variants" aria-label={`Variants of ${r.name}`}>
+          <summary className="small">{t("library.details")}</summary>
+          <p className="small muted">{t("library.formatsEstimate", { formats: r.formats.join(", "), estimate: r.estimate })}</p>
+          <ul className="variants" aria-label={t("library.variantsOf", { name: r.name })}>
             {r.variants.map((v) => (
               <li key={v.name}>
                 <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
-                <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
-                <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
+                <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : t("library.process", { engine: v.engine?.split("/").pop() ?? "" })}</span>
+                <span className="muted small">{[v.compute_capability && t("library.cc", { value: v.compute_capability }), v.driver && t("library.driver", { value: v.driver }), v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
               </li>
             ))}
           </ul>
@@ -275,8 +282,8 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
         </details>
         {canManage && !r.builtin && (
           <div className="engine-actions">
-            <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>Edit</button>
-            <button type="button" className="btn btn-quiet btn-small" onClick={() => void remove()}>Delete</button>
+            <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>{t("library.edit")}</button>
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => void remove()}>{t("library.delete")}</button>
           </div>
         )}
       </div>
@@ -288,6 +295,7 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
 // The commands that carry a container image to a machine that cannot reach the registry, for the
 // variant picked (one at a time: the recipe card is narrow and the commands are long).
 export function OfflineImages({ name, variants }: { name: string; variants: RecipeVariant[] }) {
+  const t = useT();
   const byImage = new Map<string, { names: string[]; checked: boolean }>();
   for (const v of variants) {
     if (v.runtime !== "container" || !v.image) continue;
@@ -304,31 +312,23 @@ export function OfflineImages({ name, variants }: { name: string; variants: Reci
   const id = `offline-${name}`;
   return (
     <details className="docker-advanced recipe-offline">
-      <summary className="small">Machine without registry access: load the image</summary>
+      <summary className="small">{t("library.offline.summary")}</summary>
       <p className="small">
-        On a machine that can reach the registry, save the image of the variant you need to a file. Copy it over, load it, and
-        deploy as usual. <HelpLink page="how-to" anchor="offline-machines">Offline machines</HelpLink>
+        {t.rich("library.offline.lead", { link: (text) => <HelpLink page="how-to" anchor="offline-machines">{text}</HelpLink> })}
       </p>
       {images.length > 1 && (
         <div className="field recipe-offline-pick">
-          <label htmlFor={id}>Variant</label>
+          <label htmlFor={id}>{t("library.offline.variant")}</label>
           <select id={id} value={Math.min(picked, images.length - 1)} onChange={(ev) => setPicked(Number(ev.target.value))}>
             {images.map(([img, x], n) => <option key={img} value={n}>{x.names.join(", ")} · {imageTag(img).split("/").pop()}</option>)}
           </select>
         </div>
       )}
       <p className="small mono muted recipe-offline-image">{imageTag(image)}</p>
-      <CopyBlock value={carry.save} label={`Save command for ${what}`} />
-      <CopyBox value={carry.load} label={`Load command for ${what}`} />
+      <CopyBlock value={carry.save} label={t("library.offline.save", { what })} />
+      <CopyBox value={carry.load} label={t("library.offline.load", { what })} />
       <p className="small muted">
-        {e.checked ? (
-          <>Forgeyard checks the loaded image against the ids recorded for it, so this engine works offline as it is.</>
-        ) : (
-          <>
-            No ids are recorded for this image, so Forgeyard cannot check a loaded copy: name it by its tag only (without{" "}
-            <code>@sha256:…</code>) in the recipe.
-          </>
-        )}
+        {e.checked ? t("library.offline.checked") : t.rich("library.offline.unchecked", { digest: <code>@sha256:…</code> })}
       </p>
     </details>
   );
@@ -340,6 +340,7 @@ export function OfflineImages({ name, variants }: { name: string; variants: Reci
 export function EngineForm({ edit, from, recipes, onDone, onCancel }: {
   edit: string | null; from?: string; recipes: Recipe[]; onDone: (text: string, name: string) => void; onCancel: () => void;
 }) {
+  const t = useT();
   const [text, setText] = useState("");
   const [start, setStart] = useState(from ?? "");
   const [busy, setBusy] = useState(false);
@@ -377,46 +378,40 @@ export function EngineForm({ edit, from, recipes, onDone, onCancel }: {
     try {
       const r = await api<{ recipe: Recipe }>(edit === null ? "/recipes" : `/recipes/${encodeURIComponent(edit)}`,
         { method: edit === null ? "POST" : "PUT", body: { yaml: text } });
-      onDone(edit === null ? `Engine ${r.recipe.name} added.` : `Engine ${r.recipe.name} saved.`, r.recipe.name);
+      onDone(t(edit === null ? "library.engineAdded" : "library.engineSaved", { name: r.recipe.name }), r.recipe.name);
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   return (
     <section className="panel engine-form" aria-labelledby="engine-form-title">
       <div className="panel-head">
-        <h2 id="engine-form-title">{edit === null ? "Add a custom engine" : `Change ${edit}`}</h2>
-        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>Close</button>
+        <h2 id="engine-form-title">{edit === null ? t("library.addEngine") : t("library.form.change", { name: edit })}</h2>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>{t("common.close")}</button>
       </div>
-      {edit === null && (
-        <p className="engine-form-lead">
-          Define an engine with your own image and arguments — for example a newer version, copied from a built-in engine. Built-in
-          engines are updated with Forgeyard releases.
-        </p>
-      )}
+      {edit === null && <p className="engine-form-lead">{t("library.form.lead")}</p>}
       <p className="muted small">
-        An engine is a recipe in YAML, like the built-in ones: the program or container image per hardware, its parameters and its
-        memory estimate. <HelpLink page="reference" anchor="built-in-recipes">Built-in recipes</HelpLink>
+        {t.rich("library.form.what", { link: (x) => <HelpLink page="reference" anchor="built-in-recipes">{x}</HelpLink> })}
       </p>
       {edit === null && (
         <div className="field">
-          <label htmlFor="engine-start">Start from a built-in engine</label>
+          <label htmlFor="engine-start">{t("library.form.start")}</label>
           <select id="engine-start" value={start} onChange={(e) => void copy(e.target.value)}>
-            <option value="">Empty: write the YAML yourself</option>
+            <option value="">{t("library.form.empty")}</option>
             {builtins.map((r) => <option key={r.name} value={r.name}>{r.name} ({r.engine} {r.version})</option>)}
           </select>
-          <p className="field-hint">The copy gets a name of its own; change the variants or parameters you need.</p>
+          <p className="field-hint">{t("library.form.startHint")}</p>
         </div>
       )}
       <div className={`field${error ? " has-error" : ""}`}>
-        <label htmlFor="engine-yaml">Engine recipe (YAML)</label>
+        <label htmlFor="engine-yaml">{t("library.form.yaml")}</label>
         <textarea id="engine-yaml" className="mono" rows={16} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
           disabled={loading} aria-invalid={error ? true : undefined} aria-describedby={error ? "engine-yaml-error" : undefined} />
         {error && <p className="field-error" id="engine-yaml-error" role="alert">{error}</p>}
       </div>
       <div className="row-gap">
         <button type="button" className="btn btn-primary" disabled={busy || loading || !text.trim()} onClick={() => void save()}>
-          {busy ? "Saving…" : edit === null ? "Add engine" : "Save changes"}
+          {busy ? t("library.form.saving") : edit === null ? t("library.form.add") : t("library.form.save")}
         </button>
-        <button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn btn-quiet" onClick={onCancel}>{t("common.cancel")}</button>
       </div>
     </section>
   );
@@ -425,34 +420,35 @@ export function EngineForm({ edit, from, recipes, onDone, onCancel }: {
 function Sources({ sources, onSaved }: { sources: ModelSources; onSaved: () => void }) {
   const [hosts, setHosts] = useState(sources.url_hosts.join("\n"));
   const [dirs, setDirs] = useState(sources.local_dirs.join("\n"));
+  const t = useT();
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const save = async () => {
     try {
       await api("/model-sources", { method: "PUT", body: { url_hosts: hosts.split("\n"), local_dirs: dirs.split("\n") } });
-      setMsg({ tone: "ok", text: "Saved." }); onSaved();
+      setMsg({ tone: "ok", text: t("library.sources.saved") }); onSaved();
     } catch (e) { setMsg({ tone: "error", text: errorText(e) }); }
   };
   const seeds = sources.env_seeds ?? [];
   return (
     <section className="panel" aria-labelledby="sources-title">
-      <h2 id="sources-title">Sources</h2>
-      <p className="muted small">Hugging Face models come from <code>{sources.hf_endpoint}</code>. Anything else only from what is listed here. Private and metadata addresses are always refused{sources.allow_private_hosts ? " (except: private hosts are allowed on this server for a LAN mirror)" : ""}.</p>
+      <h2 id="sources-title">{t("library.tab.sources")}</h2>
+      <p className="muted small">{t.rich("library.sources.where", { endpoint: <code>{sources.hf_endpoint}</code>,
+        except: sources.allow_private_hosts ? t("library.sources.except") : "" })}</p>
       {seeds.length > 0 && (
         <p className="from-env small" role="note">
-          <span className="chip chip-tone-wait">from .env</span>
-          <span>These lists come from {seeds.map((n, i) => <span key={n}>{i ? ", " : ""}<code>{n}</code></span>)}: nobody has saved them here
-            yet. Saving replaces them, and the environment is then ignored.</span>
+          <span className="chip chip-tone-wait">{t("library.sources.fromEnv")}</span>
+          <span>{t.rich("library.sources.seeds", { names: seeds.map((n, i) => <span key={n}>{i ? ", " : ""}<code>{n}</code></span>) })}</span>
         </p>
       )}
       <div className="grid-2">
-        <div className="field"><label htmlFor="s-hosts">Hosts for GGUF URLs (one per line, *.example.org for subdomains)</label>
+        <div className="field"><label htmlFor="s-hosts">{t("library.sources.hosts")}</label>
           <textarea id="s-hosts" className="mono" rows={3} value={hosts} onChange={(e) => setHosts(e.target.value)} /></div>
-        <div className="field"><label htmlFor="s-dirs">Directories for local:// models</label>
+        <div className="field"><label htmlFor="s-dirs">{t("library.sources.dirs")}</label>
           <textarea id="s-dirs" className="mono" rows={3} value={dirs} onChange={(e) => setDirs(e.target.value)} />
-          <p className="field-hint">Agents must also allow them (--model-local-dir).</p></div>
+          <p className="field-hint">{t("library.sources.dirsHint")}</p></div>
       </div>
       {msg && <div style={{ marginTop: 12 }}><Notice tone={msg.tone}>{msg.text}</Notice></div>}
-      <div className="row-gap" style={{ marginTop: 12 }}><button type="button" className="btn" onClick={() => void save()}>Save sources</button></div>
+      <div className="row-gap" style={{ marginTop: 12 }}><button type="button" className="btn" onClick={() => void save()}>{t("library.sources.save")}</button></div>
       <HfToken info={sources.hf_token} onSaved={onSaved} />
     </section>
   );
@@ -461,6 +457,7 @@ function Sources({ sources, onSaved }: { sources: ModelSources; onSaved: () => v
 // 1.3.1 (D2): one Hugging Face token for the server, for gated models. Write-only: only whether one is
 // set and its last four characters ever come back.
 function HfToken({ info, onSaved }: { info?: ModelSources["hf_token"]; onSaved: () => void }) {
+  const t = useT();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -470,31 +467,28 @@ function HfToken({ info, onSaved }: { info?: ModelSources["hf_token"]; onSaved: 
     try {
       await api("/hf-token", method === "PUT" ? { method, body: { token: token.trim() } } : { method });
       setToken("");
-      setMsg({ tone: "ok", text: method === "PUT" ? "Token saved." : "Token removed." });
+      setMsg({ tone: "ok", text: t(method === "PUT" ? "library.hf.saved" : "library.hf.removed") });
       onSaved();
     } catch (e) { setMsg({ tone: "error", text: errorText(e) }); } finally { setBusy(false); }
   };
   return (
     <div className="hf-token">
-      <h3 id="hf-token-title">Hugging Face token</h3>
-      <p className="muted small">
-        For gated models (Llama, Gemma 3, FLUX.1-schnell…): used to inspect them and sent to the agent that downloads them, only to Hugging
-        Face. A deployment's own token (Deploy a model → Advanced) wins for that deployment. Stored encrypted; never shown again.
-      </p>
+      <h3 id="hf-token-title">{t("library.hf.title")}</h3>
+      <p className="muted small">{t("library.hf.lead")}</p>
       <p className="small hf-token-state">
         {info?.set
-          ? <><span className="chip chip-tone-ok">set</span> ends in <code>…{info.last4}</code>{info.updated_by ? <> · by {info.updated_by}</> : null}{info.updated_at ? <> · {when(info.updated_at)}</> : null}</>
-          : <><span className="chip">not set</span> Gated models need a token, here or on each deployment.</>}
+          ? <>{t.rich("library.hf.set", { chip: (x) => <span className="chip chip-tone-ok">{x}</span>, last4: <code>…{info.last4}</code> })}{info.updated_by ? t("library.hf.by", { name: info.updated_by }) : null}{info.updated_at ? <> · {when(info.updated_at)}</> : null}</>
+          : t.rich("library.hf.notSet", { chip: (x) => <span className="chip">{x}</span> })}
       </p>
       <form className="token-row" onSubmit={(e) => { e.preventDefault(); if (token.trim()) void send("PUT"); }}>
         <div className="field">
-          <label htmlFor="hf-token">{info?.set ? "Replace the token" : "Token"}</label>
+          <label htmlFor="hf-token">{info?.set ? t("library.hf.replace") : t("library.hf.token")}</label>
           <input id="hf-token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="hf_…" />
-          <p className="field-hint">A read token of an account that accepted the model's licence on huggingface.co.</p>
+          <p className="field-hint">{t("library.hf.hint")}</p>
         </div>
         <div className="row-gap">
-          <button type="submit" className="btn" disabled={busy || !token.trim()}>Save token</button>
-          {info?.set && <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void send("DELETE")}>Remove token</button>}
+          <button type="submit" className="btn" disabled={busy || !token.trim()}>{t("library.hf.save")}</button>
+          {info?.set && <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void send("DELETE")}>{t("library.hf.remove")}</button>}
         </div>
       </form>
       {msg && <div style={{ marginTop: 10 }}><Notice tone={msg.tone}>{msg.text}</Notice></div>}

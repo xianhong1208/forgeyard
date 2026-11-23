@@ -1,4 +1,6 @@
-import { labels, t, tMaybe } from "../i18n/core";
+import { hasKey, labels, lookup, t, tMaybe } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
+import { getLang } from "../i18n/lang";
 import { IDLE_DEFAULT } from "./sleep";
 import { bytes } from "./machines";
 import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task } from "./types";
@@ -27,12 +29,26 @@ export const API_LABEL: Record<string, string> = {
   classify: "/v1/classify",
 };
 
-export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };
+export const MEDIUM_LABEL: Record<Medium, string> = labels({ image: "library.medium.image", audio: "library.medium.audio", video: "library.medium.video" });
 
-// "Images, video" for what a model takes besides text; null: unknown (a catalog entry from before 1.3).
+// "Images, video" (圖片、影片) for what a model takes besides text; null: unknown (a catalog entry from before 1.3).
+// English lowercases all but the first; Chinese has no case.
 export function mediaText(m: Medium[] | null | undefined): string | null {
   if (m === null || m === undefined) return null;
-  return m.length ? m.map((x, i) => (i ? MEDIUM_LABEL[x].toLowerCase() : MEDIUM_LABEL[x])).join(", ") : "Text only";
+  return m.length ? m.map((x, i) => (i ? MEDIUM_LABEL[x].toLowerCase() : MEDIUM_LABEL[x])).join(t("library.listSep")) : t("library.textOnly");
+}
+
+// A catalog model's task in the reader's language: English shows the server's own label, as before.
+export function taskLabel(m: { task: Task; task_label: string }): string {
+  return getLang() === "en" ? m.task_label : TASK_LABEL[m.task] ?? m.task_label;
+}
+
+// Text the server sends that the console knows by an id (a built-in engine's description, a group of the recommended
+// list). The translation is used only while the server still sends the English it was made from, so a changed text
+// is never covered by an old translation (and English readers always see what was sent).
+export function sentText(key: string, sent: string): string {
+  if (!hasKey(key) || lookup("en", key) !== sent) return sent;
+  return lookup(getLang(), key);
 }
 
 export function gib(n: number | null | undefined): string {
@@ -40,9 +56,17 @@ export function gib(n: number | null | undefined): string {
   return `${(n / 1024 ** 3).toFixed(2)} GiB`;
 }
 
+// A parameter count: "4.02 B", "596 M"; in Chinese the 萬/億 of Intl's compact notation ("40.2億").
 export function params(n: number | undefined): string {
   if (!n) return "—";
+  const lang = getLang();
+  if (lang !== "en") return formatNumber(n, lang, { notation: "compact", maximumSignificantDigits: 3 });
   return n >= 1e9 ? `${(n / 1e9).toFixed(2)} B` : `${Math.round(n / 1e6)} M`;
+}
+
+// Billions of parameters, always: "4.02 B" (a model's or a pipeline component's); in Chinese as params() says it.
+export function billions(n: number): string {
+  return getLang() === "en" ? `${(n / 1e9).toFixed(2)} B` : params(n);
 }
 
 // "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar (never past the end).

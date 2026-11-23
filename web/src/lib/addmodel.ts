@@ -1,6 +1,9 @@
 // Adding a model: the recommended list, Hugging Face search (run by the server) and the
 // inspection with its suggestion (recipe, estimate, where it fits).
 
+import { t } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
+import { getLang } from "../i18n/lang";
 import { PERMISSIVE, TASK_LABEL, VISION_TASKS } from "./models";
 import type { CatalogModel, Estimate, Medium, Task } from "./types";
 
@@ -85,8 +88,10 @@ export function pickFromSearch(r: SearchResult): Pick {
   return { ...emptyPick(), source: r.source, name: nameFor(r.source), task: r.task ?? "", gated: r.gated, from: "search" };
 }
 
-// 1234567 -> "1.2 M"
+// 1234567 -> "1.2 M"; in Chinese Intl's compact form with 萬 and 億 ("123.5萬").
 export function compact(n: number): string {
+  const lang = getLang();
+  if (lang !== "en") return formatNumber(n, lang, { notation: "compact", maximumFractionDigits: 1 });
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)} M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)} k`;
@@ -96,7 +101,9 @@ export function compact(n: number): string {
 export function fitsLine(s: Suggestion): string | null {
   const yes = (s.machines ?? []).filter((m) => m.fits);
   if (!yes.length) return null;
-  return yes.map((m) => `${m.name} (${m.gpus.length ? `GPU ${m.gpus.map((g) => `#${g}`).join(", ")}` : "CPU"})`).join(", ");
+  const sep = t("library.listSep");
+  return yes.map((m) => (m.gpus.length ? t("addmodel.fit.gpu", { name: m.name, gpus: m.gpus.map((g) => `#${g}`).join(sep) })
+    : t("addmodel.fit.cpu", { name: m.name }))).join(sep);
 }
 
 // Where to go to deploy a model just added, with the suggested recipe and device.
@@ -112,11 +119,11 @@ export function deployLink(name: string, s: Suggestion | null | undefined): stri
 export function visionProblem(meta: { vision?: InspectMeta["vision"]; license?: string | null }, task: Task | "" | null | undefined): string | null {
   if (!task || !VISION_TASKS.includes(task)) return null;
   const v = meta.vision;
-  if (!v) return `This repository is not a ${TASK_LABEL[task].toLowerCase()} model the vision server can run.`;
-  if (v.task !== task) return `This is a ${TASK_LABEL[v.task].toLowerCase()} model, not one for ${TASK_LABEL[task].toLowerCase()}.`;
-  if (v.problem) return `It cannot run on the vision server: ${v.problem}.`;
+  if (!v) return t("addmodel.vision.notVision", { task: TASK_LABEL[task].toLowerCase() });
+  if (v.task !== task) return t("addmodel.vision.otherTask", { actual: TASK_LABEL[v.task].toLowerCase(), task: TASK_LABEL[task].toLowerCase() });
+  if (v.problem) return t("addmodel.vision.cannotRun", { problem: v.problem });
   if (!meta.license || !PERMISSIVE.includes(meta.license)) {
-    return `Vision models are added with a permissive licence only (Apache-2.0, MIT, BSD); this one's is ${meta.license ?? "not stated"}.`;
+    return t("addmodel.vision.licence", { licence: meta.license ?? t("addmodel.vision.notStated") });
   }
   return null;
 }
@@ -125,5 +132,5 @@ export function visionProblem(meta: { vision?: InspectMeta["vision"]; license?: 
 // known until it is inspected).
 export function searchLicenceProblem(r: SearchResult): string | null {
   if (!r.task || !VISION_TASKS.includes(r.task) || !r.license) return null;
-  return PERMISSIVE.includes(r.license) ? null : `Licence ${r.license}: vision models need a permissive one`;
+  return PERMISSIVE.includes(r.license) ? null : t("addmodel.search.licence", { licence: r.license });
 }

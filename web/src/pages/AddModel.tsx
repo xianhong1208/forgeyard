@@ -3,6 +3,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 
 import { Notice } from "../components/ui";
+import { labels, t as tNow } from "../i18n/core";
+import { useT } from "../i18n/react";
 import { ApiError, api, errorText } from "../lib/api";
 import {
   compact, deployLink, emptyPick, fitsLine, nameFor, pickFromList, pickFromSearch, searchLicenceProblem, visionProblem,
@@ -10,7 +12,7 @@ import {
 } from "../lib/addmodel";
 import { when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { TASK_LABEL, gib, mediaText } from "../lib/models";
+import { TASK_LABEL, billions, gib, mediaText, sentText } from "../lib/models";
 import type { Task } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { licencePage, licenceTerms } from "../lib/licences";
@@ -18,39 +20,42 @@ import { licencePage, licenceTerms } from "../lib/licences";
 type Mode = "list" | "search" | "source";
 export const SEARCH_DELAY_MS = 500;
 
-const FORMAT_LABEL: Record<string, string> = { safetensors: "safetensors", gguf: "GGUF", ctranslate2: "CTranslate2", onnx: "ONNX", diffusers: "diffusers", other: "other" };
+const FORMAT_LABEL: Record<string, string> = { safetensors: "safetensors", gguf: "GGUF", ctranslate2: "CTranslate2", onnx: "ONNX", diffusers: "diffusers" };
+const formatLabel = (f: string) => (f === "other" ? tNow("addmodel.format.other") : FORMAT_LABEL[f] ?? f);
 
 // What each file beside an image model's main file is (stable-diffusion.cpp).
-const COMPONENT_LABEL: Record<string, string> = { vae: "VAE", llm: "text encoder", t5xxl: "T5-XXL", clip_l: "CLIP-L", clip_g: "CLIP-G" };
+const COMPONENT_LABEL: Record<string, string> = { vae: "VAE", t5xxl: "T5-XXL", clip_l: "CLIP-L", clip_g: "CLIP-G" };
+const componentLabel = (k: string) => (k === "llm" ? tNow("addmodel.component.llm") : COMPONENT_LABEL[k] ?? k);
 
 export function imageFacts(img: NonNullable<InspectMeta["image"]>, d?: InspectMeta["diffusers"]): string {
-  const parts = d ? Object.entries(d.components).map(([k, c]) => `${k} ${(c.params / 1e9).toFixed(2)} B`)
-    : Object.entries(img.components ?? {}).map(([k, p]) => `${COMPONENT_LABEL[k] ?? k} ${p}`);
+  const parts = d ? Object.entries(d.components).map(([k, c]) => `${k} ${billions(c.params)}`)
+    : Object.entries(img.components ?? {}).map(([k, p]) => `${componentLabel(k)} ${p}`);
   return [`${img.size}x${img.size}`, ...parts].join(" · ");
 }
 
 // A video pipeline's own size and frame rate, and its components (1.3).
 export function videoFacts(v: NonNullable<InspectMeta["video"]>, d?: InspectMeta["diffusers"]): string {
-  const parts = d ? Object.entries(d.components).map(([k, c]) => `${k} ${(c.params / 1e9).toFixed(2)} B`) : [];
-  return [`${v.size[0]}x${v.size[1]} at ${v.fps} fps`, ...parts].join(" · ");
+  const parts = d ? Object.entries(d.components).map(([k, c]) => `${k} ${billions(c.params)}`) : [];
+  return [tNow("addmodel.videoSize", { width: String(v.size[0]), height: String(v.size[1]), fps: String(v.fps) }), ...parts].join(" · ");
 }
 
-const LANGUAGE: Record<string, string> = { zh: "Chinese", en: "English", ja: "Japanese", ko: "Korean", de: "German", fr: "French",
-  ru: "Russian", pt: "Portuguese", es: "Spanish", it: "Italian" };
+const LANGUAGE: Record<string, string> = labels({ zh: "addmodel.lang.zh", en: "addmodel.lang.en", ja: "addmodel.lang.ja", ko: "addmodel.lang.ko",
+  de: "addmodel.lang.de", fr: "addmodel.lang.fr", ru: "addmodel.lang.ru", pt: "addmodel.lang.pt", es: "addmodel.lang.es", it: "addmodel.lang.it" });
 
-// "Chinese, English +8" for a speech model's languages.
+// "Chinese, English +8" (中文、英文 +8) for a speech model's languages.
 export function languagesText(langs: string[]): string {
-  const named = langs.slice(0, 2).map((l) => LANGUAGE[l] ?? l).join(", ");
+  const named = langs.slice(0, 2).map((l) => LANGUAGE[l] ?? l).join(tNow("library.listSep"));
   return langs.length > 2 ? `${named} +${langs.length - 2}` : named;
 }
 
 export function AddModel({ onAdded, empty }: { onAdded: () => void; empty: boolean }) {
+  const t = useT();
   const [open, setOpen] = useState(empty);
   if (!open) {
     return (
       <p className="add-model-open">
         <button type="button" className="btn" onClick={() => setOpen(true)}>
-          <IconPlus size={16} aria-hidden="true" /> Add a model
+          <IconPlus size={16} aria-hidden="true" /> {t("addmodel.open")}
         </button>
       </p>
     );
@@ -59,6 +64,7 @@ export function AddModel({ onAdded, empty }: { onAdded: () => void; empty: boole
 }
 
 function AddModelPanel({ onAdded, onClose }: { onAdded: () => void; onClose: () => void }) {
+  const t = useT();
   const [mode, setMode] = useState<Mode>("list");
   const [pick, setPick] = useState<Pick | null>(null);
   const [added, setAdded] = useState<{ name: string; suggestion: Suggestion | null } | null>(null);
@@ -67,21 +73,18 @@ function AddModelPanel({ onAdded, onClose }: { onAdded: () => void; onClose: () 
   return (
     <section className="panel panel-link add-model" aria-labelledby="add-model-title">
       <div className="panel-head">
-        <h2 id="add-model-title">Add a model</h2>
-        <button type="button" className="btn btn-quiet btn-small" onClick={onClose}>Close</button>
+        <h2 id="add-model-title">{t("addmodel.open")}</h2>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onClose}>{t("common.close")}</button>
       </div>
-      <p className="muted small add-model-lead">
-        Pick a model; Forgeyard reads its configuration from Hugging Face (not the weights), says what it needs and where it
-        fits, and pins it to the exact version it finds. Machines download it when you deploy it.
-      </p>
+      <p className="muted small add-model-lead">{t("addmodel.lead")}</p>
       {added && (
         <Notice tone="ok">
-          <strong>{added.name}</strong> is in the catalog. <Link to={deployLink(added.name, added.suggestion)}>Deploy it</Link>, or add another.
+          {t.rich("addmodel.added", { name: <strong>{added.name}</strong>, link: (x) => <Link to={deployLink(added.name, added.suggestion)}>{x}</Link> })}
         </Notice>
       )}
-      <div className="segmented add-model-modes" role="group" aria-label="How to find the model">
-        {([["list", "Recommended"], ["search", "Search Hugging Face"], ["source", "Enter a source"]] as const).map(([m, label]) => (
-          <button key={m} type="button" className={mode === m ? "on" : ""} aria-pressed={mode === m} onClick={() => { setMode(m); setPick(null); }}>{label}</button>
+      <div className="segmented add-model-modes" role="group" aria-label={t("addmodel.modes")}>
+        {(["list", "search", "source"] as const).map((m) => (
+          <button key={m} type="button" className={mode === m ? "on" : ""} aria-pressed={mode === m} onClick={() => { setMode(m); setPick(null); }}>{t(`addmodel.mode.${m}`)}</button>
         ))}
       </div>
       {!pick && mode === "list" && <RecommendedList data={rec.data} error={rec.error} onPick={(m) => choose(pickFromList(m))} chosen={pick} />}
@@ -101,14 +104,15 @@ function AddModelPanel({ onAdded, onClose }: { onAdded: () => void; onClose: () 
 function RecommendedList({ data, error, onPick, chosen }: {
   data: RecommendedResponse | null; error: string | null; onPick: (m: RecommendedModel) => void; chosen: Pick | null;
 }) {
+  const t = useT();
   if (error) return <Notice tone="error">{error}</Notice>;
-  if (!data) return <p className="muted small">Loading the list…</p>;
+  if (!data) return <p className="muted small">{t("addmodel.rec.loading")}</p>;
   return (
     <div className="rec-groups">
       {data.groups.map((g) => (
         <section key={g.id} className="rec-group" aria-labelledby={`rec-${g.id}`}>
-          <h3 id={`rec-${g.id}`}>{g.title}</h3>
-          <p className="muted small">{g.description}</p>
+          <h3 id={`rec-${g.id}`}>{sentText(`addmodel.group.${g.id}.title`, g.title)}</h3>
+          <p className="muted small">{sentText(`addmodel.group.${g.id}.description`, g.description)}</p>
           <ul className="rec-list">
             {data.models.filter((m) => m.group === g.id).map((m) => (
               <li key={m.name} className={`rec${chosen?.source === m.source && chosen.file === (m.file ?? "") ? " rec-on" : ""}`}>
@@ -117,27 +121,27 @@ function RecommendedList({ data, error, onPick, chosen }: {
                   <span className="chip">{TASK_LABEL[m.task]}</span>
                   {m.device === "cpu" && <span className="chip"><IconCpu size={11} aria-hidden="true" /> CPU</span>}
                   {m.inputs.length > 0 && <span className="chip chip-tone-run">{mediaText(m.inputs)}</span>}
-                  {m.languages && m.languages.length > 0 && <span className="chip" title="Languages it speaks">{languagesText(m.languages)}</span>}
-                  <span className={`chip mono${licenceTerms(m.license) ? " chip-tone-run" : ""}`} title={m.license_from ? `Licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : "Licence"}>{m.license}</span>
+                  {m.languages && m.languages.length > 0 && <span className="chip" title={t("addmodel.rec.languages")}>{languagesText(m.languages)}</span>}
+                  <span className={`chip mono${licenceTerms(m.license) ? " chip-tone-run" : ""}`} title={m.license_from ? t("addmodel.rec.licenceFrom", { source: m.license_from.replace("hf://", "") }) : t("addmodel.rec.licence")}>{m.license}</span>
                 </div>
                 <p className="rec-note small">{m.note}</p>
                 <p className="rec-size small muted">
-                  About {m.download_gib} GiB to download; one copy needs about {m.memory_gib} GiB of {m.device === "cpu" ? "RAM" : "GPU memory"}.
+                  {t(m.device === "cpu" ? "addmodel.rec.sizeRam" : "addmodel.rec.sizeGpu", { download: String(m.download_gib), memory: String(m.memory_gib) })}
                 </p>
                 {licenceTerms(m.license) && (
                   <p className="rec-terms small">
                     {licenceTerms(m.license)}{" "}
-                    {licencePage(m.source, m.license_from) && <a href={licencePage(m.source, m.license_from)!} target="_blank" rel="noreferrer">The licence</a>}
+                    {licencePage(m.source, m.license_from) && <a href={licencePage(m.source, m.license_from)!} target="_blank" rel="noreferrer">{t("addmodel.rec.theLicence")}</a>}
                   </p>
                 )}
                 {m.gated && (
-                  <p className="rec-gated small"><IconLock size={13} aria-hidden="true" /> Needs a Hugging Face token and accepting the licence on Hugging Face.</p>
+                  <p className="rec-gated small"><IconLock size={13} aria-hidden="true" /> {t("addmodel.rec.gated")}</p>
                 )}
                 <div className="rec-foot">
                   <span className="mono small muted rec-src">{m.source.replace("hf://", "")}{m.file ? ` · ${m.file}` : ""}</span>
                   {m.in_catalog
-                    ? <span className="chip chip-tone-ok">In the catalog as {m.in_catalog}</span>
-                    : <button type="button" className="btn btn-small" onClick={() => onPick(m)}>Choose</button>}
+                    ? <span className="chip chip-tone-ok">{t("addmodel.inCatalog", { name: m.in_catalog })}</span>
+                    : <button type="button" className="btn btn-small" onClick={() => onPick(m)}>{t("addmodel.choose")}</button>}
                 </div>
               </li>
             ))}
@@ -152,6 +156,7 @@ function RecommendedList({ data, error, onPick, chosen }: {
 function HubSearch({ recommended, onPick, onFallback, chosen }: {
   recommended: RecommendedModel[]; onPick: (p: Pick) => void; onFallback: () => void; chosen: Pick | null;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const [task, setTask] = useState("");
   const [format, setFormat] = useState("");
@@ -186,43 +191,44 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
 
   return (
     <div className="hub">
-      <form className="hub-form" onSubmit={submit} role="search" aria-label="Hugging Face search">
+      <form className="hub-form" onSubmit={submit} role="search" aria-label={t("addmodel.search.aria")}>
         <div className="field hub-q">
-          <label htmlFor="hub-q">Search Hugging Face</label>
+          <label htmlFor="hub-q">{t("addmodel.search.label")}</label>
           <input id="hub-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="qwen3, whisper, bge-m3…" maxLength={100} />
         </div>
         <div className="field">
-          <label htmlFor="hub-task">Task</label>
+          <label htmlFor="hub-task">{t("addmodel.search.task")}</label>
           <select id="hub-task" value={task} onChange={(e) => setTask(e.target.value)}>
-            <option value="">Any task</option>
+            <option value="">{t("addmodel.search.anyTask")}</option>
             {Object.entries(TASK_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </div>
         <div className="field">
-          <label htmlFor="hub-format">Format</label>
+          <label htmlFor="hub-format">{t("addmodel.search.format")}</label>
           <select id="hub-format" value={format} onChange={(e) => setFormat(e.target.value)}>
-            <option value="">Any format</option>
+            <option value="">{t("addmodel.search.anyFormat")}</option>
             <option value="safetensors">safetensors (GPU)</option>
-            <option value="gguf">GGUF (CPU or GPU)</option>
-            <option value="ctranslate2">CTranslate2 (speech)</option>
-            <option value="onnx">ONNX (Kokoro, Piper voices)</option>
-            <option value="diffusers">diffusers (images)</option>
+            <option value="gguf">{t("addmodel.search.gguf")}</option>
+            <option value="ctranslate2">{t("addmodel.search.ctranslate2")}</option>
+            <option value="onnx">{t("addmodel.search.onnx")}</option>
+            <option value="diffusers">{t("addmodel.search.diffusers")}</option>
           </select>
         </div>
-        <button type="submit" className="btn hub-go" disabled={busy}><IconSearch size={16} aria-hidden="true" /> {busy ? "Searching…" : "Search"}</button>
+        <button type="submit" className="btn hub-go" disabled={busy}><IconSearch size={16} aria-hidden="true" /> {busy ? t("addmodel.search.searching") : t("addmodel.search.go")}</button>
       </form>
-      <p className="muted small hub-hint">The server asks Hugging Face, most downloaded first. Only models in safetensors, GGUF, CTranslate2 or ONNX (speaches voices) can be served.</p>
+      <p className="muted small hub-hint">{t("addmodel.search.hint")}</p>
       {error && (
         <Notice tone={error.offline ? "info" : "error"}>
           {error.text}{" "}
-          {error.offline && <button type="button" className="linklike linklike-text" onClick={onFallback}>Show the recommended models</button>}
+          {error.offline && <button type="button" className="linklike linklike-text" onClick={onFallback}>{t("addmodel.search.showRecommended")}</button>}
         </Notice>
       )}
-      {res && res.results.length === 0 && <p className="muted small">Nothing found. Try a shorter name, or another task or format.</p>}
+      {res && res.results.length === 0 && <p className="muted small">{t("addmodel.search.nothing")}</p>}
       {res && res.results.length > 0 && (
         <div className="table-wrap">
           <table className="table hub-table">
-            <thead><tr><th>Model</th><th>What</th><th>Size</th><th>Downloads</th><th>Updated</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <thead><tr><th>{t("addmodel.search.col.model")}</th><th>{t("addmodel.search.col.what")}</th><th>{t("addmodel.search.col.size")}</th>
+              <th>{t("addmodel.search.col.downloads")}</th><th>{t("addmodel.search.col.updated")}</th><th><span className="sr-only">{t("addmodel.search.col.actions")}</span></th></tr></thead>
             <tbody>
               {res.results.map((r) => {
                 // A repository on the recommended list is added the way the list says (its revision,
@@ -232,25 +238,25 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
                 const servable = r.recipes.length > 0 || Boolean(entry);
                 return (
                   <tr key={r.id} className={chosen?.source === r.source ? "row-on" : undefined}>
-                    <td data-label="Model">
+                    <td data-label={t("addmodel.search.col.model")}>
                       <div className="mono small hub-id">{r.id}</div>
-                      {entry && <span className="chip chip-tone-ok">recommended</span>}{" "}
-                      {r.gated && <span className="chip chip-tone-wait"><IconLock size={11} aria-hidden="true" /> needs a token</span>}
+                      {entry && <span className="chip chip-tone-ok">{t("addmodel.search.recommended")}</span>}{" "}
+                      {r.gated && <span className="chip chip-tone-wait"><IconLock size={11} aria-hidden="true" /> {t("addmodel.search.needsToken")}</span>}
                     </td>
-                    <td data-label="What" className="small">
-                      {r.task ? TASK_LABEL[r.task] : r.pipeline_tag ?? "unknown task"} · {FORMAT_LABEL[r.format] ?? r.format}
+                    <td data-label={t("addmodel.search.col.what")} className="small">
+                      {r.task ? TASK_LABEL[r.task] : r.pipeline_tag ?? t("addmodel.search.unknownTask")} · {formatLabel(r.format)}
                       {r.license && <div className="mono muted">{r.license}</div>}
                     </td>
-                    <td data-label="Size" className="small">
-                      {r.weights_bytes ? bytes(r.weights_bytes) : r.params ? `${compact(r.params)} params` : "—"}
+                    <td data-label={t("addmodel.search.col.size")} className="small">
+                      {r.weights_bytes ? bytes(r.weights_bytes) : r.params ? t("addmodel.search.params", { count: compact(r.params) }) : "—"}
                     </td>
-                    <td data-label="Downloads" className="small">{compact(r.downloads)} <span className="muted">· {compact(r.likes)} likes</span></td>
-                    <td data-label="Updated" className="small">{r.last_modified ? when(r.last_modified) : "—"}</td>
+                    <td data-label={t("addmodel.search.col.downloads")} className="small">{compact(r.downloads)} <span className="muted">{t("addmodel.search.likes", { count: compact(r.likes) })}</span></td>
+                    <td data-label={t("addmodel.search.col.updated")} className="small">{r.last_modified ? when(r.last_modified) : "—"}</td>
                     <td className="cell-actions">
-                      {r.in_catalog ? <span className="chip chip-tone-ok">In the catalog as {r.in_catalog}</span>
+                      {r.in_catalog ? <span className="chip chip-tone-ok">{t("addmodel.inCatalog", { name: r.in_catalog })}</span>
                         : searchLicenceProblem(r) ? <span className="muted small">{searchLicenceProblem(r)}</span>
-                        : servable ? <button type="button" className="btn btn-small" onClick={() => onPick(entry ? pickFromList(entry) : pickFromSearch(r))}>Choose</button>
-                          : <span className="muted small" title="No engine reads this format for this task">Cannot be served</span>}
+                        : servable ? <button type="button" className="btn btn-small" onClick={() => onPick(entry ? pickFromList(entry) : pickFromSearch(r))}>{t("addmodel.choose")}</button>
+                          : <span className="muted small" title={t("addmodel.search.cannotTitle")}>{t("addmodel.search.cannot")}</span>}
                     </td>
                   </tr>
                 );
@@ -265,6 +271,7 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
 
 // ------------------------------------------------------------------ typing a source
 function SourceForm({ onPick }: { onPick: (p: Pick) => void }) {
+  const t = useT();
   const [source, setSource] = useState("");
   const [revision, setRevision] = useState("");
   const submit = (e: FormEvent) => {
@@ -274,26 +281,27 @@ function SourceForm({ onPick }: { onPick: (p: Pick) => void }) {
     onPick({ ...emptyPick(), source: full, revision: revision.trim(), name: "", from: "source" });
   };
   return (
-    <form className="source-form" onSubmit={submit} aria-label="Enter a source">
+    <form className="source-form" onSubmit={submit} aria-label={t("addmodel.source.aria")}>
       <div className="grid-2">
         <div className="field">
-          <label htmlFor="m-source">Source</label>
+          <label htmlFor="m-source">{t("addmodel.source.label")}</label>
           <input id="m-source" className="mono" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Qwen/Qwen3-4B" required />
-          <p className="field-hint">A Hugging Face repository (<code>org/name</code> or <code>hf://org/name</code>), the https:// address of a .gguf file from an allowed host, or <code>local:///dir</code> from an allowed directory.</p>
+          <p className="field-hint">{t.rich("addmodel.source.hint", { repo: <code>org/name</code>, hf: <code>hf://org/name</code>, local: <code>local:///dir</code> })}</p>
         </div>
         <div className="field">
-          <label htmlFor="m-rev">Revision</label>
+          <label htmlFor="m-rev">{t("addmodel.source.revision")}</label>
           <input id="m-rev" value={revision} onChange={(e) => setRevision(e.target.value)} placeholder="main" />
-          <p className="field-hint">A branch, tag or commit. Empty: main.</p>
+          <p className="field-hint">{t("addmodel.source.revisionHint")}</p>
         </div>
       </div>
-      <div className="row-gap" style={{ marginTop: 12 }}><button className="btn" disabled={!source.trim()}>Look it up</button></div>
+      <div className="row-gap" style={{ marginTop: 12 }}><button className="btn" disabled={!source.trim()}>{t("addmodel.source.go")}</button></div>
     </form>
   );
 }
 
 // ------------------------------------------------------------------ review and add
 function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () => void; onAdded: (name: string, s: Suggestion | null) => void }) {
+  const t = useT();
   const [f, setF] = useState<Pick>(initial);
   const [res, setRes] = useState<InspectResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -365,35 +373,31 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
     : meta?.diffusers ? Object.values(meta.diffusers.components).reduce((a, c) => a + c.params, 0) : meta?.gguf?.elements;
   const label = f.title || f.source.replace(/^hf:\/\//, "");
   return (
-    <form className="review" onSubmit={add} aria-label={`Add ${label}`}>
+    <form className="review" onSubmit={add} aria-label={t("addmodel.review.aria", { label })}>
       <div className="panel-head review-head">
         <h3>{label}</h3>
-        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>Choose another</button>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>{t("addmodel.review.another")}</button>
       </div>
-      {inspecting && <p className="waiting small" role="status"><span className="pulse" aria-hidden="true" /> Reading {f.source.replace(/^hf:\/\//, "")} on Hugging Face…</p>}
+      {inspecting && <p className="waiting small" role="status"><span className="pulse" aria-hidden="true" /> {t("addmodel.review.reading", { source: f.source.replace(/^hf:\/\//, "") })}</p>}
       {error && !inspecting && <Notice tone="error">{error}</Notice>}
       {needsToken && (
         <div className="token-row">
           <div className="field">
-            <label htmlFor="m-token">Hugging Face token</label>
+            <label htmlFor="m-token">{t("addmodel.review.token")}</label>
             <input id="m-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)} placeholder="hf_…" />
-            <p className="field-hint">
-              This model is gated: accept its licence on huggingface.co with your account, then paste a read token from your
-              Hugging Face settings. It is used to read the model now and is not stored. To use one token for every gated model,
-              inspecting and downloading, save it as the server's token under Models → Sources.
-            </p>
+            <p className="field-hint">{t("addmodel.review.tokenHint")}</p>
           </div>
-          <button type="button" className="btn" disabled={!f.token.trim() || inspecting} onClick={() => setAsk((cur) => ({ ...cur, round: cur.round + 1 }))}>Read it with this token</button>
+          <button type="button" className="btn" disabled={!f.token.trim() || inspecting} onClick={() => setAsk((cur) => ({ ...cur, round: cur.round + 1 }))}>{t("addmodel.review.readWithToken")}</button>
         </div>
       )}
       {isLocal && (
         <>
-          <Notice>The server cannot look inside a local directory: the machines that have it load the model. Say what format it is; when deploying, give the memory it needs.</Notice>
+          <Notice>{t("addmodel.review.local")}</Notice>
           <div className="grid-2">
             <div className="field">
-              <label htmlFor="m-format">Format</label>
+              <label htmlFor="m-format">{t("addmodel.review.format")}</label>
               <select id="m-format" value={f.format} onChange={(e) => set("format", e.target.value)} required>
-                <option value="">Choose…</option>
+                <option value="">{t("addmodel.review.choosePlaceholder")}</option>
                 <option value="safetensors">safetensors</option>
                 <option value="gguf">GGUF</option>
                 <option value="ctranslate2">CTranslate2</option>
@@ -403,7 +407,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
             </div>
             {f.format === "gguf" && (
               <div className="field">
-                <label htmlFor="m-lfile">GGUF file in the directory</label>
+                <label htmlFor="m-lfile">{t("addmodel.review.localFile")}</label>
                 <input id="m-lfile" className="mono" value={f.file} onChange={(e) => set("file", e.target.value)} required placeholder="model-Q4_K_M.gguf" />
               </div>
             )}
@@ -412,35 +416,35 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
       )}
       {meta && (
         <dl className="facts inspect-facts">
-          <div className="fact"><dt>Format</dt><dd>{FORMAT_LABEL[meta.format] ?? meta.format}{meta.file ? ` · ${meta.file}` : ""}</dd></div>
-          <div className="fact"><dt>Pinned to</dt><dd className="mono small">{meta.revision ? `${meta.revision.slice(0, 12)} (${meta.ref || "main"})` : "—"}</dd></div>
-          <div className="fact"><dt>Download</dt><dd>{bytes(meta.size_bytes)} in {meta.file_count} files</dd></div>
-          {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
-          {meta.vision && <div className="fact"><dt>Vision model</dt><dd className="small">{TASK_LABEL[meta.vision.task]} · {meta.vision.architecture}{meta.vision.zero_shot ? " · zero-shot: finds what you name" : meta.vision.labels ? ` · ${meta.vision.labels} classes (${(meta.vision.label_examples ?? []).slice(0, 4).join(", ")}…)` : ""}</dd></div>}
-          {meta.modalities !== undefined && !meta.vision && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
-          {meta.license !== undefined && <div className="fact"><dt>Licence</dt><dd className="mono small">{meta.license ?? "not stated"}{meta.gated ? " · gated" : ""}</dd></div>}
-          {meta.video && <div className="fact"><dt>Pipeline</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{videoFacts(meta.video, meta.diffusers)}</dd></div>}
-          {meta.image && <div className="fact"><dt>{meta.diffusers ? "Pipeline" : "Image model"}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{imageFacts(meta.image, meta.diffusers)}</dd></div>}
-          {meta.config && !meta.vision && <div className="fact"><dt>Shape</dt><dd>{meta.config.layers} layers, {meta.config.kv_heads} KV heads, up to {meta.config.max_context.toLocaleString("en-US")} tokens, {meta.config.dtype}</dd></div>}
+          <div className="fact"><dt>{t("addmodel.review.format")}</dt><dd>{formatLabel(meta.format)}{meta.file ? ` · ${meta.file}` : ""}</dd></div>
+          <div className="fact"><dt>{t("addmodel.fact.pinned")}</dt><dd className="mono small">{meta.revision ? `${meta.revision.slice(0, 12)} (${meta.ref || "main"})` : "—"}</dd></div>
+          <div className="fact"><dt>{t("addmodel.fact.download")}</dt><dd>{t("addmodel.fact.downloadValue", { size: bytes(meta.size_bytes), count: String(meta.file_count) })}</dd></div>
+          {params ? <div className="fact"><dt>{t("addmodel.fact.parameters")}</dt><dd>{billions(params)}</dd></div> : null}
+          {meta.vision && <div className="fact"><dt>{t("addmodel.fact.vision")}</dt><dd className="small">{TASK_LABEL[meta.vision.task]} · {meta.vision.architecture}{meta.vision.zero_shot ? t("addmodel.fact.zeroShot") : meta.vision.labels ? t("addmodel.fact.classes", { count: String(meta.vision.labels), examples: (meta.vision.label_examples ?? []).slice(0, 4).join(", ") }) : ""}</dd></div>}
+          {meta.modalities !== undefined && !meta.vision && <div className="fact"><dt>{t("addmodel.fact.takes")}</dt><dd>{meta.modalities?.length === 0 ? t("addmodel.fact.textOnly") : t("addmodel.fact.textAnd", { media: String(mediaText(meta.modalities)?.toLowerCase()) })}</dd></div>}
+          {meta.license !== undefined && <div className="fact"><dt>{t("addmodel.fact.licence")}</dt><dd className="mono small">{meta.license ?? t("addmodel.fact.notStated")}{meta.gated ? t("addmodel.fact.gated") : ""}</dd></div>}
+          {meta.video && <div className="fact"><dt>{t("addmodel.fact.pipeline")}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{videoFacts(meta.video, meta.diffusers)}</dd></div>}
+          {meta.image && <div className="fact"><dt>{meta.diffusers ? t("addmodel.fact.pipeline") : t("addmodel.fact.imageModel")}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{imageFacts(meta.image, meta.diffusers)}</dd></div>}
+          {meta.config && !meta.vision && <div className="fact"><dt>{t("addmodel.fact.shape")}</dt><dd>{t("addmodel.fact.shapeValue", { layers: String(meta.config.layers), kv: String(meta.config.kv_heads), context: t.num(meta.config.max_context), dtype: meta.config.dtype })}</dd></div>}
         </dl>
       )}
       {meta?.gguf_files && meta.gguf_files.length > 1 && (
         <div className="field gguf-pick">
-          <label htmlFor="m-file">GGUF file</label>
+          <label htmlFor="m-file">{t("addmodel.gguf.file")}</label>
           <select id="m-file" value={f.file || meta.file || ""} onChange={(e) => set("file", e.target.value)}>
             {meta.gguf_files.map((g) => <option key={g.path} value={g.path}>{g.path} ({bytes(g.size)})</option>)}
           </select>
-          <p className="field-hint">Smaller files (Q4) need less memory and run faster; larger ones (Q8, F16) answer a little better.</p>
+          <p className="field-hint">{t("addmodel.gguf.hint")}</p>
         </div>
       )}
       {meta?.mmproj_files && meta.mmproj_files.length > 0 && (
         <div className="field gguf-pick">
-          <label htmlFor="m-mmproj">Projector (for images)</label>
+          <label htmlFor="m-mmproj">{t("addmodel.mmproj.label")}</label>
           <select id="m-mmproj" value={f.mmproj || meta.mmproj?.path || "none"} onChange={(e) => set("mmproj", e.target.value)}>
             {meta.mmproj_files.map((g) => <option key={g.path} value={g.path}>{g.path} ({bytes(g.size)})</option>)}
-            <option value="none">None: text only</option>
+            <option value="none">{t("addmodel.mmproj.none")}</option>
           </select>
-          <p className="field-hint">llama.cpp reads images through this file (<code>--mmproj</code>). F16 is the usual choice; Q8_0 needs about half the memory.</p>
+          <p className="field-hint">{t.rich("addmodel.mmproj.hint", { flag: <code>--mmproj</code> })}</p>
         </div>
       )}
       {s && !isLocal && <SuggestionPanel s={s} device={f.device} onDevice={(d) => set("device", d)} />}
@@ -448,31 +452,31 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
         <>
           <div className="grid-3">
             <div className="field">
-              <label htmlFor="m-name">Name in the catalog</label>
+              <label htmlFor="m-name">{t("addmodel.name")}</label>
               <input id="m-name" className="mono" value={f.name} onChange={(e) => set("name", e.target.value)} required pattern="[a-z0-9]([a-z0-9._\-]{0,62}[a-z0-9])?" />
-              <p className="field-hint">Lowercase letters, digits, . _ -</p>
+              <p className="field-hint">{t("addmodel.nameHint")}</p>
             </div>
             <div className="field">
-              <label htmlFor="m-title">Title</label>
-              <input id="m-title" value={f.title} onChange={(e) => set("title", e.target.value)} placeholder="optional" />
+              <label htmlFor="m-title">{t("addmodel.title")}</label>
+              <input id="m-title" value={f.title} onChange={(e) => set("title", e.target.value)} placeholder={t("addmodel.titlePlaceholder")} />
             </div>
             <div className="field">
-              <label htmlFor="m-task">Task</label>
+              <label htmlFor="m-task">{t("addmodel.task")}</label>
               <select id="m-task" value={f.task} onChange={(e) => set("task", e.target.value)} required>
-                <option value="">Choose…</option>
+                <option value="">{t("addmodel.review.choosePlaceholder")}</option>
                 {(Object.entries(TASK_LABEL) as [Task, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
           </div>
           {Object.keys(f.engine_args).length > 0 && (
             <p className="small muted engine-args">
-              Comes with engine arguments for {Object.keys(f.engine_args).join(", ")}: <code>{Object.values(f.engine_args)[0].slice(0, 2).join(" ")}…</code>
+              {t.rich("addmodel.engineArgs", { names: Object.keys(f.engine_args).join(", "), args: <code>{Object.values(f.engine_args)[0].slice(0, 2).join(" ")}…</code> })}
             </p>
           )}
           {meta && visionProblem(meta, f.task as Task) && <Notice tone="error">{visionProblem(meta, f.task as Task)}</Notice>}
           <div className="form-foot">
-            <span className="muted small">Adding downloads nothing yet. Machines fetch the model when it is deployed.</span>
-            <button className="btn btn-primary" disabled={busy || inspecting || (!meta && !isLocal) || Boolean(meta && visionProblem(meta, f.task as Task))}>{busy ? "Adding…" : "Add to the catalog"}</button>
+            <span className="muted small">{t("addmodel.foot")}</span>
+            <button className="btn btn-primary" disabled={busy || inspecting || (!meta && !isLocal) || Boolean(meta && visionProblem(meta, f.task as Task))}>{busy ? t("addmodel.adding") : t("addmodel.add")}</button>
           </div>
         </>
       )}
@@ -481,19 +485,20 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
 }
 
 function SuggestionPanel({ s, device, onDevice }: { s: Suggestion; device: string; onDevice: (d: "gpu" | "cpu") => void }) {
+  const t = useT();
   if (!s.recipe) return <Notice tone="error">{s.error}</Notice>;
   const est = s.estimate;
   const where = fitsLine(s);
   const cpu = s.device === "cpu";
   return (
-    <div className="suggest" aria-label="What it needs">
+    <div className="suggest" aria-label={t("addmodel.suggest.aria")}>
       <div className="suggest-main">
         <p className="suggest-line">
-          Runs with <strong className="mono">{s.recipe}</strong> on {cpu ? "the CPU" : "a GPU"}
-          {est ? <>; one copy reserves about <strong>{gib(est.amount)}</strong> of {cpu ? "RAM" : "GPU memory"}</> : null}.
+          {t.rich(cpu ? "addmodel.suggest.cpu" : "addmodel.suggest.gpu", { recipe: <strong className="mono">{s.recipe}</strong> })}
+          {est ? t.rich(cpu ? "addmodel.suggest.reservesRam" : "addmodel.suggest.reservesGpu", { amount: <strong>{gib(est.amount)}</strong> }) : null}{t("addmodel.suggest.end")}
         </p>
         {s.devices && s.devices.length > 1 && (
-          <div className="segmented segmented-small" role="group" aria-label="Estimate for">
+          <div className="segmented segmented-small" role="group" aria-label={t("addmodel.suggest.estimateFor")}>
             {s.devices.map((d) => (
               <button key={d} type="button" className={(device || s.device) === d ? "on" : ""} aria-pressed={(device || s.device) === d} onClick={() => onDevice(d)}>
                 {d === "gpu" ? "GPU" : "CPU"}
@@ -509,12 +514,12 @@ function SuggestionPanel({ s, device, onDevice }: { s: Suggestion; device: strin
         </ul>
       )}
       {where ? (
-        <p className="suggest-fit"><IconCheck size={16} aria-hidden="true" /> Fits now on {where}.</p>
+        <p className="suggest-fit"><IconCheck size={16} aria-hidden="true" /> {t("addmodel.suggest.fits", { where })}</p>
       ) : est ? (
-        <p className="suggest-nofit"><IconAlertTriangle size={16} aria-hidden="true" /> {(s.summary ?? "Does not fit on any machine right now.").replace(/([^.])$/, "$1.")}
-          {" "}You can still add it; deploy it once a machine has room{cpu ? "" : ", or on more GPUs"}.</p>
+        <p className="suggest-nofit"><IconAlertTriangle size={16} aria-hidden="true" /> {(s.summary ?? t("addmodel.suggest.noFit")).replace(/([^.。])$/, "$1.")}
+          {" "}{t(cpu ? "addmodel.suggest.stillAdd" : "addmodel.suggest.stillAddGpu")}</p>
       ) : null}
-      <p className="muted small">With the engine's defaults ({s.recipes.length > 1 ? `also possible: ${s.recipes.filter((r) => r !== s.recipe).join(", ")}; ` : ""}context and concurrency can be changed when deploying).</p>
+      <p className="muted small">{t("addmodel.suggest.defaults", { also: s.recipes.length > 1 ? t("addmodel.suggest.also", { list: s.recipes.filter((r) => r !== s.recipe).join(", ") }) : "" })}</p>
     </div>
   );
 }
