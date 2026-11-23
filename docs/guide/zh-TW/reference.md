@@ -312,7 +312,7 @@ local_dirs = ["/data/models"]
 
 **1.3 不提供聲音複製。** 參考錄音（`ref_audio`、`ref_text`、`speaker_ref_b64`、`speaker_embedding` 等）、以音訊資料或連結當作聲音、Qwen3-TTS 的 `task_type: "Base"`，以及上傳或刪除聲音，都回應 400 `voice_cloning_not_supported`，任何內容都不會送到引擎。
 
-每個有回應的請求會計入（`GET /api/usage` 與 **Usage** 頁面）：
+每個有回應的請求會計入（`GET /api/usage` 與 **用量** 頁面）：
 
 | 單位 | 怎麼算 |
 |---|---|
@@ -352,7 +352,7 @@ local_dirs = ["/data/models"]
 
 **不過濾提示。** 閘道只檢查請求的格式與部署的上限，不檢查提示要求畫什麼。如果部署需要安全過濾，請在它前面加一層。
 
-每個有回應的請求會計入（`GET /api/usage` 與 **Usage** 頁面）：
+每個有回應的請求會計入（`GET /api/usage` 與 **用量** 頁面）：
 
 | 單位 | 怎麼算 |
 |---|---|
@@ -400,7 +400,7 @@ local_dirs = ["/data/models"]
 
 **刪除。** `DELETE /v1/videos/{id}` 在副本上取消製作中的工作，或刪除完成的影片，並移除這個工作：`{"id", "object": "video.deleted", "deleted": true}`。
 
-**同時的工作數。** 一個副本一次做一段影片；其他的在它上面等待。閘道把工作送到工作最少的就緒副本。一個部署最多同時有 *Jobs at once*（`queue`，8）個在等待或製作中的工作，其中來自同一把金鑰（或 Playground 裡同一個人）的最多 *Jobs per key*（`jobs_per_key`，2）個。再多一個就回應 429 `queue_full` 或 `too_many_jobs` 並附上 `Retry-After`（依它最近的影片花了多久計算）。金鑰的每分鐘請求數會計入每個要求的工作；輪詢、列出和下載都不算。
+**同時的工作數。** 一個副本一次做一段影片；其他的在它上面等待。閘道把工作送到工作最少的就緒副本。一個部署最多同時有 *Jobs at once*（`queue`，8）個在等待或製作中的工作，其中來自同一把金鑰（或試用區裡同一個人）的最多 *Jobs per key*（`jobs_per_key`，2）個。再多一個就回應 429 `queue_full` 或 `too_many_jobs` 並附上 `Retry-After`（依它最近的影片花了多久計算）。金鑰的每分鐘請求數會計入每個要求的工作；輪詢、列出和下載都不算。
 
 **過期。** 結果在 *Keep results*（`keep_minutes`，1,440）內可以取回；之後伺服器會在副本上刪除它。引擎自己也會在那之後一小時刪除它的檔案（`VLLM_OMNI_SERVER_STORAGE__FILE_TTL`），而且檔案放在副本的容器裡，所以停止或重新啟動的副本不會留下任何檔案。
 
@@ -421,7 +421,7 @@ local_dirs = ["/data/models"]
 | `max_prompt_chars`（*Longest prompt*，Advanced） | `2000` | 更長的提示：400 |
 | `offload`（*Offload to host memory*，Advanced） | `none` | `model`：卡上只放正在工作的元件（`--enable-cpu-offload`）；較慢 |
 
-**每個工作在結束時計入一次**（`GET /api/usage` 與 **Usage** 頁面）：
+**每個工作在結束時計入一次**（`GET /api/usage` 與 **用量** 頁面）：
 
 | 單位 | 怎麼算 |
 |---|---|
@@ -430,7 +430,7 @@ local_dirs = ["/data/models"]
 | `busy_ms` | 從看到工作進入製作中到它做完的時間，乘以部署占用的 GPU 數：也就是 GPU 時間 |
 | tokens | 不計 |
 
-Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`）、`GET
+試用區的 **影片** 面板使用 `/api/playground/videos`（`POST`、`GET`）、`GET
 /api/playground/videos/options?model=<model>`、`GET` 與 `DELETE /api/playground/videos/{id}`，以及 `GET
 /api/playground/videos/{id}/content`：規則相同，以登入的使用者身分（session cookie 與主控台的 `X-Forgeyard: 1` 標頭），只能看到自己的工作，計為 console。工作存放在伺服器的資料庫裡（資料表 `video_jobs`，migration `0014`）。
 
@@ -451,7 +451,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 **零樣本偵測模型（1.4.4，#142）**（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OWL-ViT、OWLv2）找的是每個請求說的東西，而不是固定的類別清單：目錄標示 *Finds what you name*（`vision.zero_shot`）。送簡單的名稱，`labels: ["cat", "remote control"]`（或表單欄位 `labels=cat, remote control`）；重複和空的名稱會被去掉。視覺伺服器依各家族的方式詢問（Grounding DINO 是一句小寫提示「cat. remote control.」，每個方框取分數最高的那個名稱；OWL 是每個名稱一個查詢），所以名稱會照送出的樣子傳回。它們的分數比固定類別的偵測模型低：從 0.3（Grounding DINO）或 0.1 到 0.2（OWLv2）開始。它們需要 1.4.4 起的視覺映像檔，內建配方已經使用（固定在 `forgeyard-vision` 1.4.4rc1）；自訂配方指定較舊的映像檔時，部署會回 422 `vision_image_too_old`（本機建置照原樣接受）。
 
-每個有回應的請求會計入（`GET /api/usage` 和 **Usage** 頁）：
+每個有回應的請求會計入（`GET /api/usage` 和 **用量** 頁）：
 
 | 單位 | 怎麼算 |
 |---|---|
@@ -600,11 +600,11 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 403 `metrics_local_only` | `METRICS_TOKEN` 留空，而請求來自其他位址或經過 proxy |
 | 421 | 請求的主機名稱不是伺服器會回應的名稱（`ALLOWED_HOSTS`），所有路徑都一樣 |
 
-閘道的指標計算的是用量統計所計算的請求（`/v1`、Playground、`/x/` 和影片工作），在請求結束時計入：
+閘道的指標計算的是用量統計所計算的請求（`/v1`、試用區、`/x/` 和影片工作），在請求結束時計入：
 
 | 指標 | 類型 | 標籤 | 是什麼 |
 |---|---|---|---|
-| `forgeyard_gateway_requests_total` | counter | `endpoint`、`model`、`status`、`source`、`target` | 已結束的請求。`endpoint`：`chat/completions`、`embeddings`、`audio/speech`、`videos`、`x`（直通）… `status`：HTTP 狀態碼（499：用戶端離開了）。`source`：`api`（API 金鑰）或 `console`（Playground）。`target`：`local` 或 `provider` |
+| `forgeyard_gateway_requests_total` | counter | `endpoint`、`model`、`status`、`source`、`target` | 已結束的請求。`endpoint`：`chat/completions`、`embeddings`、`audio/speech`、`videos`、`x`（直通）… `status`：HTTP 狀態碼（499：用戶端離開了）。`source`：`api`（API 金鑰）或 `console`（試用區）。`target`：`local` 或 `provider` |
 | `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`、`model` | 從請求到達到結束；影片工作是從建立到結束 |
 | `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`、`model` | 從請求到達，到收到副本或供應商回應的第一批位元組：串流是第一個區塊，其他是它的狀態列。只計有收到回應的請求 |
 | `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
@@ -664,7 +664,7 @@ Deprecation: @1794787200
 Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 ```
 
-替代做法：把要跑的東西當成模型在 **服務中** 部署；內建引擎跑不了的模型，加一個自訂引擎（**模型 → 引擎**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[Playground 的視覺模型](#vision)取代 1.3 的視覺範本。
+替代做法：把要跑的東西當成模型在 **服務中** 部署；內建引擎跑不了的模型，加一個自訂引擎（**模型 → 引擎**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[試用區的視覺模型](#vision)取代 1.3 的視覺範本。
 
 ## 直通（/x/）
 
@@ -705,12 +705,12 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 等回應每一段的時間 | 600 秒（第一個位元組之前逾時回 504 `upstream_timeout`） | 應用程式：**Read timeout (s)**，1 到 3,600 |
 | 連到副本 | `GATEWAY_CONNECT_TIMEOUT`（5 秒）；連不到的副本會跳過，改試下一個 | 伺服器 |
 | 每個副本同時處理的請求 | 不限（每個副本都滿了時回 429 `workload_busy`） | 應用程式 |
-| 每把金鑰同時進行的請求 | 不限（429 `key_busy`）；在 Playground 裡以每個人計算 | 應用程式 |
+| 每把金鑰同時進行的請求 | 不限（429 `key_busy`）；在試用區裡以每個人計算 | 應用程式 |
 | 每分鐘請求數 | 金鑰自己的限制（429 `rate_limit_exceeded`）；每分鐘 token 數不適用 | 金鑰 |
 
 每個 429 都帶 `Retry-After`。用戶端離開時，到應用程式的請求會立刻關閉。
 
-**Usage** 把每個請求記在模型 `x:<name>` 底下：請求數、錯誤（包括回應本身的 5xx）、被限制的請求、送進的位元組（請求本文）和送出的位元組（實際送出的回應本文）、忙碌時間（從送出請求到回應結束）和延遲。
+**用量** 把每個請求記在模型 `x:<name>` 底下：請求數、錯誤（包括回應本身的 5xx）、被限制的請求、送進的位元組（請求本文）和送出的位元組（實際送出的回應本文）、忙碌時間（從送出請求到回應結束）和延遲。
 
 ### /x/ 的錯誤
 
@@ -734,9 +734,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 已經開始的回應如果中斷，狀態碼就無法再改：連線會在本文完整之前關閉，所以用戶端絕不會把被截斷的本文當成完整的。
 
-### 從 Playground 呼叫
+### 從試用區呼叫
 
-1.4 起，console 的 Playground 只提供視覺模型（在它唯一的模型選單裡；Vision 分頁已移除），`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的 Vision 分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
+1.4 起，console 的試用區只提供視覺模型（在它唯一的模型選單裡；Vision 分頁已移除），`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的 Vision 分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
 
 | 路由 | 做什麼 |
 |---|---|
@@ -1094,7 +1094,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
-| `deployment-idle-awake` | 說明 | 1.5.0：關閉 *Sleep when idle* 的執行中部署 3 天沒有請求（Usage 的最後一天、伺服器啟動後看到的請求，或從部署、啟動或修改起算），而且佔著 GPU 記憶體：要讓它閒置時休眠嗎？ |
+| `deployment-idle-awake` | 說明 | 1.5.0：關閉 *Sleep when idle* 的執行中部署 3 天沒有請求（用量的最後一天、伺服器啟動後看到的請求，或從部署、啟動或修改起算），而且佔著 GPU 記憶體：要讓它閒置時休眠嗎？ |
 | `deployment-wakes-often` | 說明 | 1.5.0：開啟 *Sleep when idle* 的部署在過去 24 小時被喚醒超過 10 次，而且上次啟動超過一分鐘：把閒置時間調長 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
 | `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |

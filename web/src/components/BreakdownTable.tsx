@@ -1,6 +1,7 @@
 import { IconArrowDown, IconArrowUp, IconChevronDown } from "@tabler/icons-react";
 import { useId, useState, type ReactNode } from "react";
 
+import { useT } from "../i18n/react";
 import { useNarrow } from "../lib/useNarrow";
 
 // The breakdown tables of Usage (1.4): one row per model, key, day, source, person or provider.
@@ -60,6 +61,7 @@ export function cutRows<R>(rows: R[], limit: number, all: boolean): { shown: R[]
 }
 
 export function BreakdownTable<R extends BreakdownRow>({ label, nameLabel, rows, columns, metric, sort: first, others, nameClass, nameExtra, className, limit = TOP_ROWS }: Props<R>) {
+  const t = useT();
   const narrow = useNarrow();
   const uid = useId();
   const [sort, setSort] = useState<Sort>(first ?? { by: metric, desc: true });
@@ -85,12 +87,12 @@ export function BreakdownTable<R extends BreakdownRow>({ label, nameLabel, rows,
   const more = rows.length > limit && (
     <p className="usage-more">
       <button type="button" className="btn btn-quiet btn-small" aria-expanded={all} onClick={() => setAll((v) => !v)}>
-        {all ? `Show the top ${limit}` : `Show all ${rows.length}`}
+        {all ? t("usage.table.top", { count: String(limit) }) : t("usage.table.all", { count: String(rows.length) })}
       </button>
-      {!all && <span className="muted small">The other {hidden.length} are added up in the last row.</span>}
+      {!all && <span className="muted small">{t("usage.table.rest", { count: String(hidden.length) })}</span>}
     </p>
   );
-  const othersName = (n: number) => `${n} other${n === 1 ? "" : "s"}`;
+  const othersName = (n: number) => t.plural("usage.table.others", n);
 
   if (narrow) {
     const sortable = columns.filter((c) => c.value);
@@ -120,8 +122,8 @@ export function BreakdownTable<R extends BreakdownRow>({ label, nameLabel, rows,
     return (
       <div className={`usage-compact ${className ?? ""}`}>
         <div className="usage-sort">
-          <label className="field-inline small">Sort by
-            <select aria-label="Sort by" value={sort.by} onChange={(e) => setSort(firstOrder(e.target.value))}>
+          <label className="field-inline small">{t("usage.table.sortBy")}
+            <select aria-label={t("usage.table.sortBy")} value={sort.by} onChange={(e) => setSort(firstOrder(e.target.value))}>
               <option value={NAME}>{nameLabel}</option>
               {sortable.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
