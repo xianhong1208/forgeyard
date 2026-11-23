@@ -1265,7 +1265,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | 回應 | 代碼 | 什麼時候 |
 |---|---|---|
 | 409 | `check_again` | 沒有那個版本的檢查結果、檢查之後內建配方變了，或儲存的結果無法使用 |
-| 409 | `name_taken`、`builtin_name`、`not_builtin`、`try_running`、`digest_moved` | 如字面意思（`digest_moved` 會附上 `variant`） |
+| 409 | `name_taken`、`builtin_name`、`not_builtin`、`try_running`、`digest_moved` | 代碼本身就說明了原因（`digest_moved` 會附上 `variant`） |
 | 422 | `invalid_name`、`nothing_to_pin`、`signature_failed`、`signature_missing` | 簽章驗證不過，或是會簽章的專案沒有那個 digest 的建置證明 |
 | 502 | `cannot_verify`、`registry_error`、`github_error` | 連不到 GitHub、Sigstore 的信任根或 registry：什麼都不會建立，也絕不會改成建立未驗證的複本 |
 

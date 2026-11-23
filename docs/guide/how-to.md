@@ -1955,8 +1955,8 @@ engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-p
 
 To use the copy, deploy a model with it (pick it as the engine on the deploy page), and compare it with the built-in
 before you move other deployments. Delete the copy when you are done with it: it cannot be deleted while a
-deployment uses it. Remove its image from the machines first (their pages, **Engine images**), while the copy still
-names it.
+deployment uses it. Remove its image from the machines first (their pages, **Engine images**): once the copy is
+deleted, Forgeyard no longer counts that image as one of its own.
 
 ## Download a model before deploying it
 
