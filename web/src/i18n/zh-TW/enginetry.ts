@@ -1,0 +1,66 @@
+import type en from "../en/enginetry";
+
+export default {
+  "enginetry.try": "試用這個版本",
+  "enginetry.tryTitle": "以 {name} 為基礎，建立使用 {version} 映像檔的自訂推論引擎，並以 digest 釘選",
+  "enginetry.dlgTitle": "試用 {title} {version}",
+  "enginetry.lead":
+    "Forgeyard 會建立一個自訂推論引擎：{name} 的複本，改用 {version} 的映像檔，每個都以 digest 釘選。內建的 {name} 維持原樣，任何部署都不會變動。",
+  "enginetry.name": "複本名稱",
+  "enginetry.nameHint": "只能用小寫英文字母、數字和連字號。部署時就是用這個名稱選擇推論引擎。",
+  "enginetry.variants": "變體",
+  "enginetry.included": "包含",
+  "enginetry.leftOut": "不包含",
+  "enginetry.leftOutNote": "需要用到未包含變體的機器，會繼續使用內建的 {name}。",
+  "enginetry.archiveLine": "{archive}（SHA-256 雜湊值 {sha}）",
+  "enginetry.sigTitle": "簽章",
+  "enginetry.signed":
+    "{repository} 會為它的映像檔和發布壓縮檔簽章（GitHub 建置證明，artifact attestation）。Forgeyard 會在建立複本時逐一驗證；只要有一個簽章驗證不過，就不會建立複本。",
+  "enginetry.unsigned": "{text}這個複本只以 digest 釘選。",
+  "enginetry.unsigned.vllm": "vLLM 的映像檔沒有提供簽章或建置證明。",
+  "enginetry.unsigned.vllm-omni": "vLLM-Omni 的映像檔沒有提供簽章或建置證明。",
+  "enginetry.unsigned.speaches": "speaches 的映像檔沒有提供簽章或建置證明。",
+  "enginetry.unsigned.stable-diffusion.cpp":
+    "stable-diffusion.cpp 的映像檔只附上沒有簽章的建置紀錄（BuildKit provenance），沒有可以驗證的簽章。",
+  "enginetry.warn":
+    "新版本可能改變參數、預設值和記憶體用量。複本會沿用 {name} 原本的參數，而 Forgeyard 的估算是以 {from} 量測的。建議先用一個部署試用，再把其他部署換過去。",
+  "enginetry.mentions": "版本說明提到這個推論引擎使用的參數或設定：{list}。",
+  "enginetry.notes": "閱讀版本說明",
+  "enginetry.make": "建立複本",
+  "enginetry.making": "正在建立複本…（檢查 digest 和簽章）",
+  "enginetry.nothing": "沒有任何變體有這個版本的映像檔，所以沒有東西可以複製。",
+  "enginetry.done": "已建立 {name}：{from} 的複本，使用 {version}。",
+  "enginetry.open": "前往 {name}",
+  "enginetry.close": "關閉",
+  "enginetry.help": "試用推論引擎的新版本",
+
+  "enginetry.copyTitle": "{name} 的複本",
+  "enginetry.copyLead":
+    "由內建的 {link}（{from}）以「試用這個版本」建立，使用 {version}；建立時間 {date}，建立者 {who}。Forgeyard 沒有測試過這個複本。內建的 {name} 維持原樣：只有在你選擇這個複本時，部署才會使用它。",
+  "enginetry.copyLeadManual":
+    "以內建的 {link} 為基礎：目錄中為 {name} 設定的推論引擎參數，在這裡也同樣適用。內建的 {name} 維持原樣。",
+  "enginetry.col.variant": "變體",
+  "enginetry.col.pinned": "釘選",
+  "enginetry.col.signature": "簽章",
+  "enginetry.verified": "已驗證",
+  "enginetry.unsignedChip": "上游未簽章",
+  "enginetry.notRecorded": "沒有紀錄",
+  "enginetry.notRecordedTitle": "這個映像檔不是 Forgeyard 自己釘選的（是手動寫入的），所以沒有經過任何驗證。",
+  "enginetry.signer": "{repository} · {workflow} · {ref}",
+  "enginetry.run": "建置紀錄",
+  "enginetry.pinnedBy": "{date} 由 {who} 釘選",
+  "enginetry.leftOutTitle": "這個複本未包含的變體",
+
+  "enginetry.err.check_again": "上次的檢查結果已經不包含這個版本。請再檢查一次新版本。",
+  "enginetry.err.try_running": "目前正在建立另一個複本，請等它完成後再試一次。",
+  "enginetry.err.digest_moved": "檢查之後，有映像檔或壓縮檔的內容換了，所以沒有建立複本。請再檢查一次新版本後再試用。（{message}）",
+  "enginetry.err.signature_failed": "有簽章驗證不過，所以沒有建立複本：{message}",
+  "enginetry.err.signature_missing": "找不到應有的簽章，所以沒有建立複本：{message}",
+  "enginetry.err.cannot_verify": "目前無法驗證簽章，所以沒有建立複本：{message}",
+  "enginetry.err.registry_error": "無法讀取映像檔 registry：{message}",
+  "enginetry.err.github_error": "無法讀取 GitHub：{message}",
+  "enginetry.err.nothing_to_pin": "沒有任何變體有這個版本的映像檔，所以沒有東西可以複製。",
+  "enginetry.err.name_taken": "這個名稱已經被使用了，請替複本換一個名稱。",
+  "enginetry.err.builtin_name": "這是內建推論引擎的名稱，請替複本換一個名稱。",
+  "enginetry.err.invalid_name": "名稱只能用 1 到 40 個小寫英文字母、數字和連字號。",
+} satisfies Record<keyof typeof en, string>;

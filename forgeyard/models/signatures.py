@@ -19,8 +19,8 @@ recorded (repository, workflow, ref, commit, the run) and shown on the copy's pa
 
 - No attestation for the digest, or none that verifies: the copy is refused (the reason says which check failed).
 - GitHub or Sigstore's trust root cannot be reached: "cannot verify", the copy is refused as well. Not verifying would
-  make a signed engine's copy look like an unsigned one's; an air-gapped site adds such an engine by hand (Add an
-  engine) and its page then says nothing was verified.
+  make a signed engine's copy look like an unsigned one's; an air-gapped site adds such an engine by hand (Add a
+  custom engine), and nothing is verified for it.
 - An engine that publishes nothing: recorded as "unsigned upstream", said plainly in the dialog and on the page. Trust
   then rests on the repository being the built-in's own and the digest being fixed at Try.
 

@@ -6,6 +6,7 @@ import { IconCopy, IconCpu, IconEngine, IconPencil, IconRefresh, IconTrash } fro
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { CopySection, TryButton } from "../components/EngineTry";
 import { CheckBar, EngineUpdates } from "../components/EngineUpdates";
 import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
@@ -110,7 +111,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
           <div className="lp-head-text">
             <p className="eyebrow">{t("enginepage.eyebrow", { kind: r.builtin ? t("enginepage.builtin") : t("enginepage.custom") })}</p>
             <h1 className="mono">{r.name}</h1>
-            <p className="small muted lp-sub">{r.title} {r.version}</p>
+            <p className="small muted lp-sub">{baseTitle(r)} {r.version}</p>
             <p className="engine-image-line lp-image"><EngineImage runs={engineRuns(r.variants)} /></p>
           </div>
         </div>
@@ -144,11 +145,19 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         {r.share === "vram" ? <span className="chip chip-tone-wait">{t("library.sharesGpu")}</span> : <span className="muted">{t("enginepage.ownCard")}</span>}
         {!r.builtin && <span className="chip chip-tone-run">{t("library.custom")}</span>}
       </p>
-      <Jump links={[["overview", t("enginepage.jump.overview")], ["variants", t("enginepage.jump.variants")],
+      <Jump links={[["overview", t("enginepage.jump.overview")],
+        ...(r.based_on ? [["copy", t("enginetry.copyTitle", { name: r.based_on })] as [string, string]] : []),
+        ["variants", t("enginepage.jump.variants")],
         ...(r.builtin ? [["updates", t("engineupdates.title")] as [string, string]] : []), ["machines", t("enginepage.jump.machines")],
         ["params", t("enginepage.jump.params")], ["deployments", t("enginepage.jump.deployments")]]} />
 
       <Section id="overview" title={t("enginepage.jump.overview")}><EngineAbout r={r} /></Section>
+
+      {r.based_on && (
+        <Section id="copy" title={t("enginetry.copyTitle", { name: r.based_on })}>
+          <CopySection r={r} pins={p.pins} />
+        </Section>
+      )}
 
       <Section id="variants" title={t("enginepage.jump.variants")} count={r.variants.length} note={t("enginepage.variantsNote")}>
         <EngineVariants r={r} />
@@ -158,7 +167,8 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         <Section id="updates" title={t("engineupdates.title")}
           count={upd?.result?.engines[r.name]?.candidates.length || undefined}
           actions={<CheckBar compact data={upd} onChecked={(res) => setChecked({ result: res, can_check: true })} />}>
-          <EngineUpdates u={upd?.result?.engines[r.name]} version={r.version} />
+          <EngineUpdates u={upd?.result?.engines[r.name]} version={r.version}
+            action={upd?.can_check ? (c) => <TryButton recipe={r} candidate={c} signed={upd.signatures?.[r.name]} /> : undefined} />
         </Section>
       )}
 
@@ -190,9 +200,15 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         <HelpLink page="concepts" anchor="models-engines-and-estimates">{t("library.help.concepts")}</HelpLink>
         <HelpLink page="how-to" anchor="offline-machines">{t("library.help.offline")}</HelpLink>
         {r.builtin && <HelpLink page="how-to" anchor="see-whether-an-engine-has-a-newer-version">{t("engineupdates.help")}</HelpLink>}
+        {(r.builtin || r.based_on) && <HelpLink page="how-to" anchor="try-a-newer-version-of-an-engine">{t("enginetry.help")}</HelpLink>}
       </HelpLinks>
     </>
   );
+}
+
+// A copy's title already ends with its version ("vLLM 0.34.0"): said once.
+function baseTitle(r: Recipe): string {
+  return r.title.endsWith(` ${r.version}`) ? r.title.slice(0, -(r.version.length + 1)) : r.title;
 }
 
 function EngineAbout({ r }: { r: Recipe }) {
@@ -201,7 +217,7 @@ function EngineAbout({ r }: { r: Recipe }) {
     <>
       <p className="lp-desc">{engineDescription(r)}</p>
       <dl className="facts lp-facts">
-        <div className="fact"><dt>{t("enginepage.fact.engine")}</dt><dd>{r.title} <span className="mono small">{r.version}</span></dd></div>
+        <div className="fact"><dt>{t("enginepage.fact.engine")}</dt><dd>{baseTitle(r)} <span className="mono small">{r.version}</span></dd></div>
         <div className="fact"><dt>{t("enginepage.fact.serves")}</dt><dd>{r.tasks.map((x) => <span key={x} className="lp-api">{TASK_LABEL[x]} <code>{API_LABEL[r.api[x]] ?? r.api[x]}</code></span>)}</dd></div>
         <div className="fact"><dt>{t("enginepage.fact.formats")}</dt><dd className="mono small">{r.formats.join(", ")}</dd></div>
         {r.media && <div className="fact"><dt>{t("enginepage.fact.takes")}</dt><dd>{r.media.inputs.length ? mediaText(r.media.inputs) : t("enginepage.fact.textOnly")}{r.media.files ? t("enginepage.fact.files") : ""}</dd></div>}

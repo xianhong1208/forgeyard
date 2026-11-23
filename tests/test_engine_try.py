@@ -311,6 +311,20 @@ def test_fy_etry_006_a_rolling_build_unsigned_upstream_and_its_archive_left_out(
     assert [x["variant"] for x in lo] == ["cpu-process"] and lo[0]["code"] in ("no_archive", "no_release")
     sig = r.json()["signatures"]["cuda"]
     assert sig["status"] == "unsigned" and "unsigned build record" in sig["note"]
+    # A rolling engine's stored tag must be the built-in variant's own tag: another one is never taken.
+    from forgeyard.db import ServerSetting
+
+    db = new_session()
+    try:
+        row = db.get(ServerSetting, ev.SETTING_KEY)
+        value = json.loads(json.dumps(row.value))
+        value["engines"]["sd-cpp"]["candidates"][0]["variants"][0]["tag"] = "master-vulkan"
+        row.value = value
+        db.commit()
+    finally:
+        db.close()
+    r = try_(owner, "sd-cpp", "master-1117-0d71f96", name="sd-other")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "check_again"
 
 
 # ------------------------------------------------------------------ process archives and signatures
@@ -395,6 +409,22 @@ def test_fy_etry_009_an_archive_whose_sha256_changed_since_the_check_is_refused(
     rel["assets"] = [a for a in rel["assets"] if a is not asset]
     assert try_(owner, "llama-cpp", "1.0.0").json()["detail"]["code"] == "digest_moved"
     assert custom_names() == []
+    # A stored archive address outside the built-in's own release downloads is never taken.
+    from forgeyard.db import ServerSetting
+
+    db = new_session()
+    try:
+        row = db.get(ServerSetting, ev.SETTING_KEY)
+        value = json.loads(json.dumps(row.value))
+        cand = value["engines"]["llama-cpp"]["candidates"][0]
+        proc = next(v for v in cand["variants"] if v["name"] == "cpu-process")
+        proc["url"] = proc["url"].replace("ggml-org/llama.cpp", "someone/llama.cpp")
+        row.value = value
+        db.commit()
+    finally:
+        db.close()
+    r = try_(owner, "llama-cpp", "1.0.0")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "check_again"
 
 
 def test_fy_etry_010_verify_checks_the_signer_the_issuer_and_the_subject(up, tmp_path):
@@ -419,6 +449,24 @@ def test_fy_etry_010_verify_checks_the_signer_the_issuer_and_the_subject(up, tmp
     finally:
         signatures.SOURCES.clear()
         signatures.SOURCES.update(src)
+    # The signer must be a workflow file of that repository, and the statement build provenance in-toto.
+    from sigstore.errors import VerificationError
+    from sigstore.models import Bundle
+
+    cert = Bundle.from_json(json.dumps(up.attestations[(LLAMA, VULKAN_1)]["attestations"][0]["bundle"])).signing_certificate
+    signatures._SignerInRepository(LLAMA).verify(cert)
+    with pytest.raises(VerificationError):
+        signatures._SignerInRepository("ggml-org/other").verify(cert)
+    assert signatures.identity(cert)["signer"].startswith("https://github.com/ggml-org/llama.cpp/.github/workflows/")
+    for name, value in (("PREDICATES", ("https://example.org/other/v1",)), ("STATEMENT_TYPE", "text/plain")):
+        old = getattr(signatures, name)
+        setattr(signatures, name, value)
+        try:
+            with pytest.raises(signatures.SignatureError) as e:
+                signatures.verify("llama.cpp", VULKAN_1, what="x", policy=policy, data_dir=tmp_path)
+            assert e.value.code == "signature_failed"
+        finally:
+            setattr(signatures, name, old)
     assert signatures.about("llama.cpp") == {"signed": True, "kind": "github-attestation", "repository": LLAMA}
     assert signatures.about("vllm")["signed"] is False and signatures.unsigned("vllm")["status"] == "unsigned"
     assert "no signatures that Forgeyard can verify" in signatures.about("someone")["text"]
