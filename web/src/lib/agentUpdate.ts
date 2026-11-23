@@ -1,6 +1,6 @@
 // 1.4.2 (#121, #122): the "update the agent" hint on a machine's tile and page, and how its update command is
 // introduced. Pure, so each case is tested on its own.
-import { t } from "../i18n/core";
+import { labels, t } from "../i18n/core";
 import type { AgentBehind, AgentUpdate, Machine } from "./types";
 
 // "agent 1.4.0, server 1.4.2: update", or for a build of the server's version from older code
@@ -15,27 +15,27 @@ export function behindText(m: Pick<Machine, "agent_behind">): string | null {
 
 // A sentence for the machine's page.
 export function behindDetail(b: AgentBehind): string {
-  if (b.old_protocol) return `Its agent (${b.agent ?? "unknown version"}) speaks an older protocol than the server (${b.server}) and cannot work correctly. Update it.`;
-  if (b.older) return `Its agent is ${b.agent ?? "of an unknown version"}; the server is ${b.server}. Update it to get this release's fixes and features.`;
-  return `Its agent is the server's version (${b.server}) but does not offer ${b.missing.join(", ")}: it was built from older code. Update it.`;
+  if (b.old_protocol) return t("machine.behind.oldProtocol", { agent: b.agent ?? t("machine.behind.unknownVersion"), server: b.server });
+  if (b.older) return t("machine.behind.older", { agent: b.agent ?? t("machine.behind.ofUnknownVersion"), server: b.server });
+  return t("machine.behind.lacks", { server: b.server, missing: b.missing.join(", ") });
 }
 
-export const METHOD_LABEL: Record<string, string> = {
-  container: "runs in a container",
-  "install.sh": "installed with install.sh",
-  manual: "installed by hand",
-  unknown: "could not tell",
-};
+export const METHOD_LABEL: Record<string, string> = labels({
+  container: "machine.method.container",
+  "install.sh": "machine.method.install",
+  manual: "machine.method.manual",
+  unknown: "machine.method.unknown",
+});
 
 // One line on how the agent runs and what the command does.
 export function methodLine(u: AgentUpdate): string {
-  if (!u.method || !u.known) return "How this agent runs is not known.";
+  if (!u.method || !u.known) return t("machine.methodLine.unknown");
   const how = METHOD_LABEL[u.method] ?? u.method;
   if (u.method === "container") {
     return u.offline
-      ? `It ${how} and gets its files through the server: carry the image ${u.image} to it, then start the same container on the new image.`
-      : `It ${how}: pull ${u.image}, then start the same container on it.`;
+      ? t("machine.methodLine.containerOffline", { how, image: String(u.image) })
+      : t("machine.methodLine.container", { how, image: String(u.image) });
   }
-  if (u.method === "install.sh") return `It was ${how}: run it again, without a join token.`;
-  return `It was ${how}.`;
+  if (u.method === "install.sh") return t("machine.methodLine.install", { how });
+  return t("machine.methodLine.other", { how });
 }

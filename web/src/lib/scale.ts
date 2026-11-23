@@ -1,5 +1,6 @@
 // 1.5.0 (#37): automatic replicas on the deploy and edit forms. The server checks the values
 // (forgeyard/workloads/autoscale.py); these are the defaults it uses when one is left empty.
+import { t, tPlural } from "../i18n/core";
 import type { Deployment, Recipe } from "./types";
 
 export const SCALE_DEFAULTS = { min: 1, max: 2, target: 80, upSeconds: 60, downMinutes: 10 };
@@ -62,14 +63,14 @@ export function scaleEditParams(s: ScaleForm): Record<string, unknown> {
 export function scaleSummary(d: Deployment): string | null {
   const a = d.autoscale;
   if (!a?.on) return null;
-  const low = a.min === 0 ? "0 (asleep)" : String(a.min);
-  return `Automatic, ${low} to ${a.max} · ${a.replicas} now`;
+  const low = a.min === 0 ? t("deployment.scale.zeroAsleep") : String(a.min);
+  return t("deployment.scale.summary", { low, max: a.max, now: a.replicas });
 }
 
 export function loadText(d: Deployment): string | null {
   const a = d.autoscale;
   if (!a?.on || a.load === null) return null;
   const goal = Math.round(a.capacity * a.target) / 100;
-  const per = a.per_replica === null ? "" : `, ${a.per_replica} per ready replica`;
-  return `Load ${a.load} over the last ${a.scale_up_seconds} s${per} (target ${goal} of ${a.capacity} concurrent request${a.capacity === 1 ? "" : "s"} each)`;
+  const per = a.per_replica === null ? "" : t("deployment.scale.perReplica", { per: String(a.per_replica) });
+  return tPlural("deployment.scale.load", a.capacity, { load: String(a.load), seconds: a.scale_up_seconds, per, goal: String(goal) });
 }

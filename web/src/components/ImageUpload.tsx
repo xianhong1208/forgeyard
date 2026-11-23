@@ -20,10 +20,12 @@ import { bytes } from "../lib/machines";
 import type { Machine } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Notice } from "./ui";
+import { useT } from "../i18n/react";
 
 export function EngineImagesSection({ m, machines, canManage, onChanged, onError }: {
   m: Machine; machines: Machine[]; canManage: boolean; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [copying, setCopying] = useState(false);
   const live = m.status === "online" && (m.features ?? []).includes("image_save");
@@ -58,41 +60,38 @@ export function EngineImagesSection({ m, machines, canManage, onChanged, onError
   return (
     <section className="panel mk-section" aria-labelledby="mk-images" id="engine-images" ref={here}>
       <div className="panel-head">
-        <h2 id="mk-images">Engine images {v && v.listed && <span className="muted small">· {v.images.length}</span>}</h2>
+        <h2 id="mk-images">{t("machine.img.title")} {v && v.listed && <span className="muted small">· {v.images.length}</span>}</h2>
         <span className="cache-head-side">
           {disk && <span className="cache-disk small">{disk}</span>}
           {canManage && (
             <span className="img-actions">
               <button type="button" className="btn btn-small" disabled={copyNo !== null} title={copyNo ?? undefined}
                 onClick={() => setCopying(true)}>
-                <IconCopy size={14} aria-hidden="true" /> Copy from another machine
+                <IconCopy size={14} aria-hidden="true" /> {t("machine.img.copyButton")}
               </button>
               <button type="button" className="btn btn-small" disabled={blocked !== null} title={blocked ?? undefined}
                 onClick={() => setOpen(true)}>
-                <IconUpload size={14} aria-hidden="true" /> Upload an image
+                <IconUpload size={14} aria-hidden="true" /> {t("machine.img.uploadButton")}
               </button>
             </span>
           )}
         </span>
       </div>
       <p className="small muted img-lead">
-        A deployment pulls its engine image itself. A machine that cannot reach the registry gets a pinned image through
-        the server instead (Internet access, above). Any other image, such as a custom recipe's image named by a tag only,
-        can be copied here from another machine (Copy from another machine), or uploaded: save it on a machine that has it, for example
-        <code className="mono"> docker save IMAGE | gzip &gt; image.tar.gz</code>.
+        {t.rich("machine.img.lead", { command: <code className="mono"> docker save IMAGE | gzip &gt; image.tar.gz</code> })}
       </p>
       {canManage && blocked && <p className="small muted">{blocked}</p>}
-      {!live && m.status === "online" && <p className="field-hint cache-note">This machine's agent cannot list its engine images: it has no container engine, or it is older than 1.4.1 (update the agent).</p>}
-      {live && !v && !error && <p className="muted small">Asking {m.name} for its engine images…</p>}
+      {!live && m.status === "online" && <p className="field-hint cache-note">{t("machine.img.cannotList")}</p>}
+      {live && !v && !error && <p className="muted small">{t("machine.img.asking", { name: m.name })}</p>}
       {live && error && <p className="muted small">{error}</p>}
       {v && !v.listed && <p className="field-hint cache-note">{v.note}</p>}
       {v && v.listed && (
         <>
           {v.can_remove && v.remove_note && <p className="field-hint cache-note">{v.remove_note}</p>}
           {v.images.length === 0 ? (
-            <p className="empty-line">No image a recipe names is on this machine.</p>
+            <p className="empty-line">{t("machine.img.none")}</p>
           ) : (
-            <ul className="cachelist" aria-label={`Engine images on ${m.name}`}>
+            <ul className="cachelist" aria-label={t("machine.img.listLabel", { name: m.name })}>
               {v.images.map((i) => (
                 <EngineImageRow key={i.id} i={i} m={m} canRemove={v.can_remove} asking={asking === i.id} busy={busy}
                   onAsk={() => setAsking(i.id)} onCancel={() => setAsking(null)} onRemove={() => void remove(i)} />
@@ -101,7 +100,7 @@ export function EngineImagesSection({ m, machines, canManage, onChanged, onError
           )}
           {v.others > 0 && (
             <p className="field-hint cache-note">
-              {v.others} other {v.others === 1 ? "image is" : "images are"} in this machine's engine. No recipe names {v.others === 1 ? "it" : "them"}, so {v.others === 1 ? "it is" : "they are"} not Forgeyard's and {v.others === 1 ? "is" : "are"} not listed here.
+              {t.plural("machine.img.others", v.others)}
             </p>
           )}
         </>
@@ -116,7 +115,8 @@ function EngineImageRow({ i, m, canRemove, asking, busy, onAsk, onCancel, onRemo
   i: EngineImage; m: Machine; canRemove: boolean; asking: boolean; busy: string | null;
   onAsk: () => void; onCancel: () => void; onRemove: () => void;
 }) {
-  const name = i.tags.length ? i.tags.join(", ") : "(no tag)";
+  const t = useT();
+  const name = i.tags.length ? i.tags.join(", ") : t("machine.img.noTag");
   return (
     <li className="cacherow">
       <span className="runlist-k" aria-hidden="true"><IconBox size={16} stroke={1.7} /></span>
@@ -126,29 +126,29 @@ function EngineImageRow({ i, m, canRemove, asking, busy, onAsk, onCancel, onRemo
         <small className="mono">{listedLine({ ...i, size: null })}</small>
       </span>
       <span className="cacherow-use">
-        {i.agent && <span className="chip chip-tone-off" title="The agent runs from this image">agent's own image</span>}
+        {i.agent && <span className="chip chip-tone-off" title={t("machine.img.agentTitle")}>{t("machine.img.agent")}</span>}
         {i.used_by.map((u) => (
           userHref(u)
-            ? <Link key={`${u.kind}-${u.id}`} to={userHref(u)!} className="chip chip-tone-run" title={`Used by the ${u.kind} ${u.name} on this machine`}>in use: {u.name}</Link>
-            : <span key={`${u.kind}-${u.id}`} className="chip chip-tone-run" title={`Used by ${u.name} on this machine`}>in use: {u.name}</span>
+            ? <Link key={`${u.kind}-${u.id}`} to={userHref(u)!} className="chip chip-tone-run" title={t("machine.usedByDeployment", { name: u.name })}>{t("machine.inUse", { name: u.name })}</Link>
+            : <span key={`${u.kind}-${u.id}`} className="chip chip-tone-run" title={t("machine.usedBy", { name: u.name })}>{t("machine.inUse", { name: u.name })}</span>
         ))}
       </span>
-      <span className="cacherow-size mono">{i.size === null ? "size unknown" : bytes(i.size)}</span>
+      <span className="cacherow-size mono">{i.size === null ? t("machine.sizeUnknown") : bytes(i.size)}</span>
       {canRemove && (
         <span className="cacherow-act">
           <button type="button" className="btn btn-danger btn-small" disabled={i.remove_note !== null || busy !== null || asking}
-            title={i.remove_note ?? `Remove ${name} from ${m.name}'s engine`} aria-label={`Remove ${name}`} onClick={onAsk}>
-            <IconTrash size={14} aria-hidden="true" /> Remove
+            title={i.remove_note ?? t("machine.img.removeTitle", { name, machine: m.name })} aria-label={t("machine.removeNamed", { name })} onClick={onAsk}>
+            <IconTrash size={14} aria-hidden="true" /> {t("machine.remove")}
           </button>
         </span>
       )}
       {asking && (
-        <div className="cacherow-confirm" role="group" aria-label={`Remove ${name}?`}>
+        <div className="cacherow-confirm" role="group" aria-label={t("machine.img.removeAsk", { name })}>
           <p className="small">{engineRemoveQuestion(m.name, i)}</p>
           <span className="cacherow-confirm-act">
-            <button type="button" className="btn btn-quiet btn-small" disabled={busy !== null} onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-quiet btn-small" disabled={busy !== null} onClick={onCancel}>{t("common.cancel")}</button>
             <button type="button" className="btn btn-danger btn-small" disabled={busy !== null} onClick={onRemove}>
-              <IconTrash size={14} aria-hidden="true" /> {busy === i.id ? "Removing…" : "Remove the image"}
+              <IconTrash size={14} aria-hidden="true" /> {busy === i.id ? t("machine.removing") : t("machine.img.removeImage")}
             </button>
           </span>
         </div>
@@ -160,6 +160,7 @@ function EngineImageRow({ i, m, canRemove, asking, busy, onAsk, onCancel, onRemo
 type Phase = "pick" | "sending" | "loading" | "done" | "error";
 
 function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => void; onLoaded: (text: string) => void }) {
+  const t = useT();
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>("pick");
   const [sent, setSent] = useState(0);
@@ -172,7 +173,7 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
   const busy = phase === "sending" || phase === "loading";
 
   const close = () => {
-    if (busy && !window.confirm("Stop the upload? Nothing is loaded on the machine.")) return;
+    if (busy && !window.confirm(t("machine.img.stopUpload"))) return;
     xhr.current?.abort();
     onClose();
   };
@@ -199,7 +200,7 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
     req.setRequestHeader("X-Filename", encodeURIComponent(file.name));
     req.upload.onprogress = (e) => setSent(e.loaded);
     req.upload.onload = () => { setSent(file.size); setPhase("loading"); };
-    req.onerror = () => { setPhase("error"); setError("The upload broke off: the connection to the server ended."); };
+    req.onerror = () => { setPhase("error"); setError(t("machine.img.brokeOff")); };
     req.onabort = () => { setPhase("pick"); setSent(0); };
     req.onload = () => {
       let body: { detail?: { message?: string; reason?: string } } & Partial<UploadResult>;
@@ -208,12 +209,12 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
         const r = body as UploadResult;
         setResult(r);
         setPhase("done");
-        onLoaded(`Loaded ${r.images.flatMap((i) => i.tags).join(", ") || r.images.map((i) => shortId(i.id)).join(", ")} on ${m.name}.`);
+        onLoaded(t("machine.img.loaded", { images: r.images.flatMap((i) => i.tags).join(", ") || r.images.map((i) => shortId(i.id)).join(", "), name: m.name }));
         return;
       }
       if (req.status === 401) notifyUnauthorized(body.detail?.reason);
       setPhase("error");
-      setError(body.detail?.message ?? `The upload failed (HTTP ${req.status}).`);
+      setError(body.detail?.message ?? t("machine.img.failed", { status: String(req.status) }));
     };
     req.send(file);
   };
@@ -223,24 +224,23 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
     <div className="dlg-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className="dlg panel" role="dialog" aria-modal="true" aria-labelledby="upl-title" ref={box}>
         <div className="dlg-head">
-          <h2 id="upl-title"><IconUpload size={18} aria-hidden="true" /> Upload an image to {m.name}</h2>
-          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label="Close" onClick={close}><IconX size={16} aria-hidden="true" /></button>
+          <h2 id="upl-title"><IconUpload size={18} aria-hidden="true" /> {t("machine.img.uploadTitle", { name: m.name })}</h2>
+          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label={t("common.close")} onClick={close}><IconX size={16} aria-hidden="true" /></button>
         </div>
         <p className="small muted dlg-lead">
-          A file <code className="mono">docker save</code> or <code className="mono">podman save</code> wrote, gzip-compressed
-          or not. It goes through the server, which keeps none of it, straight into {m.name}'s container engine
-          ({m.runtime_info?.container?.engine ?? "Docker or Podman"}). Up to {bytes(max)}.
+          {t.rich("machine.img.uploadLead", { docker: <code className="mono">docker save</code>, podman: <code className="mono">podman save</code>,
+            name: m.name, engine: m.runtime_info?.container?.engine ?? t("machine.img.dockerOrPodman"), max: bytes(max) })}
         </p>
         <div className="field">
-          <label htmlFor="upl-file">Image file</label>
+          <label htmlFor="upl-file">{t("machine.img.file")}</label>
           <input id="upl-file" type="file" accept={UPLOAD_ACCEPT} disabled={busy}
             onChange={(e) => { setFile(e.target.files?.[0] ?? null); setPhase("pick"); setError(null); setResult(null); }} />
-          {file && <p className={`field-hint${tooLarge ? " field-error" : ""}`}>{file.name} · {bytes(file.size)}{tooLarge ? ` · larger than the limit of ${bytes(max)} (IMAGE_UPLOAD_MAX_GB)` : ""}</p>}
+          {file && <p className={`field-hint${tooLarge ? " field-error" : ""}`}>{file.name} · {bytes(file.size)}{tooLarge ? t("machine.img.tooLarge", { max: bytes(max) }) : ""}</p>}
         </div>
         {busy && file && (
           <div className="upl-progress">
             <span className="bar bar-dl" role="progressbar" aria-valuemin={0} aria-valuemax={100}
-              aria-valuenow={Math.round(frac * 100)} aria-label={`Upload of ${file.name} to ${m.name}`}>
+              aria-valuenow={Math.round(frac * 100)} aria-label={t("machine.img.uploadLabel", { file: file.name, name: m.name })}>
               <span style={{ width: `${Math.round(frac * 100)}%` }} />
             </span>
             <small>{uploadLine(phase, sent, file.size, m.name)}</small>
@@ -248,12 +248,12 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
         )}
         {error && <Notice tone="error">{error}</Notice>}
         {result && (
-          <ul className="upl-result" aria-label="Loaded images">
+          <ul className="upl-result" aria-label={t("machine.img.loadedList")}>
             {result.images.map((i) => (
               <li key={i.id}>
                 <IconBox size={16} aria-hidden="true" />
                 <span className="upl-result-main">
-                  <strong className="mono">{i.tags.length ? i.tags.join(", ") : "(no tag)"}</strong>
+                  <strong className="mono">{i.tags.length ? i.tags.join(", ") : t("machine.img.noTag")}</strong>
                   <small className="mono muted">{shortId(i.id)}{i.architecture ? ` · ${i.os || "linux"}/${i.architecture}` : ""}</small>
                   <small>{matchLine(i)}</small>
                 </span>
@@ -262,10 +262,10 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
           </ul>
         )}
         <div className="dlg-foot">
-          <button type="button" className="btn btn-quiet" onClick={close}>{phase === "done" ? "Close" : "Cancel"}</button>
+          <button type="button" className="btn btn-quiet" onClick={close}>{phase === "done" ? t("common.close") : t("common.cancel")}</button>
           {phase !== "done" && (
             <button type="button" className="btn btn-primary" disabled={!file || tooLarge || busy} onClick={start}>
-              <IconUpload size={16} aria-hidden="true" /> {busy ? "Uploading…" : "Upload"}
+              <IconUpload size={16} aria-hidden="true" /> {busy ? t("machine.img.uploading") : t("machine.img.upload")}
             </button>
           )}
         </div>
@@ -280,6 +280,7 @@ type CopyPhase = "pick" | "copying" | "done" | "error";
 function CopyDialog({ m, sources, onClose, onLoaded }: {
   m: Machine; sources: Machine[]; onClose: () => void; onLoaded: (text: string) => void;
 }) {
+  const t = useT();
   const [from, setFrom] = useState<number | null>(sources[0]?.id ?? null);
   const [list, setList] = useState<ListedImage[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -306,7 +307,7 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
     return () => { live = false; };
   }, [from]);
   const close = () => {
-    if (busy && !window.confirm("Close this? The copy goes on until it ends; its result is in the audit log.")) return;
+    if (busy && !window.confirm(t("machine.img.closeCopy"))) return;
     onClose();
   };
   useEffect(() => {
@@ -324,7 +325,8 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
       const r = await api<CopyResult>(`/machines/${m.id}/images/copy`, { method: "POST", body: { source_id: from, image } });
       setResult(r);
       setPhase("done");
-      onLoaded(`Copied ${r.images.flatMap((i) => i.tags).join(", ") || r.images.map((i) => shortId(i.id)).join(", ")} from ${source.name} to ${m.name}.`);
+      onLoaded(t("machine.img.copied", { images: r.images.flatMap((i) => i.tags).join(", ") || r.images.map((i) => shortId(i.id)).join(", "),
+        source: source.name, name: m.name }));
     } catch (e) {
       setPhase("error");
       setError(errorText(e));
@@ -335,16 +337,14 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
     <div className="dlg-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className="dlg panel" role="dialog" aria-modal="true" aria-labelledby="cpy-title" ref={box}>
         <div className="dlg-head">
-          <h2 id="cpy-title"><IconCopy size={18} aria-hidden="true" /> Copy an image to {m.name}</h2>
-          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label="Close" onClick={close}><IconX size={16} aria-hidden="true" /></button>
+          <h2 id="cpy-title"><IconCopy size={18} aria-hidden="true" /> {t("machine.img.copyTitle", { name: m.name })}</h2>
+          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label={t("common.close")} onClick={close}><IconX size={16} aria-hidden="true" /></button>
         </div>
         <p className="small muted dlg-lead">
-          The other machine saves the image from its container engine; the server passes it on, keeping none of it,
-          straight into {m.name}'s ({m.runtime_info?.container?.engine ?? "Docker or Podman"}). An image named by a tag
-          only is used as that machine has it: copy only from a machine you trust.
+          {t("machine.img.copyLead", { name: m.name, engine: m.runtime_info?.container?.engine ?? t("machine.img.dockerOrPodman") })}
         </p>
         <div className="field">
-          <label htmlFor="cpy-from">From</label>
+          <label htmlFor="cpy-from">{t("machine.img.from")}</label>
           <select id="cpy-from" value={from ?? ""} disabled={busy || phase === "done"}
             onChange={(e) => {
               setFrom(Number(e.target.value)); setList(null); setListError(null); setImage(null); setShowAll(false);
@@ -354,20 +354,20 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
           </select>
         </div>
         {listError && <Notice tone="error">{listError}</Notice>}
-        {!listError && list === null && <p className="small muted">Asking {source?.name ?? "the machine"} for its images…</p>}
-        {list !== null && list.length === 0 && <p className="small muted">{source?.name} has no images.</p>}
+        {!listError && list === null && <p className="small muted">{t("machine.img.askingImages", { name: source?.name ?? t("machine.dl.theMachine") })}</p>}
+        {list !== null && list.length === 0 && <p className="small muted">{t("machine.img.noImages", { name: source?.name ?? "" })}</p>}
         {shown !== null && list !== null && list.length > 0 && shown.length === 0 && phase !== "done" && (
-          <p className="small muted">No image on {source?.name} is one a recipe names.</p>
+          <p className="small muted">{t("machine.img.noneNamed", { name: source?.name ?? "" })}</p>
         )}
         {shown !== null && shown.length > 0 && phase !== "done" && (
           <fieldset className="dlg-machines cpy-images">
-            <legend>{showAll ? `Images on ${source?.name}` : `Engine images on ${source?.name} (named by a recipe)`}</legend>
+            <legend>{showAll ? t("machine.img.imagesOn", { name: source?.name ?? "" }) : t("machine.img.engineImagesOn", { name: source?.name ?? "" })}</legend>
             {shown.map((i) => (
               <label key={i.id} className="dlg-target">
                 <input type="radio" name="cpy-image" value={i.id} checked={image === i.id} disabled={busy}
                   onChange={() => setImage(i.id)} />
                 <span className="dlg-target-main">
-                  <span className="dlg-target-name"><strong className="mono">{i.tags.length ? i.tags.join(", ") : "(no tag)"}</strong></span>
+                  <span className="dlg-target-name"><strong className="mono">{i.tags.length ? i.tags.join(", ") : t("machine.img.noTag")}</strong></span>
                   <small className="mono">{listedLine(i)}</small>
                   <small>{matchLine({ ...i, tags: i.tags })}</small>
                 </span>
@@ -384,24 +384,24 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
                 setImage(copyChoices(list, false)[0]?.id ?? null);
               }
             }} />
-            <span>Show all images <small className="muted">({hidden} more that no recipe names, such as other people's on a shared machine)</small></span>
+            <span>{t("machine.img.showAll")} <small className="muted">{t("machine.img.showAllMore", { count: hidden })}</small></span>
           </label>
         )}
         {busy && source && (
           <div className="upl-progress" role="status">
             <span className="bar bar-dl bar-busy" aria-hidden="true"><span /></span>
-            <small>Copying from {source.name}: it saves the image, the server passes it on, {m.name} loads it. A large image takes minutes.</small>
+            <small>{t("machine.img.copying", { source: source.name, name: m.name })}</small>
           </div>
         )}
         {error && <Notice tone="error">{error}</Notice>}
         {result && (
-          <ul className="upl-result" aria-label="Loaded images">
+          <ul className="upl-result" aria-label={t("machine.img.loadedList")}>
             {result.images.map((i) => (
               <li key={i.id}>
                 <IconBox size={16} aria-hidden="true" />
                 <span className="upl-result-main">
-                  <strong className="mono">{i.tags.length ? i.tags.join(", ") : "(no tag)"}</strong>
-                  <small className="mono muted">{shortId(i.id)}{i.architecture ? ` · ${i.os || "linux"}/${i.architecture}` : ""} · {bytes(result.bytes)} from {result.source.name}</small>
+                  <strong className="mono">{i.tags.length ? i.tags.join(", ") : t("machine.img.noTag")}</strong>
+                  <small className="mono muted">{shortId(i.id)}{i.architecture ? ` · ${i.os || "linux"}/${i.architecture}` : ""} {t("machine.img.copiedSize", { size: bytes(result.bytes), source: result.source.name })}</small>
                   <small>{sameLine(i, result.source.name)}</small>
                   <small>{matchLine(i)}</small>
                 </span>
@@ -410,10 +410,10 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
           </ul>
         )}
         <div className="dlg-foot">
-          <button type="button" className="btn btn-quiet" onClick={close}>{phase === "done" ? "Close" : "Cancel"}</button>
+          <button type="button" className="btn btn-quiet" onClick={close}>{phase === "done" ? t("common.close") : t("common.cancel")}</button>
           {phase !== "done" && (
             <button type="button" className="btn btn-primary" disabled={image === null || busy} onClick={() => void start()}>
-              <IconCopy size={16} aria-hidden="true" /> {busy ? "Copying…" : "Copy"}
+              <IconCopy size={16} aria-hidden="true" /> {busy ? t("machine.img.copyingShort") : t("machine.img.copy")}
             </button>
           )}
         </div>

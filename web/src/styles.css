@@ -348,6 +348,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .event { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .event:last-child { border-bottom: 0; }
 .event time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.event-kind { font-weight: 600; margin-right: 6px; }
 .event-placed span, .event-created span { color: var(--ink-2); }
 .event-unplaced span { color: var(--bad); }
 .fact { display: contents; }

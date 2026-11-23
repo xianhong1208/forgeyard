@@ -1,13 +1,14 @@
 // "Download to…" (1.4, issue #35): what the dialog says of each machine, and how a download reads in a list.
+import { labels, t as tr } from "../i18n/core";
 import { bytes } from "./machines";
 import { downloadFraction, downloadText } from "./models";
 import type { DownloadTarget, FetchVia, ModelDownload } from "./types";
 import { when } from "./format";
 
-export const TARGET_LABEL: Record<DownloadTarget["state"], string> = {
-  ok: "fits", cached: "already here", downloading: "downloading", too_old: "update the agent", no_cache: "no model cache",
-  offline: "offline", no_space: "not enough disk", revoked: "revoked",
-};
+export const TARGET_LABEL: Record<DownloadTarget["state"], string> = labels({
+  ok: "machine.target.ok", cached: "machine.target.cached", downloading: "machine.target.downloading", too_old: "machine.target.too_old",
+  no_cache: "machine.target.no_cache", offline: "machine.target.offline", no_space: "machine.target.no_space", revoked: "machine.target.revoked",
+});
 
 export const TARGET_TONE: Record<DownloadTarget["state"], string> = {
   ok: "ok", cached: "run", downloading: "wait", too_old: "bad", no_cache: "off", offline: "off", no_space: "bad",
@@ -21,16 +22,18 @@ export function pickable(t: DownloadTarget): boolean {
 // "1.19 GiB to download · 48 GiB free · engine: llama.cpp-1.0.0 archive (cpu-process)".
 export function targetDetail(t: DownloadTarget): string {
   const parts: string[] = [];
-  if (t.model_cached) parts.push("model already here");
-  else if (t.need_bytes) parts.push(`${bytes(t.need_bytes)} to download`);
-  if (t.free_bytes !== null && t.free_bytes !== undefined) parts.push(`${bytes(t.free_bytes)} free`);
+  if (t.model_cached) parts.push(tr("machine.target.modelHere"));
+  else if (t.need_bytes) parts.push(tr("machine.target.toDownload", { size: bytes(t.need_bytes) }));
+  if (t.free_bytes !== null && t.free_bytes !== undefined) parts.push(tr("machine.free", { free: bytes(t.free_bytes) }));
   if (t.engine) {
-    const what = t.engine.kind === "image" ? `image ${shortImage(t.engine.name)}` : `${t.engine.name} archive`;
-    parts.push(`engine: ${what}${t.engine.cached ? " (already here)" : ""}${t.variant ? ` · ${t.variant}` : ""}`);
+    const what = t.engine.kind === "image" ? tr("machine.target.engineImage", { image: shortImage(t.engine.name) })
+      : tr("machine.target.engineArchive", { name: t.engine.name });
+    parts.push(tr("machine.target.engine", { what, here: t.engine.cached ? tr("machine.target.engineHere") : "",
+      variant: t.variant ? ` · ${t.variant}` : "" }));
   } else if (t.engine_note) {
-    parts.push(`no engine: ${t.engine_note}`);
+    parts.push(tr("machine.target.noEngine", { note: t.engine_note }));
   }
-  if (t.via === "server" && !t.model_cached) parts.push(t.from_machine ? `via the server, from ${t.from_machine}` : "via the server");
+  if (t.via === "server" && !t.model_cached) parts.push(t.from_machine ? tr("machine.target.viaFrom", { machine: t.from_machine }) : tr("machine.target.via"));
   return parts.join(" · ");
 }
 
@@ -49,15 +52,18 @@ export function downloadLine(d: ModelDownload): string {
   if (d.state === "downloading" || d.state === "queued") {
     const progress = d.download ? downloadText({ download: d.download }) : null;
     const frac = d.download ? downloadFraction({ download: d.download }) : null;
-    const text = progress ? `${progress}${frac !== null ? ` (${Math.round(frac * 100)}%)` : ""}` : d.reason || (d.state === "queued" ? "Waiting to start" : "Starting");
+    const text = progress ? `${progress}${frac !== null ? ` (${Math.round(frac * 100)}%)` : ""}`
+      : d.reason || (d.state === "queued" ? tr("machine.dl.waiting") : tr("machine.dl.starting"));
     return d.waiting ? `${text} · ${d.waiting}` : text;
   }
   if (d.state === "done") {
-    const via = d.via === "machine" ? ` via the server, from ${d.source?.name ?? "another machine"}` : d.via === "server" ? " via the server" : "";
-    return `Downloaded ${when(d.finished_at)}${via}${d.recipe ? `, with the ${d.recipe} engine` : ""}`;
+    const via = d.via === "machine" ? tr("machine.dl.viaMachine", { name: d.source?.name ?? tr("machine.dl.anotherMachine") })
+      : d.via === "server" ? tr("machine.dl.viaServer") : "";
+    return tr("machine.dl.done", { when: when(d.finished_at), via, engine: d.recipe ? tr("machine.dl.withEngine", { recipe: d.recipe }) : "" });
   }
-  if (d.state === "cancelled") return `${capital(d.reason || "cancelled")} ${when(d.finished_at)}`.trim();
-  return `Failed: ${d.reason || "unknown reason"}`;
+  // The server's reason as it sent it, else "Cancelled" in the reader's language.
+  if (d.state === "cancelled") return (d.reason ? `${capital(d.reason)} ${when(d.finished_at)}` : tr("machine.dl.cancelled", { when: when(d.finished_at) })).trim();
+  return tr("machine.dl.failed", { reason: d.reason || tr("machine.dl.unknownReason") });
 }
 
 function capital(text: string): string {
@@ -79,13 +85,11 @@ export function recentDownloads(list: ModelDownload[], key: "machine" | "model",
   return out.slice(0, Math.max(limit, active.length));
 }
 
-export const FETCH_VIA_LABEL: Record<FetchVia, string> = {
-  auto: "Auto", server: "Always through the server", direct: "Direct only",
-};
+export const FETCH_VIA_LABEL: Record<FetchVia, string> = labels({
+  auto: "machine.fetchVia.auto", server: "machine.fetchVia.server", direct: "machine.fetchVia.direct",
+});
 
 // What each choice does (1.4, "relay"): shown under the machine's Internet access setting.
-export const FETCH_VIA_HINT: Record<FetchVia, string> = {
-  auto: "Downloads models, engine archives and pinned engine images directly, and through the server once the source cannot be reached from here.",
-  server: "Every model file, engine archive and pinned engine image comes through the server, which stores nothing: for a machine with no internet access of its own.",
-  direct: "Always downloads directly, never through the server.",
-};
+export const FETCH_VIA_HINT: Record<FetchVia, string> = labels({
+  auto: "machine.fetchVia.hint.auto", server: "machine.fetchVia.hint.server", direct: "machine.fetchVia.hint.direct",
+});

@@ -1,4 +1,5 @@
 // 1.4.5 (#163): how the gateway reaches a machine's replicas, as its page says it. Pure, so each case is tested.
+import { t as tr } from "../i18n/core";
 import type { Machine, ReplicaTls } from "./types";
 
 export type TlsTone = "ok" | "warn" | "bad" | "wait";
@@ -9,35 +10,36 @@ export function tlsChip(m: Pick<Machine, "replica_tls" | "status">): { text: str
   if (!t || m.status === "revoked") return null;
   switch (t.state) {
     case "plain":
-      return { text: "not encrypted: update the agent", tone: "warn", update: true };
+      return { text: tr("machine.tls.chip.plain"), tone: "warn", update: true };
     case "missing":
-      return { text: "no replica certificate", tone: "bad", update: false };
+      return { text: tr("machine.tls.chip.missing"), tone: "bad", update: false };
     case "expired":
-      return { text: "replica certificate expired", tone: "bad", update: false };
+      return { text: tr("machine.tls.chip.expired"), tone: "bad", update: false };
     case "expiring":
-      return { text: "replica certificate not renewed", tone: "bad", update: false };
+      return { text: tr("machine.tls.chip.expiring"), tone: "bad", update: false };
     default:
       return null; // ok and pending need no chip: the Agent section says it
   }
 }
 
-// The Agent section's "Replica traffic" line.
+// The Agent section's "Replica traffic" line. The date stays as the server's ISO date (2026-12-01) in both languages.
 export function tlsLine(t: ReplicaTls | null | undefined): string | null {
   if (!t) return null;
   const until = t.not_after ? t.not_after.slice(0, 10) : null;
+  const reason = t.reason ? tr("machine.tls.reason", { reason: t.reason }) : "";
   switch (t.state) {
     case "ok":
-      return `Encrypted (TLS)${until ? `, certificate valid until ${until}` : ""}`;
+      return until ? tr("machine.tls.line.okUntil", { until }) : tr("machine.tls.line.ok");
     case "pending":
-      return "Encrypted (TLS), getting its certificate";
+      return tr("machine.tls.line.pending");
     case "plain":
-      return "Not encrypted (plain HTTP): its agent is older than 1.4.5. Update the agent.";
+      return tr("machine.tls.line.plain");
     case "missing":
-      return `TLS, but no certificate from this server${t.reason ? ` (${t.reason})` : ""}: its replicas cannot be reached`;
+      return tr("machine.tls.line.missing", { reason });
     case "expiring":
-      return `TLS, certificate valid until ${until ?? "?"} and not being renewed${t.reason ? ` (${t.reason})` : ""}`;
+      return tr("machine.tls.line.expiring", { until: until ?? "?", reason });
     case "expired":
-      return `TLS, certificate expired${until ? ` on ${until}` : ""}: its replicas cannot be reached`;
+      return until ? tr("machine.tls.line.expiredOn", { until }) : tr("machine.tls.line.expired");
     default:
       return null;
   }
