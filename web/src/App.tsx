@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 import { useAuth } from "./auth";
 import { Layout } from "./components/Layout";
 import { Splash } from "./components/Splash";
+import { HtmlLang } from "./i18n/react";
 import { loginPath } from "./lib/nav";
 import { AccountPage } from "./pages/Account";
 import { ApiKeysPage } from "./pages/ApiKeys";
@@ -48,6 +49,8 @@ function AdminOnly({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
+    <>
+    <HtmlLang />
     <Routes>
       <Route path="/setup" element={<SetupPage />} />
       <Route path="/login" element={<LoginPage />} />
@@ -106,5 +109,6 @@ export default function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
+    </>
   );
 }

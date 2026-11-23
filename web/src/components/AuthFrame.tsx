@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { useT } from "../i18n/react";
 import { useDocumentTitle } from "../lib/title";
 import { Mark } from "./Mark";
 
@@ -11,6 +12,7 @@ const PLATES = [
 
 export function AuthFrame({ title, lead, children }: { title: string; lead?: ReactNode; children: ReactNode }) {
   useDocumentTitle(title);
+  const t = useT();
   return (
     <div className="auth">
       <aside className="auth-yard" aria-hidden="true">
@@ -23,7 +25,7 @@ export function AuthFrame({ title, lead, children }: { title: string; lead?: Rea
             <span key={i} className={`plate ${kind ? `plate-${kind}` : ""} ${i % 7 === 3 ? "plate-hot" : ""}`} />
           ))}
         </div>
-        <p className="auth-tagline">One control plane for the GPUs and CPUs you own.</p>
+        <p className="auth-tagline">{t("common.appTagline")}</p>
       </aside>
       <main className="auth-main">
         <div className="auth-card">

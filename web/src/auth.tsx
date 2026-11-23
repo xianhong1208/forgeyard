@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 
+import { t } from "./i18n/core";
 import { api, setUnauthorizedHandler } from "./lib/api";
 import type { AuthState, User } from "./lib/types";
 
@@ -29,7 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoadError(null);
     } catch {
       // Not reachable or a 5xx: say so, keep whatever we knew. Never treat it as signed out.
-      setLoadError("Forgeyard is not answering right now.");
+      setLoadError(t("auth.notAnswering"));
     }
   }, []);
 
@@ -41,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState(s);
         if (s.ended) setEnded(s.ended);
       },
-      () => alive && setLoadError("Forgeyard is not answering right now."),
+      () => alive && setLoadError(t("auth.notAnswering")),
     );
     return () => {
       alive = false;

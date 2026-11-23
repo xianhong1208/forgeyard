@@ -1,15 +1,16 @@
 // The secret-key backup dialog's rules (1.4.2, issue #127). The server checks the same.
+import { t } from "../i18n/core";
 
 export const BACKUP_PASSPHRASE_MIN = 12;
 export const BACKUP_PASSPHRASE_MAX = 1024;
 
 // Why the passphrase cannot be used yet, or null.
 export function passphraseProblem(passphrase: string, confirm: string, password: string): string | null {
-  if (passphrase.length < BACKUP_PASSPHRASE_MIN) return `Use a passphrase of at least ${BACKUP_PASSPHRASE_MIN} characters.`;
-  if (passphrase.length > BACKUP_PASSPHRASE_MAX) return `Use a passphrase of at most ${BACKUP_PASSPHRASE_MAX} characters.`;
-  if (new Set(passphrase).size <= 2) return "Use more than two different characters in the passphrase.";
-  if (password && passphrase === password) return "Choose a passphrase that is not your password.";
-  if (confirm !== passphrase) return "The two passphrases are not the same.";
+  if (passphrase.length < BACKUP_PASSPHRASE_MIN) return t("advisor.backup.tooShort", { min: BACKUP_PASSPHRASE_MIN });
+  if (passphrase.length > BACKUP_PASSPHRASE_MAX) return t("advisor.backup.tooLong", { max: BACKUP_PASSPHRASE_MAX });
+  if (new Set(passphrase).size <= 2) return t("advisor.backup.tooSimple");
+  if (password && passphrase === password) return t("advisor.backup.isPassword");
+  if (confirm !== passphrase) return t("advisor.backup.mismatch");
   return null;
 }
 

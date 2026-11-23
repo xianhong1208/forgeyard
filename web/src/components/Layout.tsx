@@ -1,14 +1,17 @@
-import { IconBook2, IconChecklist, IconChevronDown, IconLock, IconLogout, IconMenu2, IconUserCircle, IconX } from "@tabler/icons-react";
+import { IconBook2, IconCheck, IconChecklist, IconChevronDown, IconLanguage, IconLock, IconLogout, IconMenu2, IconUserCircle, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { useAuth } from "../auth";
+import { LANG_NAME, LANGS, setLang } from "../i18n/lang";
+import { useT } from "../i18n/react";
 import { AdvisorProvider, HealthBadge } from "./Advisor";
 import { Mark } from "./Mark";
 import { Notice } from "./ui";
 
 export function Layout() {
   const { user, state, signOut } = useAuth();
+  const t = useT();
   // TLS=off and this page came over plain HTTP (not through a TLS proxy): admins must know.
   const plainHttp = user?.role === "admin" && state?.tls?.mode === "off" && !state.tls.https;
   const [menu, setMenu] = useState(false);
@@ -34,17 +37,17 @@ export function Layout() {
   // the console in 1.4 (#88).
   const admin = user?.role === "admin";
   const links = [
-    { to: "/machines", label: "Machines" },
-    { to: "/serving", label: "Serving" },
-    { to: "/models", label: "Models" },
-    ...(admin ? [{ to: "/cloud", label: "Cloud" }] : []),
-    { to: "/playground", label: "Playground" },
-    { to: "/keys", label: "API keys" },
-    { to: "/usage", label: "Usage" },
+    { to: "/machines", label: t("shell.nav.machines") },
+    { to: "/serving", label: t("shell.nav.serving") },
+    { to: "/models", label: t("shell.nav.models") },
+    ...(admin ? [{ to: "/cloud", label: t("shell.nav.cloud") }] : []),
+    { to: "/playground", label: t("shell.nav.playground") },
+    { to: "/keys", label: t("shell.nav.keys") },
+    { to: "/usage", label: t("shell.nav.usage") },
     ...(admin
       ? [
-          { to: "/users", label: "Users" },
-          { to: "/audit", label: "Audit log" },
+          { to: "/users", label: t("shell.nav.users") },
+          { to: "/audit", label: t("shell.nav.audit") },
         ]
       : []),
   ];
@@ -61,56 +64,58 @@ export function Layout() {
           <button
             type="button"
             className="nav-toggle"
-            aria-label={nav ? "Close menu" : "Open menu"}
+            aria-label={nav ? t("shell.menu.close") : t("shell.menu.open")}
             aria-expanded={nav}
             onClick={() => setNav((v) => !v)}
           >
             {nav ? <IconX size={20} /> : <IconMenu2 size={20} />}
           </button>
-          <nav className={`mainnav${nav ? " open" : ""}`} aria-label="Main">
+          <nav className={`mainnav${nav ? " open" : ""}`} aria-label={t("shell.nav.main")}>
             {links.map((l) => (
               <NavLink key={l.to} to={l.to} onClick={() => setNav(false)} className={({ isActive }) => (isActive ? "active" : "")}>
                 {l.label}
               </NavLink>
             ))}
             <NavLink to="/start" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
-              Get started
+              {t("shell.nav.start")}
             </NavLink>
             <NavLink to="/guide" onClick={() => setNav(false)} className="only-narrow">
-              Guide
+              {t("shell.nav.guide")}
             </NavLink>
             <NavLink to="/account" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
-              My account
+              {t("shell.nav.account")}
             </NavLink>
             <button type="button" className="only-narrow navbutton" onClick={() => void signOut()}>
-              Sign out
+              {t("shell.menu.signOut")}
             </button>
+            <LangSwitch className="only-narrow nav-langs" onPick={() => setNav(false)} />
           </nav>
           <HealthBadge onClick={() => setNav(false)} />
           <div className="usermenu" ref={menuRef}>
             <button type="button" className="usermenu-button" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
               <IconUserCircle size={20} stroke={1.6} aria-hidden="true" />
               <span className="usermenu-name">{user?.username}</span>
-              <span className="usermenu-role">{user?.role}</span>
+              <span className="usermenu-role">{user ? t.maybe(`common.role.${user.role}`, user.role) : null}</span>
               <IconChevronDown size={14} aria-hidden="true" />
             </button>
             {menu && (
               <div className="usermenu-panel" role="menu">
                 <NavLink to="/start" role="menuitem" onClick={() => setMenu(false)}>
-                  <IconChecklist size={16} aria-hidden="true" /> Get started
+                  <IconChecklist size={16} aria-hidden="true" /> {t("shell.menu.start")}
                 </NavLink>
                 <NavLink to="/guide" role="menuitem" onClick={() => setMenu(false)}>
-                  <IconBook2 size={16} aria-hidden="true" /> Guide
+                  <IconBook2 size={16} aria-hidden="true" /> {t("shell.menu.guide")}
                 </NavLink>
                 <NavLink to="/account" role="menuitem" onClick={() => setMenu(false)}>
-                  <IconUserCircle size={16} aria-hidden="true" /> My account and sessions
+                  <IconUserCircle size={16} aria-hidden="true" /> {t("shell.menu.account")}
                 </NavLink>
                 <NavLink to="/trust" role="menuitem" onClick={() => setMenu(false)}>
-                  <IconLock size={16} aria-hidden="true" /> Trust this server (HTTPS)
+                  <IconLock size={16} aria-hidden="true" /> {t("shell.menu.trust")}
                 </NavLink>
                 <button type="button" role="menuitem" onClick={() => void signOut()}>
-                  <IconLogout size={16} aria-hidden="true" /> Sign out
+                  <IconLogout size={16} aria-hidden="true" /> {t("shell.menu.signOut")}
                 </button>
+                <LangSwitch className="usermenu-langs" inMenu />
               </div>
             )}
           </div>
@@ -120,9 +125,11 @@ export function Layout() {
         {plainHttp && (
           <div className="plain-http">
             <Notice tone="error">
-              <strong>Forgeyard is running without HTTPS.</strong> It was started with <code>TLS=off</code> and this page came over plain HTTP,
-              so passwords, session cookies and API keys cross the network unencrypted. Remove <code>TLS=off</code> to use Forgeyard's own
-              certificate authority, or put a proxy that terminates TLS in front of it. <NavLink to="/trust">What to do</NavLink>
+              {t.rich("shell.plainHttp", {
+                off: <code>TLS=off</code>,
+                strong: (text) => <strong>{text}</strong>,
+                link: (text) => <NavLink to="/trust">{text}</NavLink>,
+              })}
             </Notice>
           </div>
         )}
@@ -130,5 +137,25 @@ export function Layout() {
       </main>
     </div>
     </AdvisorProvider>
+  );
+}
+
+// English / 繁體中文, each named in itself: in the account menu, and in the narrow screens' menu. The choice is
+// kept in this browser and is the guide's too.
+function LangSwitch({ className, onPick, inMenu }: { className: string; onPick?: () => void; inMenu?: boolean }) {
+  const t = useT();
+  return (
+    <div className={`langswitch ${className}`} role="group" aria-label={t("shell.menu.language")}>
+      <span className="langswitch-label"><IconLanguage size={16} aria-hidden="true" /> {t("shell.menu.language")}</span>
+      <span className="langswitch-options">
+        {LANGS.map((l) => (
+          <button key={l} type="button" lang={l} className={t.lang === l ? "on" : ""}
+            {...(inMenu ? { role: "menuitemradio", "aria-checked": t.lang === l } : { "aria-pressed": t.lang === l })}
+            onClick={() => { setLang(l); onPick?.(); }}>
+            {t.lang === l && <IconCheck size={13} aria-hidden="true" />}{LANG_NAME[l]}
+          </button>
+        ))}
+      </span>
+    </div>
   );
 }

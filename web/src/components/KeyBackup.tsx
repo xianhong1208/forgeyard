@@ -3,6 +3,7 @@
 import { IconDownload, IconKey, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { useT } from "../i18n/react";
 import { ApiError, errorText, notifyUnauthorized, type ErrorDetail } from "../lib/api";
 import { BACKUP_PASSPHRASE_MIN, backupFilename, passphraseProblem } from "../lib/keyBackup";
 import type { SecretKeyInfo } from "../lib/types";
@@ -55,6 +56,7 @@ export async function downloadKeyBackup(password: string, passphrase: string, co
 // onClose gets the finished download, if there was one: the caller refreshes what depends on it (the
 // advisor's reminder) only then, so the dialog is not unmounted while it shows how to restore.
 export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | null) => void }) {
+  const t = useT();
   const info = useApi<SecretKeyInfo>("/secret-key");
   const [password, setPassword] = useState("");
   const [passphrase, setPassphrase] = useState("");
@@ -103,66 +105,59 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
     <div className="dlg-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className="dlg panel keybak" role="dialog" aria-modal="true" aria-labelledby="keybak-title" ref={box}>
         <div className="dlg-head">
-          <h2 id="keybak-title"><IconKey size={18} aria-hidden="true" /> Back up the secret key</h2>
-          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label="Close" onClick={close}><IconX size={16} aria-hidden="true" /></button>
+          <h2 id="keybak-title"><IconKey size={18} aria-hidden="true" /> {t("advisor.backup.title")}</h2>
+          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label={t("common.close")} onClick={close}><IconX size={16} aria-hidden="true" /></button>
         </div>
         {done ? (
           <div className="keybak-done">
             <Notice tone="ok">
-              <strong>Downloaded {done.file}.</strong> Setup health counts it as the backup of key id {done.kid}.
+              {t.rich("advisor.backup.downloaded", { file: done.file, kid: done.kid, strong: (text) => <strong>{text}</strong> })}
             </Notice>
-            <p className="small">
-              Keep the file and its passphrase apart from the database backup, and the passphrase apart from the file: whoever has both can
-              read every stored secret and sign certificates your devices trust. Forgeyard keeps neither.
-            </p>
-            <p className="small">To restore it, stop the server and run, in the Forgeyard folder:</p>
-            <CopyBox label="Restore command" value={`uv run --no-sync python -m forgeyard secrets restore ${done.file}`} />
-            <p className="small muted">It asks for the passphrase, and never replaces a different key without <code>--force</code>.</p>
+            <p className="small">{t("advisor.backup.keepApart")}</p>
+            <p className="small">{t("advisor.backup.restoreHow")}</p>
+            <CopyBox label={t("advisor.backup.restoreCommand")} value={`uv run --no-sync python -m forgeyard secrets restore ${done.file}`} />
+            <p className="small muted">{t.rich("advisor.backup.restoreAsks", { force: <code>--force</code> })}</p>
             <div className="dlg-foot">
-              <button type="button" className="btn btn-primary" onClick={close}>Done</button>
+              <button type="button" className="btn btn-primary" onClick={close}>{t("common.done")}</button>
             </div>
           </div>
         ) : (
           <form onSubmit={(e) => void submit(e)} noValidate>
-            <p className="small muted dlg-lead">
-              One file with the key that encrypts the stored secrets (Hugging Face tokens, provider keys, replica keys)
-              {i?.includes_ca ? " and this server's certificate authority (its key and certificate)" : ""}, encrypted with a passphrase you
-              choose now. You need the file and the passphrase to restore; Forgeyard keeps neither.
-            </p>
+            <p className="small muted dlg-lead">{t("advisor.backup.lead", { ca: i?.includes_ca ? t("advisor.backup.leadCa") : "" })}</p>
             {info.error && <Notice tone="error">{info.error}</Notice>}
             {i && (
               <dl className="facts keybak-facts">
-                <dt>Key id</dt>
+                <dt>{t("advisor.backup.kid")}</dt>
                 <dd className="mono">{i.kid}</dd>
-                <dt>Certificate authority</dt>
-                <dd>{i.includes_ca ? "included" : i.tls_mode === "own" ? "not included: this server uses your own certificate, back it up yourself" : "not included: this server does not use Forgeyard's own CA"}</dd>
+                <dt>{t("advisor.backup.ca")}</dt>
+                <dd>{i.includes_ca ? t("advisor.backup.caIncluded") : i.tls_mode === "own" ? t("advisor.backup.caOwn") : t("advisor.backup.caNone")}</dd>
                 {i.backed_up && (
                   <>
-                    <dt>Last backup</dt>
-                    <dd>{i.backed_up.at.slice(0, 10)} by {i.backed_up.by}</dd>
+                    <dt>{t("advisor.backup.last")}</dt>
+                    <dd>{t("advisor.backup.lastBy", { date: i.backed_up.at.slice(0, 10), user: i.backed_up.by })}</dd>
                   </>
                 )}
               </dl>
             )}
             {i && !i.has_password ? (
-              <Notice tone="error">Your account has no password to confirm this with. Set one first (an admin can send you a link).</Notice>
+              <Notice tone="error">{t("advisor.backup.noPassword")}</Notice>
             ) : (
               <>
                 <div className="field">
-                  <label htmlFor="keybak-password">Your password</label>
+                  <label htmlFor="keybak-password">{t("advisor.backup.password")}</label>
                   <input id="keybak-password" type="password" autoComplete="current-password" value={password}
                     onChange={(e) => setPassword(e.target.value)} />
                 </div>
                 <div className={`field${touched && problem && !passphrase ? " has-error" : ""}`}>
-                  <label htmlFor="keybak-passphrase">Backup passphrase</label>
+                  <label htmlFor="keybak-passphrase">{t("advisor.backup.passphrase")}</label>
                   <input id="keybak-passphrase" type="password" autoComplete="off" value={passphrase} aria-describedby="keybak-passphrase-hint"
                     onChange={(e) => setPassphrase(e.target.value)} />
                   <p className="field-hint" id="keybak-passphrase-hint">
-                    At least {BACKUP_PASSPHRASE_MIN} characters, not your password. Write it down: a lost passphrase cannot be recovered.
+                    {t("advisor.backup.passphraseHint", { min: BACKUP_PASSPHRASE_MIN })}
                   </p>
                 </div>
                 <div className="field">
-                  <label htmlFor="keybak-confirm">Passphrase again</label>
+                  <label htmlFor="keybak-confirm">{t("advisor.backup.confirm")}</label>
                   <input id="keybak-confirm" type="password" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
                 </div>
                 {(touched || (passphrase && confirm)) && problem && <p className="field-error" role="alert">{problem}</p>}
@@ -170,9 +165,9 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
               </>
             )}
             <div className="dlg-foot">
-              <button type="button" className="btn btn-quiet" onClick={close}>Cancel</button>
+              <button type="button" className="btn btn-quiet" onClick={close}>{t("common.cancel")}</button>
               <button type="submit" className="btn btn-primary" disabled={busy || !i || !i.has_password}>
-                <IconDownload size={16} aria-hidden="true" /> {busy ? "Encrypting…" : "Download the backup"}
+                <IconDownload size={16} aria-hidden="true" /> {busy ? t("advisor.backup.busy") : t("advisor.backup.submit")}
               </button>
             </div>
           </form>
@@ -183,14 +178,15 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
 }
 
 // A button that opens the dialog; onDone runs when a dialog that downloaded the file is closed.
-export function KeyBackupButton({ className = "btn btn-small", label = "Download a backup…", onDone }: {
+export function KeyBackupButton({ className = "btn btn-small", label, onDone }: {
   className?: string; label?: string; onDone?: (d: KeyBackupDone) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <>
       <button type="button" className={className} onClick={() => setOpen(true)}>
-        <IconDownload size={15} aria-hidden="true" /> {label}
+        <IconDownload size={15} aria-hidden="true" /> {label ?? t("advisor.backup.open")}
       </button>
       {open && <KeyBackupDialog onClose={(d) => { setOpen(false); if (d) onDone?.(d); }} />}
     </>

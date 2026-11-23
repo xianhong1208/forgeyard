@@ -2,6 +2,7 @@ import { IconAlertTriangle, IconCheck, IconCopy, IconInfoCircle } from "@tabler/
 import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { Link } from "react-router";
 
+import { useT } from "../i18n/react";
 import { useDocumentTitle } from "../lib/title";
 
 export function PageHeader({ index, title, lead, actions }: { index: string; title: string; lead?: ReactNode; actions?: ReactNode }) {
@@ -43,6 +44,7 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "error" | 
 }
 
 export function CopyBox({ value, label }: { value: string; label: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -58,7 +60,7 @@ export function CopyBox({ value, label }: { value: string; label: string }) {
       <code aria-label={label}>{value}</code>
       <button type="button" className="btn btn-quiet" onClick={copy}>
         {copied ? <IconCheck size={16} aria-hidden="true" /> : <IconCopy size={16} aria-hidden="true" />}
-        {copied ? "Copied" : "Copy"}
+        {copied ? t("common.copied") : t("common.copy")}
       </button>
     </div>
   );
@@ -66,6 +68,7 @@ export function CopyBox({ value, label }: { value: string; label: string }) {
 
 // A command over several lines (a long one-liner broken with backslashes), copied as it is shown.
 export function CopyBlock({ value, label }: { value: string; label: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -81,26 +84,28 @@ export function CopyBlock({ value, label }: { value: string; label: string }) {
       <pre aria-label={label}>{value}</pre>
       <button type="button" className="btn btn-quiet btn-small" onClick={copy}>
         {copied ? <IconCheck size={16} aria-hidden="true" /> : <IconCopy size={16} aria-hidden="true" />}
-        {copied ? "Copied" : "Copy"}
+        {copied ? t("common.copied") : t("common.copy")}
       </button>
     </div>
   );
 }
 
 export function RoleChip({ role }: { role: string }) {
-  return <span className={`chip chip-role-${role}`}>{role}</span>;
+  const t = useT();
+  return <span className={`chip chip-role-${role}`}>{t.maybe(`common.role.${role}`, role)}</span>;
 }
 
 export function StatusChip({ status }: { status: string }) {
-  return <span className={`chip chip-status-${status}`}>{status}</span>;
+  const t = useT();
+  return <span className={`chip chip-status-${status}`}>{t.maybe(`common.status.${status}`, status)}</span>;
 }
 
 // Next to the gateway address: programs must trust this server's own certificate authority.
 export function TrustHint({ url }: { url: string }) {
+  const t = useT();
   return (
     <p className="muted small trust-hint" data-url={url}>
-      This server's HTTPS certificate comes from its own certificate authority: programs need its file,{" "}
-      <code>forgeyard-ca.pem</code>, from <Link to="/trust">Trust this server</Link>. The examples use it.
+      {t.rich("common.trustHint", { file: <code>forgeyard-ca.pem</code>, link: (text) => <Link to="/trust">{text}</Link> })}
     </p>
   );
 }
