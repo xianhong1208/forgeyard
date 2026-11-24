@@ -399,8 +399,10 @@ def exercise(c: Client, d: dict, model: str, spec: dict, size: str, args, check,
 
     refused(f"more than {seconds} s is refused", {"prompt": PROMPT, "seconds": str(seconds + 1)}, "video_too_long")
     refused("a size over the cap is refused", {"prompt": PROMPT, "size": f"{w * 2}x{h * 2}"}, "video_too_large")
-    refused("image-to-video is refused", {"prompt": PROMPT, "input_reference": "data:image/png;base64,iVBORw0KGgo="},
-            "input_reference_not_supported")
+    # 1.5.5: start images are checked input_reference files (accept with --image in a later PR); a reference the engine
+    # would fetch itself stays refused.
+    refused("a URL reference for the engine is refused", {"prompt": PROMPT, "image_reference": '{"image_url": '
+            '"http://169.254.169.254/"}'}, "input_reference_not_supported")
     other = _sdk(c.ok("POST", "/api/keys", {"name": f"{PREFIX}other"}), httpx, openai)
     for label, call in (("its status", lambda: other.videos.retrieve(v.id)),
                         ("its content", lambda: other.videos.download_content(v.id)),

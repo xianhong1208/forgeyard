@@ -147,34 +147,38 @@ def read_json(obj: dict) -> Inputs:
         raise _bad("images is a list of objects with an image_url.", "images")
     inputs = Inputs()
     for item in images[:MAX_INPUTS + 1]:
-        if not isinstance(item, dict):
-            raise _bad("Each entry of images is an object with an image_url.", "images")
-        if item.get("file_id") not in (None, ""):
-            raise _bad("file_id is not taken: Forgeyard keeps no uploaded files. Send the image itself as image_url "
-                       "(a base64 data: URL or an https URL), or as a multipart file.", "images", "file_id_not_supported")
-        url = item.get("image_url")
-        if isinstance(url, dict):
-            url = url.get("url")
-        if not isinstance(url, str) or not url.strip():
-            raise _bad("Each entry of images needs an image_url: a base64 data: URL or an http(s) URL.", "images")
-        url = url.strip()
-        head = url[:16].lower()
-        if head.startswith("data:"):
-            m = _DATA_RE.match(url[:300])
-            if not m:
-                raise _bad("An image_url data: URL is base64 data of an image (data:image/png;base64,…).", "images",
-                           "invalid_image")
-            try:
-                data = base64.b64decode(url[m.end():], validate=True)
-            except (binascii.Error, ValueError):
-                raise _bad("An image_url data: URL does not hold valid base64.", "images", "invalid_image") from None
-            inputs.items.append(Input(data=data))
-        elif head.startswith(("https://", "http://")):
-            inputs.items.append(Input(url=url))
-        else:
-            raise _bad("image_url is a base64 data: URL or an http(s) URL; other kinds are refused.", "images",
-                       "media_url_refused")
+        inputs.items.append(read_item(item, "images"))
     return inputs
+
+
+def read_item(item, param: str) -> Input:
+    """One image of a JSON request: {"image_url": a base64 data: URL or an http(s) URL} (also {"image_url": {"url":
+    …}}); a `file_id` is refused. Errors name `param` (`images` for an edit, `input_reference` for a video, 1.5.5)."""
+    if not isinstance(item, dict):
+        raise _bad(f"Each entry of {param} is an object with an image_url.", param)
+    if item.get("file_id") not in (None, ""):
+        raise _bad("file_id is not taken: Forgeyard keeps no uploaded files. Send the image itself as image_url "
+                   "(a base64 data: URL or an https URL), or as a multipart file.", param, "file_id_not_supported")
+    url = item.get("image_url")
+    if isinstance(url, dict):
+        url = url.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise _bad(f"Each entry of {param} needs an image_url: a base64 data: URL or an http(s) URL.", param)
+    url = url.strip()
+    head = url[:16].lower()
+    if head.startswith("data:"):
+        m = _DATA_RE.match(url[:300])
+        if not m:
+            raise _bad("An image_url data: URL is base64 data of an image (data:image/png;base64,…).", param,
+                       "invalid_image")
+        try:
+            data = base64.b64decode(url[m.end():], validate=True)
+        except (binascii.Error, ValueError):
+            raise _bad("An image_url data: URL does not hold valid base64.", param, "invalid_image") from None
+        return Input(data=data)
+    if head.startswith(("https://", "http://")):
+        return Input(url=url)
+    raise _bad("image_url is a base64 data: URL or an http(s) URL; other kinds are refused.", param, "media_url_refused")
 
 
 def count(inputs: Inputs) -> None:
@@ -185,7 +189,7 @@ def count(inputs: Inputs) -> None:
         raise _bad(f"An edit takes at most {MAX_INPUTS} input images.", "image", "too_many_input_images")
 
 
-async def fetch_all(inputs: Inputs) -> None:
+async def fetch_all(inputs: Inputs, param: str = "images") -> None:
     """Fetch the http(s) inputs of a JSON request through the media rules (forgeyard/gateway/media.py)."""
     todo = [i for i in inputs.items if i.url is not None]
     if not todo:
@@ -194,30 +198,31 @@ async def fetch_all(inputs: Inputs) -> None:
     for item, r in zip(todo, results):
         if isinstance(r, BaseException):
             if isinstance(r, GatewayError):
-                r.param = "images"
+                r.param = param
             raise r
         item.data, item.url = r[1], None
 
 
-def check(inputs: Inputs) -> None:
-    """Each input's bytes, type (by its first bytes) and size (from its header, never decoded)."""
+def check(inputs: Inputs, param: str = "image") -> None:
+    """Each input's bytes, type (by its first bytes) and size (from its header, never decoded). Errors name `param`
+    (`image` for an edit, `input_reference` for a video's start image)."""
     cap = get_settings().media_fetch_max_mb * 1024**2
     for n, item in enumerate(inputs.items, 1):
         if len(item.data) > cap:
             raise GatewayError(413, "media_too_large", f"Input image {n} is larger than {cap // 1024**2} MiB "
-                                                       "(MEDIA_FETCH_MAX_MB).", param="image")
+                                                       "(MEDIA_FETCH_MAX_MB).", param=param)
         dims = imagegen.image_dims(item.data)
         if dims is None:
             if _known(item.data):
-                raise _bad(f"Input image {n} could not be read: its header does not say its size.", "image",
+                raise _bad(f"Input image {n} could not be read: its header does not say its size.", param,
                            "invalid_image")
             what = "a HEIC (iPhone) photo" if item.data[4:12] in (b"ftypheic", b"ftypheix", b"ftypmif1", b"ftyphevc") \
                 else "not a PNG, JPEG or WebP image"
-            raise _bad(f"Input image {n} is {what}. Send PNG, JPEG or WebP (convert HEIC photos first).", "image",
+            raise _bad(f"Input image {n} is {what}. Send PNG, JPEG or WebP (convert HEIC photos first).", param,
                        "unsupported_image_format")
         item.width, item.height, item.fmt = dims
         if item.width < 1 or item.height < 1:
-            raise _bad(f"Input image {n} says it has no pixels.", "image", "invalid_image")
+            raise _bad(f"Input image {n} says it has no pixels.", param, "invalid_image")
 
 
 def _known(data: bytes) -> bool:

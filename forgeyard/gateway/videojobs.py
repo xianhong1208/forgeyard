@@ -30,7 +30,8 @@ disk) until asked to delete them. So a job belongs to one replica for its whole 
 - **Usage**: one request per job, recorded when it ends: a finished video counts its length in
   `media_ms` and the replica's time on it (from when it was seen in progress, times its GPUs) in
   `busy_ms`; a failed one counts as an error and nothing else; one deleted while at work as 499 (not an
-  error). A refused request (400, 404, 429) is counted when it is refused, as everywhere else. Polls,
+  error). A start image (1.5.5) is counted when the job is accepted, as the engine has it then: one in
+  `media_items` and its bytes in `bytes_in`, added to the same row without counting another request. A refused request (400, 404, 429) is counted when it is refused, as everywhere else. Polls,
   lists and downloads are not requests. No cloud.
 """
 
@@ -54,7 +55,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, VideoJob, as_utc, new_session, utcnow
-from forgeyard.gateway import imagegen, proxy, videogen, waking
+from forgeyard.gateway import imageedit, imagegen, proxy, videogen, waking
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -279,7 +280,7 @@ def _insert(caller: KeyCaller, model: str, g: proxy.LocalGroup, t: Target, ask: 
 
 async def _send(g: proxy.LocalGroup, t: Target, ask: videogen.Ask):
     """Ask one replica for the video: its job id, or a failure to try the next replica with."""
-    body, ctype = videogen.form(videogen.upstream_fields(ask, g.films, g.upstream_model))
+    body, ctype = videogen.form(videogen.upstream_fields(ask, g.films, g.upstream_model), ask.image)
     http = proxy.client()
     try:
         r = await http.post(f"{t.url}/v1/videos", content=body, timeout=_timeout(SUBMIT_TIMEOUT),
@@ -331,6 +332,11 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
         deployment_id = route.deployment_id
         idle.used(route_deployments(route))   # 1.5.0: a video asked for is use (its job then holds it awake)
         ask = videogen.check(obj)
+        if ask.image is not None:
+            # 1.5.5 (#143): a start image's URL fetched by the gateway (only now that the key may use the model), its
+            # bytes, type and header size checked as an edit's input images are.
+            await imageedit.fetch_all(ask.inputs, videogen.START)
+            imageedit.check(ask.inputs, videogen.START)
         groups = [g for tier in route.tiers for g in tier.locals if g.films is not None]
         if not groups:
             raise GatewayError(503, "no_target", f"{model!r} has no video deployment that can take this request.")
@@ -395,6 +401,10 @@ async def _place(caller: KeyCaller, route: proxy.Route, groups: list[proxy.Local
             got = await _send(g, t, ask)
             if isinstance(got, str):
                 job = await run_in_threadpool(_insert, caller, route.served_name, g, t, ask, got)
+                if ask.image is not None:
+                    recorder.record(source=job.source, key_id=job.key_id, user_id=job.user_id, username=job.username,
+                                    model=job.model, deployment_id=job.deployment_id, status=200, latency_ms=0,
+                                    units={"media_items": 1, "bytes_in": len(ask.image.data)}, request=False)
                 return job, f"local:{g.name}#{t.ordinal}"
             last = got
         if isinstance(last, Answer):

@@ -8,10 +8,16 @@ before anything is sent, what the engine is asked, and what a job looks like to 
 - **Checks** (400 before anything is sent): `prompt` is a non-empty string; `seconds` a whole number of
   seconds (OpenAI sends it as a string: "4" and 4 are the same); `size` is `WIDTHxHEIGHT`; the
   extensions `num_inference_steps`, `guidance_scale`, `seed` and `negative_prompt` of the right types.
-  **`input_reference` is refused** (`input_reference_not_supported`), and so are vLLM-Omni's
-  `image_reference`, `video_reference` and `audio_reference`: image-to-video is not offered in 1.3 (the
-  recommended text-to-video model takes no image, and the engine would read uploads and fetch URLs).
   OpenAI's `quality` and `user` are accepted and change nothing.
+- **A start image** (1.5.5, #143: image to video) is OpenAI's `input_reference`: a file in a multipart request, or
+  in JSON `{"image_url": …}`, a base64 data: URL or an http(s) URL that **the gateway fetches** under the media rules
+  (forgeyard/gateway/media.py), only once the key may use the model; a `file_id` is refused. It gets the checks of an
+  edit's input images (forgeyard/gateway/imageedit.py): at most MEDIA_FETCH_MAX_MB, a PNG, JPEG or WebP by its first
+  bytes, its size read from its header (never decoded) and within the deployment's `max_input_side`. A model that
+  needs one (`meta.video.image_input` required) refuses a request without it (`input_reference_required`); one that
+  takes none refuses a request with it (`input_reference_not_supported`). vLLM-Omni's `image_reference`,
+  `video_reference`, `audio_reference` and `input_references` stay refused: the engine would fetch those URLs itself
+  (following redirects) or read videos and sound.
 - **Per deployment** (each with a working default, from its parameters): the longest video
   (`max_seconds`), the largest side (`max_side`, 0: the model's own) and no more pixels than the
   default size scaled to it, sizes a multiple of what the model takes (16 for Wan2.1, 32 for Wan2.2-5B),
@@ -21,8 +27,9 @@ before anything is sent, what the engine is asked, and what a job looks like to 
 - **Frames**: seconds x the deployment's frames per second, rounded to the frame counts the model makes
   (Wan: 4k + 1, so 5 s at 16 fps is 81 frames, 5.06 s).
 - **Only known fields reach the engine**: prompt, model, size, num_frames, fps, and the extensions
-  above. Anything else a client sends (vLLM-Omni's `lora`, `extra_params`, frame interpolation with a
-  model path, references) is left out.
+  above, and the checked start image as the file `input_reference` (never a URL). Anything else a client sends
+  (vLLM-Omni's `lora`, `extra_params`, frame interpolation with a model path, other references, other files) is left
+  out. The size is always sent: the engine would otherwise make the start image's size.
 - **The job object** keeps OpenAI's shape: `id` (Forgeyard's own, `video_` and 32 random hex digits, never
   the engine's), `object: "video"`, `model`, `status` (queued, in_progress, completed, failed),
   `progress` (vLLM-Omni reports 0 until it is done, then 100), `created_at`, `completed_at`,
@@ -39,7 +46,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
-from forgeyard.gateway import multipart
+from forgeyard.gateway import imageedit, multipart
 from forgeyard.gateway.errors import GatewayError
 
 ENDPOINT = "videos"
@@ -51,7 +58,9 @@ MAX_SECONDS = 60
 DEFAULT_MAX_PROMPT = 2000
 ID_RE = re.compile(r"^video_[0-9a-f]{32}$")
 _SIZE_RE = re.compile(r"^\s*(\d{1,5})\s*[xX×]\s*(\d{1,5})\s*$")
-REFERENCES = ("input_reference", "image_reference", "video_reference", "audio_reference", "input_references")
+START = "input_reference"   # OpenAI's start image (1.5.5)
+REFERENCES = ("image_reference", "video_reference", "audio_reference", "input_references")   # never taken
+DEFAULT_INPUT_SIDE = 2048
 VARIANTS = ("video", "thumbnail", "spritesheet")
 
 
@@ -83,6 +92,8 @@ class Films:
     keep: int = 86400                # seconds a finished video can be fetched
     timeout: int = 3600              # seconds a job may take from when it was asked
     gpus: int = 1
+    image_input: str = "none"        # 1.5.5: none | optional | required (forgeyard/models/videoinput.py)
+    max_input_side: int = DEFAULT_INPUT_SIDE   # the widest or tallest start image it takes
 
 
 def _int(v, default: int, low: int = 0) -> int:
@@ -90,6 +101,7 @@ def _int(v, default: int, low: int = 0) -> int:
 
 
 def films(recipe, params: dict, meta: Optional[dict] = None) -> Films:
+    from forgeyard.models import videoinput
     from forgeyard.models.estimate import video_shape
 
     vs = video_shape(meta or {}, params, recipe.videogen.frames_step)
@@ -99,7 +111,8 @@ def films(recipe, params: dict, meta: Optional[dict] = None) -> Films:
                  max_prompt=_int(params.get("max_prompt_chars"), DEFAULT_MAX_PROMPT, 1),
                  queue=_int(params.get("queue"), 8, 1), per_key=_int(params.get("jobs_per_key"), 2, 1),
                  keep=_int(params.get("keep_minutes"), 1440, 1) * 60, timeout=_int(params.get("timeout"), 3600, 1),
-                 gpus=max(1, _int(params.get("gpus"), 1)))
+                 gpus=max(1, _int(params.get("gpus"), 1)), image_input=videoinput.of(meta),
+                 max_input_side=_int(params.get("max_input_side"), DEFAULT_INPUT_SIDE, 1))
 
 
 def frames_of(seconds: int, f: Films) -> int:
@@ -120,6 +133,11 @@ class Ask:
     guidance: Optional[float] = None
     seed: Optional[int] = None
     negative: Optional[str] = None
+    image: Optional[imageedit.Input] = None   # the start image (1.5.5): its bytes, or a URL still to fetch
+
+    @property
+    def inputs(self) -> imageedit.Inputs:
+        return imageedit.Inputs([self.image] if self.image is not None else [])
 
 
 def _bad(message: str, param: str, code: str = "invalid_request") -> GatewayError:
@@ -128,7 +146,8 @@ def _bad(message: str, param: str, code: str = "invalid_request") -> GatewayErro
 
 def read_body(body: bytes, content_type: str) -> dict:
     """The request's fields from JSON, multipart/form-data (OpenAI's SDK sends multipart) or a URL-encoded form
-    (curl -d): a dict of name -> value, where a file part's value is the marker {"file": name}."""
+    (curl -d): a dict of name -> value, where a file part's value is the marker {"file": name} (1.5.5: with its
+    bytes as "data" for the start image, `input_reference`; more than one of those is refused)."""
     ctype = (content_type or "").lower()
     if "multipart/form-data" in ctype:
         try:
@@ -137,7 +156,12 @@ def read_body(body: bytes, content_type: str) -> dict:
             raise GatewayError(400, "invalid_request", f"The multipart body could not be read: {e}.") from None
         out: dict = {}
         for p in parts:
-            if p.is_file:
+            if p.is_file and p.name == START:
+                if START in out:
+                    raise _bad("A video takes one start image: send one input_reference file.", START,
+                               "too_many_input_images")
+                out[START] = {"file": START, "data": p.content}
+            elif p.is_file:
                 out[p.name] = {"file": p.name}
             elif p.name not in out:
                 out[p.name] = p.content.decode("utf-8", "replace").strip()
@@ -189,14 +213,28 @@ def _number(obj: dict, name: str, low: float, high: float) -> Optional[float]:
     return float(v)
 
 
+def _start(value) -> Optional[imageedit.Input]:
+    """The start image of a request (1.5.5): a multipart file, or OpenAI's JSON {"image_url": …} (a data: URL or an
+    http(s) URL, fetched later, once the key may use the model)."""
+    if value in (None, "", {}):
+        return None
+    if isinstance(value, dict) and "data" in value and value.get("file") == START:
+        return imageedit.Input(data=value["data"])
+    if isinstance(value, dict):
+        return imageedit.read_item(value, START)
+    raise _bad("input_reference is the start image: a file in a multipart/form-data request, or in JSON an object "
+               "{\"image_url\": \"data:image/png;base64,…\" or an https URL}.", START)
+
+
 def check(obj: dict) -> Ask:
     """Validate a video request's fields (400 for what no deployment should get). Mutates nothing."""
     for name in REFERENCES:
         if obj.get(name) not in (None, "", [], {}):
             raise GatewayError(400, "input_reference_not_supported",
-                               "Forgeyard makes videos from text only (in 1.3): image-to-video and video-to-video "
-                               f"references are not taken. Leave {name} out and describe the video in the prompt.",
-                               param=name)
+                               f"{name} is not taken: the engine would fetch or read it itself. Send a start image as "
+                               "input_reference (a file, or {\"image_url\": …}); video and sound references are not "
+                               "taken.", param=name)
+    image = _start(obj.get(START))
     prompt = obj.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise _bad("The request needs a 'prompt': the text that describes the video.", "prompt")
@@ -216,13 +254,19 @@ def check(obj: dict) -> Ask:
     steps = _whole(obj, "num_inference_steps", 1)
     seed = _whole(obj, "seed", -(2**63), 2**63 - 1)
     return Ask(prompt=prompt, seconds=seconds, size=wh, steps=steps, guidance=_number(obj, "guidance_scale", 0, 20),
-               seed=seed, negative=neg if neg else None)
+               seed=seed, negative=neg if neg else None, image=image)
 
 
 def takes(f: Optional[Films], ask: Ask) -> Optional[str]:
     """Why this deployment cannot take the request (an error code), or None."""
     if f is None:
         return None
+    if ask.image is None and f.image_input == "required":
+        return "input_reference_required"
+    if ask.image is not None and f.image_input == "none":
+        return "input_reference_not_supported"
+    if ask.image is not None and max(ask.image.width, ask.image.height) > f.max_input_side:
+        return "input_image_too_large"
     if len(ask.prompt) > f.max_prompt or len(ask.negative or "") > f.max_prompt:
         return "prompt_too_long"
     if ask.seconds is not None and ask.seconds > f.max_seconds:
@@ -237,11 +281,24 @@ def takes(f: Optional[Films], ask: Ask) -> Optional[str]:
     return None
 
 
-ORDER = ("prompt_too_long", "video_too_long", "video_too_large", "invalid_size", "too_many_steps")
+# A deployment that takes the start image says more about what to change than one that takes none, so the image's
+# codes come last.
+ORDER = ("prompt_too_long", "video_too_long", "video_too_large", "invalid_size", "too_many_steps",
+         "input_image_too_large", "input_reference_required", "input_reference_not_supported")
 
 
 def refusal(name: str, code: str, ask: Ask, all_f: list[Films]) -> GatewayError:
     """The error for a request no deployment of the route can take, saying what would work."""
+    if code == "input_reference_not_supported":
+        return _bad(f"{name!r} makes videos from text only: leave input_reference out, or use a model that takes a "
+                    "start image (Wan2.2-TI2V-5B).", START, code)
+    if code == "input_reference_required":
+        return _bad(f"{name!r} makes videos from a start image: send it as input_reference (a file, or "
+                    "{\"image_url\": \"data:image/png;base64,…\" or an https URL}).", START, code)
+    if code == "input_image_too_large":
+        most = max(f.max_input_side for f in all_f if f.image_input != "none")
+        return _bad(f"{name!r} takes start images up to {most} pixels on a side; this one is "
+                    f"{ask.image.width}x{ask.image.height}. Scale it down first.", START, code)
     if code == "prompt_too_long":
         most = max(f.max_prompt for f in all_f)
         return _bad(f"The prompt is {max(len(ask.prompt), len(ask.negative or ''))} characters; {name!r} takes at most "
@@ -284,13 +341,18 @@ def upstream_fields(ask: Ask, f: Films, upstream: str) -> dict:
     return out
 
 
-def form(fields: dict) -> tuple[bytes, str]:
-    """multipart/form-data of plain text fields: (body, content type)."""
+def form(fields: dict, image: Optional[imageedit.Input] = None) -> tuple[bytes, str]:
+    """multipart/form-data of plain text fields and, for image to video (1.5.5), the checked start image as the file
+    `input_reference`: (body, content type)."""
     boundary = "forgeyard-" + uuid.uuid4().hex
     out = []
     for name, value in fields.items():
         out.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n".encode() +
                    str(value).encode("utf-8") + b"\r\n")
+    if image is not None:
+        ext = "jpg" if image.fmt == "jpeg" else image.fmt
+        out.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{START}\"; filename=\"start.{ext}\"\r\n"
+                   f"Content-Type: {imageedit.INPUT_TYPES[image.fmt]}\r\n\r\n".encode() + image.data + b"\r\n")
     out.append(f"--{boundary}--\r\n".encode())
     return b"".join(out), f"multipart/form-data; boundary={boundary}"
 

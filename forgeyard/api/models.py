@@ -31,7 +31,7 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, EngineTrial, Node, get_db, new_session, utcnow
 from forgeyard.models import (catalog, editing, encoders, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
-                              recommended as rec, scheduler, sources, textcls, vision)
+                              recommended as rec, scheduler, sources, textcls, videoinput, vision)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
@@ -155,12 +155,14 @@ def image_out(meta: dict) -> Optional[dict]:
 
 
 def video_out(meta: dict) -> Optional[dict]:
-    """A video model's own size, frame rate and the multiple its sizes take (1.3), and its pipeline's parts."""
+    """A video model's own size, frame rate and the multiple its sizes take (1.3), its pipeline's parts, and whether
+    a request may or must carry a start image (1.5.5: none, optional, required)."""
     v = meta.get("video") if isinstance(meta.get("video"), dict) else None
     if v is None:
         return None
     d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
     return {"size": v.get("size"), "multiple": v.get("multiple"), "fps": v.get("fps"), "pipeline": d.get("pipeline"),
+            "image_input": videoinput.of(meta),
             "parts": {k: {"class": c.get("class"), "params": c.get("params")} for k, c in (d.get("components") or {}).items()}}
 
 
