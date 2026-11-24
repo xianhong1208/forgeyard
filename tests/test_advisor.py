@@ -700,7 +700,7 @@ def test_fy_adv_025_a_failing_check_does_not_take_the_panel_down(owner, monkeypa
 
 
 def test_fy_adv_026_findings_link_where_the_console_shows_a_route_or_provider(owner):
-    """FY-ADV-026 (1.4, #81): a deployment's own route is its cloud fallback, on the deployment's page;
+    """FY-ADV-026 (1.4, #81): a deployment's own route is its routing and fallback, on its page;
     a name an admin made is on Cloud -> Cloud models; a provider is under /cloud/providers. The banners
     follow: the deployment's page and Models, or the Cloud models tab."""
     pid, pm, did, rid = _cloud_world()
@@ -709,7 +709,7 @@ def test_fy_adv_026_findings_link_where_the_console_shows_a_route_or_provider(ow
     edit(Provider, pid, budget_micros=0)
     f = findings()
     own = f["route-cloud-never-used"][0]
-    assert own.fix_url == f"/serving/{did}#cloud-fallback" and own.fix_label == "Open its cloud fallback"
+    assert own.fix_url == f"/serving/{did}#routing" and own.fix_label == "Open its routing"
     assert own.pages == ("serving", f"deployment:{did}", f"route:{rid}")
     dead = f["route-no-target"][0]
     assert dead.fix_url == f"/cloud/models/{named}" and dead.pages == ("cloud-models", f"route:{named}")

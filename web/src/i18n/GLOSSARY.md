@@ -47,7 +47,7 @@ reader plainly with 你, never 您.
 | local (not cloud) | 本機 | |
 | route / tier | 路由 / 層 | |
 | cloud provider | 雲端供應商 | |
-| cloud fallback / spill | 雲端備援 / 溢出 | |
+| routing and fallback / spill | 分流與備援 / 溢出 | A deployment's own route (its section on the deployment's page): later tiers hold other local deployments or cloud models. Before 1.5.4 it was "cloud fallback / 雲端備援"; say 雲端 only when a cloud provider is meant. |
 | budget | 預算 | |
 | API key | API 金鑰 | |
 | usage | 用量 | |

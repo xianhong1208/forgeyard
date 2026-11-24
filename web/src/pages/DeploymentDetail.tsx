@@ -12,7 +12,7 @@ import { deploymentRuns } from "../lib/engines";
 import { MODEL_KIND, modelKind } from "../lib/fleet";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
-import { FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
+import { FALLBACK_ANCHOR, OLD_FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
 import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
 import { engineHref, modelHref } from "../lib/pages";
@@ -246,7 +246,7 @@ function Gateway({ d }: { d: Deployment }) {
                   <span key={i}>{i === 0 ? t("deployment.gw.then") : t("deployment.gw.thenNext")}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
                 ))}</span>
               ) : <span className="muted small">{t("deployment.gw.none")}</span>}{" "}
-              <a className="small" href={`#${FALLBACK_ANCHOR}`}>{d.routing.kind === "local" ? t("deployment.gw.addOne") : t("deployment.change")}</a>
+              <a className="small" href={`#${FALLBACK_ANCHOR}`}>{tiers(d.routing).length > 1 ? t("deployment.change") : t("deployment.gw.addOne")}</a>
             </dd>
           </>
         )}
@@ -292,18 +292,18 @@ function Gateway({ d }: { d: Deployment }) {
   );
 }
 
-// The deployment's own route, as its cloud fallback (1.4, #81: it was on the Serving tab of Models). Admins
+// The deployment's own route, as its routing and fallback (1.4, #81: it was on the Serving tab of Models). Admins
 // change it here; everyone else sees it.
 function Fallback({ routing, reload }: { routing: RouteInfo; reload: () => void }) {
   const { user } = useAuth();
   const admin = user?.role === "admin";
   const opts = useApi<RouteOptions>(admin ? "/route-options" : null);
   const { hash } = useLocation();
-  // A link to #cloud-fallback (the Deployments list's mark, the advisor) opens the page at it, once
-  // the section is there.
+  // A link to #routing (the Deployments list's mark, the advisor; #cloud-fallback before 1.5.4) opens the
+  // page at it, once the section is there.
   const scrolled = useRef(false);
   useEffect(() => {
-    if (hash !== `#${FALLBACK_ANCHOR}` || scrolled.current) return;
+    if ((hash !== `#${FALLBACK_ANCHOR}` && hash !== `#${OLD_FALLBACK_ANCHOR}`) || scrolled.current) return;
     scrolled.current = true;
     document.getElementById(FALLBACK_ANCHOR)?.scrollIntoView?.({ block: "start" });
   }, [hash]);

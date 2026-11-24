@@ -108,8 +108,9 @@ multimodal chat, embeddings, rerank, text classification, speech to text, text t
 vision), each
 with the path it answers at under `/v1`, and one line per deployment: where it runs (machine and
 cards), its memory and its state. **Deploy a model** is there too, and each deployment has its page
-at `/serving/<id>`. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its
-provider, such as *→ Gemini*; the fallback itself is on the deployment's page.
+at `/serving/<id>`. A deployment with a cloud model in a later tier of its
+[routing and fallback](#routing-tiers-and-cloud-providers) shows its provider, such as *→ Gemini*;
+the tiers themselves are on the deployment's page.
 
 **Models** is the library, what you can deploy, in three tabs: **Catalog** (the default), **Engines**
 and, for admins, **Sources**. Cloud models and providers are on the **Cloud** page (admins). Links
@@ -506,15 +507,18 @@ of texts a second on a GPU with stable labels and scores, at a fraction of a cha
   added up as *Other*. Hover a point or use the arrow keys to read a period's values; **Show the
   numbers** lists them as a table. Days are UTC, and the latest period is still going on (dashed).
 
-## Cloud providers and tiers
+## Routing, tiers and cloud providers
 
 - A **provider** is a model API outside Forgeyard (OpenAI, Anthropic, Gemini, Azure OpenAI,
   OpenRouter, or an OpenAI-compatible server of yours). Admins add it with its key, which is stored
   encrypted and never shown again.
 - Each model name at `/v1` is a **route** (in the API). A route has **targets** in **tiers**: local
   deployments and providers' models. A deployment's own route starts with one tier, the deployment.
-  An admin can add a cloud model as a later tier: the deployment's **cloud fallback**, on its page.
-  An admin can also make a **cloud model**, a name of its own for a provider's model, on
+  An admin changes it in the deployment's **Routing and fallback**, on its page: targets in **one
+  tier share** the requests (local deployments by load, cloud models by weight), and a **later tier**
+  is used only when the earlier ones cannot serve. A later tier may hold another local deployment
+  ([Share requests between two local deployments](how-to.md#share-requests-between-two-local-deployments))
+  or a cloud model. An admin can also make a **cloud model**, a name of its own for a provider's model, on
   **Cloud → Cloud models**.
 - **Local first.** A request goes to the next tier only before its answer starts, and only when the
   local tier is unavailable, **busy** (every replica at its deployment's *Concurrent requests*), or

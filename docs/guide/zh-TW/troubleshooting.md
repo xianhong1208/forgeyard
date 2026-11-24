@@ -419,11 +419,11 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **原因：** 部署應該在執行，但還沒有就緒的副本：模型還在下載、推論引擎還在啟動、某個副本失敗後正在重新啟動，或它所在的機器離線。訊息會列出每個副本的狀態，例如 `replica 0 on gpu-01: downloading`。如果你還是呼叫已停止的部署，也會得到同樣的回應（`The deployment is stopped.`）。
 
-**做法：** 打開部署的頁面。下載或啟動中就等待（頁面會顯示進度）。如果副本一直失敗，頁面上的輸出會說明原因；機器離線請見[agent 顯示離線](#an-agent-shows-offline)。如果想讓這段期間的請求改送雲端供應商，請在部署的頁面替它設定雲端備援（[雲端供應商](cloud-providers.md#give-a-deployment-a-cloud-fallback)）。
+**做法：** 打開部署的頁面。下載或啟動中就等待（頁面會顯示進度）。如果副本一直失敗，頁面上的輸出會說明原因；機器離線請見[agent 顯示離線](#an-agent-shows-offline)。如果想讓這段期間的請求改送雲端供應商，請把雲端模型放進部署 **分流與備援** 後面的層（[雲端供應商](cloud-providers.md#let-a-deployment-spill-to-a-cloud-model)）；放另一個本機部署也可以（[讓兩個本機部署分攤請求](how-to.md#share-requests-between-two-local-deployments)）。
 
 ## 請求沒有溢出到雲端
 
-**你會看到：** 部署有雲端備援，但本機副本忙碌或停擺時，請求仍然失敗（503、429）或在等待。回應沒有 `X-Forgeyard-Spilled`。
+**你會看到：** 部署的分流與備援後面的層有雲端模型，但本機副本忙碌或停擺時，請求仍然失敗（503、429）或在等待。回應沒有 `X-Forgeyard-Spilled`。
 
 **原因**，依序檢查：
 

@@ -793,11 +793,12 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   (`route.created`, `route.changed`, `route.deleted` in the audit log). Migration 0009 turned every
   existing route into one tier-0 target with the same upstream model name, so they behave exactly as
   before.
-- **Where the console shows them** (1.4, #81). A deployment's own route is its **cloud fallback**, edited
-  on the deployment's page, and the Serving list marks one with a cloud tier (*→ Gemini*). A route an
+- **Where the console shows them** (1.4, #81). A deployment's own route is its **routing and fallback**
+  ("cloud fallback" until 1.5.4: a later tier may hold another local deployment too), edited on the
+  deployment's page, and the Serving list marks one with a cloud tier (*→ Gemini*). A route an
   admin made is on **Cloud → Cloud models**: a *cloud model* when a provider's model is in it, else
   under *Other names for deployments*; each deployment's page links the names it also answers as. The
-  console says "cloud fallback" and "cloud model"; "route" stays the API's word (`/api/routes`). The
+  console says "routing and fallback" and "cloud model"; "route" stays the API's word (`/api/routes`). The
   old addresses (`?tab=routes`, `/models/routes/<id>`, `/providers…`) redirect.
 - **Spill rules, only before the first byte.** The next tier is used when this one is *unavailable*
   (no ready replica, every connection failed), *busy* (every ready replica has as many requests in

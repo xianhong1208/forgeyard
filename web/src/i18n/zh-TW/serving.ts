@@ -4,7 +4,7 @@ export default {
   "serving.index": "02 · 服務中",
   "serving.title": "服務中",
   "serving.lead":
-    "現在正在執行的模型，依用途分組；部署的頁面上也有它的雲端備援。每個就緒的部署都可以用 API 金鑰在 /v1 呼叫，也可以在試用區使用。可以部署的模型在「模型」頁。",
+    "現在正在執行的模型，依用途分組；部署的頁面上也有它的分流與備援。每個就緒的部署都可以用 API 金鑰在 /v1 呼叫，也可以在試用區使用。可以部署的模型在「模型」頁。",
   "serving.deploy": "部署模型",
   "serving.help.first": "怎麼部署第一個模型？",
   "serving.help.gateway": "部署與閘道",

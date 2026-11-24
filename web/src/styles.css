@@ -1669,13 +1669,18 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .deprow-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .deprow-name a { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .deprow-name a:hover { text-decoration: underline; }
-/* 1.4 (#81): "→ Gemini": the deployment has a cloud fallback (on its page). */
+/* 1.4 (#81): "→ Gemini": the deployment can move on to a cloud model (its routing and fallback, on its page). */
 .deprow-name { flex-wrap: wrap; row-gap: 2px; }
 .deprow-name a.fallback-mark { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px;
   font-family: var(--font); font-size: 11.5px; font-weight: 500; color: var(--heat-ink); background: var(--heat-soft); border-color: #f3d39b; white-space: nowrap; }
 .deprow-name a.fallback-mark:hover { color: var(--ink); text-decoration: none; border-color: var(--line-strong); }
-#cloud-fallback { scroll-margin-top: 72px; }
+#routing { scroll-margin-top: 72px; }
 .fallback-form { margin-top: 6px; }
+/* 1.5.4: the routing editor's summary follows the tiers on screen, and says when they are not saved. */
+.route-summary-line { margin: 6px 0 0; }
+/* No space in the text: a Chinese sentence takes none after its full stop, so the gap is a margin. */
+.route-unsaved { margin-left: 0.4em; color: var(--ink); font-weight: 600; }
+.panel .help-links { margin: 8px 0 14px; }
 .fallback-rules { margin: 18px 0 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .fallback-rules h3, .fallback-form .panel-head h3 { margin: 0; font-size: 15px; }
 .also-in { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }

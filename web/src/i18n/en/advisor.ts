@@ -43,7 +43,7 @@ export default {
   "advisor.fix.Open Models": "Open Models",
   "advisor.fix.Open Serving": "Open Serving",
   "advisor.fix.Open Users": "Open Users",
-  "advisor.fix.Open its cloud fallback": "Open its cloud fallback",
+  "advisor.fix.Open its routing": "Open its routing",
   "advisor.fix.Open the deployment": "Open the deployment",
   "advisor.fix.Open the machine": "Open the machine",
   "advisor.fix.Open the model name": "Open the model name",

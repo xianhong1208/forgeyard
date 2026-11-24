@@ -11,9 +11,9 @@ local models come first. [繁體中文版](zh-TW/cloud-providers.md)
   stored encrypted and is never shown again. Admins add providers on **Cloud → Providers**.
 - A provider's **models** are the names you may send it, such as `gpt-4o-mini` or, for Azure, your
   deployment's name.
-- A deployment answers at `/v1` under its model name. An admin can give it a **cloud fallback**: a
-  later tier with a provider's model, used when the local replicas are busy or down. It is on the
-  deployment's page.
+- A deployment answers at `/v1` under its model name. On its page, **Routing and fallback** holds
+  later tiers that an admin adds: a provider's model, used when the local replicas are busy or down,
+  or another local deployment.
 - An admin can also make a **cloud model**: a provider's model under a name of its own, on
   **Cloud → Cloud models**.
 - Both are **routes** in the API (`/api/routes`): a model name with **targets** in **tiers**. Every
@@ -34,8 +34,8 @@ On **Cloud → Providers**, choose **Add a provider**, pick the kind and paste t
    provider listed, or why it refused.
 2. Open the provider and add its models: by name, or with **Import from /models** (not for Azure,
    whose list does not show your deployments).
-3. Use a model: as a deployment's [cloud fallback](#give-a-deployment-a-cloud-fallback), or as a
-   [cloud model of its own](#serve-a-cloud-model-under-a-name-of-its-own).
+3. Use a model: in a later tier of a deployment's [routing and fallback](#let-a-deployment-spill-to-a-cloud-model),
+   or as a [cloud model of its own](#serve-a-cloud-model-under-a-name-of-its-own).
 
 **Outside your network** is ticked for every kind except *OpenAI-compatible server*, which is ticked
 when its base URL is a public address (or a name that resolves to one) and left unticked for a
@@ -85,17 +85,19 @@ need no cloud permission to use it. A public address ticks it (Together, Groq an
 parties); untick it only if the server really is yours. Over a VPN with a private address, you may tick **Allow plain HTTP**.
 Forgeyard drops nothing from requests to it.
 
-## Give a deployment a cloud fallback
+## Let a deployment spill to a cloud model
 
-To let a deployment spill to the cloud when it is busy or down:
+To let a deployment spill to a cloud model when it is busy or down:
 
-1. Open the deployment from **Serving**. Its page has a **Cloud fallback** section.
-2. **Add a cloud tier**, and add the provider's model to it.
-3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save cloud
-   fallback**.
+1. Open the deployment from **Serving**. Its page has a **Routing and fallback** section (called
+   *Cloud fallback* before 1.5.4).
+2. Choose **Add a tier**, and add the provider's model to it.
+3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save routing**.
 
-In the **Serving** list, a deployment with a cloud fallback shows a small mark with its provider,
-such as *→ Gemini*.
+The same section takes other local deployments too, in the same tier or a later one: see
+[Share requests between two local deployments](how-to.md#share-requests-between-two-local-deployments).
+In the **Serving** list, a deployment with a cloud model in a later tier shows a small mark with its
+provider, such as *→ Gemini*.
 
 ## Serve a cloud model under a name of its own
 

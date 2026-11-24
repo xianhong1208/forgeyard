@@ -1190,11 +1190,12 @@ def cloud_defaults(ctx: Context) -> Iterator[Finding]:
 
 
 def route_place(r: GatewayRoute) -> tuple[str, tuple[str, ...], str]:
-    """Where the console shows a route (1.4, #81): a deployment's own route is its cloud fallback, on
-    the deployment's page; a name an admin made is on Cloud -> Cloud models."""
+    """Where the console shows a route (1.4, #81): a deployment's own route is its routing and fallback
+    (named "cloud fallback" before 1.5.4), on the deployment's page; a name an admin made is on Cloud ->
+    Cloud models."""
     if r.deployment_id is not None:
-        return (f"/serving/{r.deployment_id}#cloud-fallback",
-                ("serving", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its cloud fallback")
+        return (f"/serving/{r.deployment_id}#routing",
+                ("serving", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its routing")
     return f"/cloud/models/{r.id}", ("cloud-models", f"route:{r.id}"), "Open the model name"
 
 
