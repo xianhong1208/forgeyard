@@ -44,6 +44,8 @@
 
 1.5.3 **移除應用程式**（1.4 起已淘汰），這是修補版本裡的不相容變更：`POST /api/workloads`、範本和閘道的 `/x/` 都回 410，升級時會移除剩下的應用程式，並把每一個都寫進稽核紀錄。升級前請先執行 `python -m forgeyard check-apps` 看看會移除什麼，把還需要的東西改成模型部署，並做好備份（[版本說明](CHANGELOG.md#153--2026-11-24)（英文）、[怎麼檢查](docs/guide/zh-TW/reference.md#apps-removed)）。模型部署不受影響；agent 不必更新。
 
+1.5.4 加入**圖片嵌入**，以及能在 **CPU 或 GPU** 上執行的**文字分類**。Forgeyard 自己的 transformers 推論引擎在視覺映像檔上執行，在 `/v1/embeddings` 用 CLIP、SigLIP 2 或 DINOv2 為圖片和文字產生嵌入，用文字就能找到圖片；含圖片的請求絕不會送往雲端供應商。`/v1/classify` 讓零樣本模型從每個請求指定的標籤中挑選，中文也行（[作法](docs/guide/zh-TW/how-to.md#classify-text-without-training-zero-shot)）。agent 現在會清點主機上的 GPU，GPU 增加、移除或 agent 看不到時，設定健康檢查都會提醒（[作法](docs/guide/zh-TW/how-to.md#add-or-remove-a-gpu-on-a-machine)）。部署頁面上的「雲端備援」改名為**分流與備援**，因為後面的層級也可以放另一個本機部署。沒有資料庫遷移。想收到 GPU 的提醒，請用機器頁面上的指令更新 agent；1.5.3 的 agent 照常運作。
+
 ## 1.4 的新功能
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
@@ -69,7 +71,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.3
+  docker.io/tonyhuang1101/forgeyard:1.5.4
 sudo docker logs forgeyard
 ```
 
@@ -112,7 +114,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
@@ -227,7 +229,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | **視覺（1.4）** | | |
 | RT-DETRv2 R18 與 R50、SAM 2.1 Hiera tiny、Depth Anything V2 Small | Forgeyard 的視覺伺服器（`vision`） | CPU（以行程執行，1.4 映像檔發布之前） |
 | **圖片嵌入與文字分類（1.5.4）** | | |
-| CLIP ViT-B/32 LAION-2B 與 DINOv2 small 嵌入；DistilBERT 多語言情緒；bge-m3-zeroshot-v2.0-c 與 roberta-base-zeroshot-v2.0-c（零樣本） | Forgeyard 的 transformers 伺服器（`transformers`） | CPU（以行程執行，1.5.4 的映像檔發布之前） |
+| CLIP ViT-B/32 LAION-2B 與 DINOv2 small 嵌入；DistilBERT 多語言情緒；bge-m3-zeroshot-v2.0-c 與 roberta-base-zeroshot-v2.0-c（零樣本） | Forgeyard 的 transformers 伺服器（`transformers`） | CPU；NVIDIA A100（CUDA）；AMD Strix Halo（CPU） |
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
 

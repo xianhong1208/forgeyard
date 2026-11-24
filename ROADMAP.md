@@ -442,6 +442,31 @@ A breaking change in a patch release, announced in 1.4: check and back up before
 means restoring that backup ([release notes](CHANGELOG.md#153--2026-11-24)). The agents need no update: no agent
 code changed.
 
+## Shipped: 1.5.4 (2026-11-24), more kinds of models, part 2
+
+1. ✅ **The transformers engine** (#267, for #141 and #144): Forgeyard's vision server, on the same `forgeyard-vision`
+   image, embeds images and texts (CLIP, SigLIP, SigLIP 2, DINOv2) and classifies texts, with fixed labels or
+   zero-shot with NLI models, on a CPU or an NVIDIA GPU. A new built-in recipe `transformers` runs it; it runs no code
+   from a model's repository.
+2. ✅ **Image embeddings and zero-shot classification through the gateway** (#269, for #141 and #144):
+   `/v1/embeddings` takes typed text and image items beside OpenAI's plain strings, and a request with images never
+   goes to a cloud provider; `/v1/classify` takes `labels`, `multi_label` and `hypothesis_template` for zero-shot
+   models. Five models join the recommended list.
+3. ✅ **The console, the guide and the acceptance** (#270, for #141 and #144): Playground → Embeddings (a similarity
+   table) and zero-shot Text classification (labels as chips), what a model takes and which languages it reads on
+   its page, two how-tos, and `scripts/accept_transformers.py`.
+4. ✅ **GPU changes noticed** (#266): the agent counts the host's GPUs on its PCI bus and reports the ones it does not
+   see; the server records GPUs added or removed (audit `node.gpus_changed`), and Setup health says what to do.
+5. ✅ **The update command finds the NVIDIA devices when it runs** (#264): one command fits every NVIDIA machine, and a
+   GPU installed after the agent started is passed too.
+6. ✅ **Routing and fallback** (#271): *Cloud fallback* on a deployment's page is renamed, since a later tier may
+   hold another local deployment; the summary follows the tiers on screen.
+7. ✅ **The vision image pinned to 1.5.4rc1** (#272, #274): the `vision` and `transformers` recipes run the image
+   accepted on the lab machines before the release. A test fix (#273).
+
+No migration. Update the agents with the machine page's command to get the GPU notices; a 1.5.3 agent keeps working
+and only does not report the GPUs it cannot see.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -471,7 +496,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.5.4: more kinds of models, part 2** | Image embeddings (#141), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
 | **1.5.5: image-to-image and image-to-video** | Edit an image or make variations of it from a prompt, and turn an image into a short video (#143). |
 | **1.6.0: single sign-on** *(enterprise edition)* | Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication (#39). |
 | **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
