@@ -130,6 +130,8 @@ export default {
     "用 stable-diffusion.cpp 文字生成圖片：在容器裡跑在 AMD GPU 和 APU（Vulkan）以及 NVIDIA GPU 上，或在 CPU 上以一般行程執行。支援 GGUF 和單一檔案模型（Stable Diffusion 1.5 / XL、Z-Image、FLUX.1），提供 OpenAI 的 /v1/images/generations。",
   "library.engineDesc.speaches-tts":
     "小型英文語音（Kokoro-82M、Piper），提供 OpenAI 相容的 /v1/audio/speech；CPU 上就夠快，預設和其他部署共用 GPU。只能唸英文（和其他拉丁字母）文字。",
+  "library.engineDesc.transformers":
+    "在 /v1/embeddings 提供圖片嵌入（CLIP、SigLIP、SigLIP 2、DINOv2），在 /v1/classify 提供文字分類：固定標籤，或用 NLI 模型做零樣本分類。很小：在 CPU 上就跑得很好，預設和其他部署共用 GPU。",
   "library.engineDesc.vision":
     "用 transformers 模型做物件偵測、影像分割（SAM 2）、深度估計與圖片分類，提供 /v1/vision/detect、/v1/vision/segment、/v1/vision/depth 和 /v1/vision/classify。很小：預設和其他部署共用 GPU，在 CPU 上也跑得很好。",
   "library.engineDesc.vllm-omni-image":

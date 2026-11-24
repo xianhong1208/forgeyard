@@ -39,12 +39,12 @@ def first_variant(name, accel):
 
 
 def test_fy_rec_001_builtins_load_and_are_pinned():
-    """FY-REC-001: ten recipes (1.3 adds the text-to-speech, image and video ones, 1.4 vision), every image
+    """FY-REC-001: eleven recipes (1.3 adds the text-to-speech, image and video ones, 1.4 vision, 1.5.4 transformers), every image
     tagged (never latest; a rolling tag such as master-vulkan is held by its digest, FY-REC-008), engines by
     SHA-256."""
     rs = recipes.builtin_recipes()
-    assert sorted(rs) == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vision", "vllm", "vllm-omni-image",
-                          "vllm-omni-tts", "vllm-omni-video", "vllm-pooling"]
+    assert sorted(rs) == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "transformers", "vision", "vllm",
+                          "vllm-omni-image", "vllm-omni-tts", "vllm-omni-video", "vllm-pooling"]
     for r, _ in rs.values():
         assert r.builtin
         for v in r.variants:
@@ -157,7 +157,8 @@ def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
     assert [v for v in containers if v.forgeyard_image is not None] == []
     images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
               if v.runtime == "container"]
-    assert len(images) == 21 and {(n, v) for n, v, _ in images} >= {("vision", "cuda"), ("vision", "cpu")}
+    assert len(images) == 23 and {(n, v) for n, v, _ in images} >= {("vision", "cuda"), ("vision", "cpu"),
+                                                                   ("transformers", "cuda"), ("transformers", "cpu")}
     unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
     assert unpinned == []
     # One tag, one digest: the same tag in two recipes (vllm and vllm-pooling) is the same image.

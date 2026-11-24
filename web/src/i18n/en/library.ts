@@ -144,6 +144,8 @@ export default {
     "Text to image with stable-diffusion.cpp: AMD GPUs and APUs (Vulkan) and NVIDIA GPUs in a container, or the CPU as a plain process. GGUF and single-file models (Stable Diffusion 1.5 / XL, Z-Image, FLUX.1), behind OpenAI's /v1/images/generations.",
   "library.engineDesc.speaches-tts":
     "Small English voices (Kokoro-82M, Piper) behind an OpenAI-compatible /v1/audio/speech; fast enough on a CPU, and shares a GPU by default. English (and other Latin-script) text only.",
+  "library.engineDesc.transformers":
+    "Image embeddings (CLIP, SigLIP, SigLIP 2, DINOv2) at /v1/embeddings, and text classification with fixed labels or zero-shot with NLI models at /v1/classify. Small: runs well on a CPU, shares a GPU by default.",
   "library.engineDesc.vision":
     "Object detection, segmentation (SAM 2), depth estimation and image classification with transformers models, behind /v1/vision/detect, /v1/vision/segment, /v1/vision/depth and /v1/vision/classify. Small: shares a GPU by default, and runs well on a CPU.",
   "library.engineDesc.vllm-omni-image":

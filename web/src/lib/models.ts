@@ -103,9 +103,14 @@ export function downloadText(r: WithDownload): string | null {
   return tMaybe(`fleet.download.${what}${how}${d.total ? "Of" : ""}`, "", sizes);
 }
 
+// The recipes a model can be deployed with: the server's list for it (`model.recipes`, in its order: 1.5.4, the
+// transformers server is offered only the models it runs, after the others), else every recipe serving its format
+// and task.
 export function compatibleRecipes(model: CatalogModel | undefined, recipes: Recipe[]): Recipe[] {
   if (!model) return [];
-  return recipes.filter((r) => r.formats.includes(model.format) && r.tasks.includes(model.task));
+  const serves = recipes.filter((r) => r.formats.includes(model.format) && r.tasks.includes(model.task));
+  if (!Array.isArray(model.recipes)) return serves;
+  return model.recipes.map((n) => serves.find((r) => r.name === n)).filter((r): r is Recipe => r !== undefined);
 }
 
 export type DeployForm = {

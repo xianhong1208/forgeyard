@@ -1659,6 +1659,7 @@ recipe with only the variants you want can.
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
 | `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
 | | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
+| `transformers` (1.5.4) | `cuda`, `cpu` | as `vision` | the same image as `vision` (pinned to the same digests) |
 
 `vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`: vLLM's
 compile cache is kept between starts, in a directory per replica on its machine, so a restart or a wake loads
@@ -1763,6 +1764,37 @@ Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
 1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU);
 Grounding DINO and MM-Grounding-DINO add 512 MiB (their text encoder and 800-pixel features: peak 2.24 GiB on a
 CPU with 0.64 GiB of files, 1.4.4).
+
+The `transformers` recipe (1.5.4, #141 and #144) runs the same Forgeyard image as `vision`, with `--task embed` or
+`--task classify`: image embeddings at `/v1/embeddings` and text classification at `/v1/classify`. It is offered for
+an `embed` model that is CLIP-like (CLIP, SigLIP, SigLIP 2, ALIGN, AltCLIP, Chinese-CLIP, MetaCLIP 2: texts and
+images in one space) or DINOv2 (`Dinov2Model`, images only), and for every `classify` model (fixed labels:
+DistilBERT, DeBERTa, BERT, RoBERTa, XLM-R…; or zero-shot with an NLI model, whose labels come with each request), and
+listed after the other recipes that serve the model: a text embedding model keeps `vllm-pooling` only, and deploying
+one on `transformers` answers 422 `incompatible`. No code from a model's repository is run: a `config.json` with
+`auto_map` stops the replica at start. Parameters (advanced): `threads` (4, a CPU's torch threads), `max_images`
+(32, images per embeddings request, each at most 20 MiB and 40 megapixels) and `max_pairs` (256: a zero-shot model
+runs once per text and label, so texts x labels per request is at most this). The server itself:
+
+- `POST /v1/embeddings`: `input` is a text, or a list of texts, `{"text": …}` and `{"image": "<base64 or data:
+  URI>"}` items (the Jina shape; the gateway fetches image URLs, the engine never does); answered in OpenAI's shape,
+  each vector L2-normalised, in the order sent; `encoding_format` `float` or `base64`; `dimensions` only the model's
+  own. Texts are cut to the model's length (CLIP 77 tokens, SigLIP 64) and counted in `usage.truncated_inputs`;
+  `usage` also counts `images` and `kilopixels`. An image-only model (DINOv2) refuses texts (400
+  `text_not_supported`).
+- `POST /classify` (and `/v1/classify`): vLLM's request and answer (`input`, `truncate_prompt_tokens`,
+  `use_activation`; `data[index, label, probs, num_classes]`, `usage`). A zero-shot model also takes `labels`
+  (required, at most 32 distinct names), `multi_label` (false) and `hypothesis_template` (`"This text is about {}."`)
+  and answers transformers' zero-shot pipeline: `probs` in the request's label order, which the answer echoes
+  (`labels`, `multi_label`); single-label probabilities add up to 1. A fixed-label model given `labels` answers 400
+  `labels_not_supported`, a zero-shot one without them `labels_required`; too many pairs `too_many_pairs`.
+
+On a CPU it holds the weights in float32 (half precision is several times slower there: a bge-m3 NLI pass took 1.4 s
+in float16, 0.2 s in float32 on four threads), so the estimate counts a 16-bit checkpoint's parameters at 4 bytes each
+(recipe estimate field `cpu_float32`) plus 1.25 GiB; on a GPU the files plus 1 GiB, like `vision`. The tasks need a
+vision image from 1.5.4 on: until the built-in recipe's pin moves to it (right after the release that publishes it),
+deploying or estimating on it answers 422 `vision_image_too_old`. The public API (typed items at `/v1/embeddings`,
+`labels` at `/v1/classify`) comes with the gateway's next step.
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
