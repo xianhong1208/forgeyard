@@ -40,6 +40,12 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
+| 1.5.4 | full regression (`accept_all.py`, all groups; 16 checks skipped: 5 deploys on the x86-64 CPU machine, which has no container engine, of the vision and transformers images, covered by the runs below; 3 that need a second CPU machine in this script, covered by `accept_scale.py`; an expired key, since the API's shortest expiry is a day, covered by a unit test; a provider budget, since the admin has a budget of their own; Gemini, which has no embeddings model; and information lines). For the first time since 1.4.4 with the Ryzen AI MAX+ 395: models through the server, and an image copied to it from the A100 host | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 433 | 0 |
+| 1.5.4 | sleep when idle, waking and automatic replicas (`accept_scale.py`); 1 check skipped: a CPU model wakes in 3.4 s, sooner than the shortest wait | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
+| 1.5.4 | the transformers engine (`accept_transformers.py`) on the CPU and on CUDA: image and text embeddings, a fixed-label classifier and zero-shot classification; bge-m3-zeroshot-v2.0-c put 12 of 12 Traditional Chinese lines in the right topic with a Chinese template | A100 host (CPU and CUDA) | 105 | 0 |
+| 1.5.4 | the transformers engine (`accept_transformers.py`) on a machine that reaches no registry: the vision image (8 layers, 0.64 GiB) and the models came through the server | Ryzen AI MAX+ 395, on the CPU | 37 | 0 |
+| 1.5.4 | vision models with the 1.5.4rc1 image (`accept_vision.py`) | A100 | 40 | 0 |
+| 1.5.4 | vision models with the 1.5.4rc1 image (`accept_vision.py`) | Ryzen AI MAX+ 395, on the CPU | 37 | 0 |
 | 1.5.3 | full regression (`accept_all.py`; 10 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 394 | 0 |
 | 1.5.3 | sleep when idle, waking and automatic replicas (`accept_scale.py`), the automatic replicas on two CPU machines; 1 check skipped | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
 | 1.5.3 | during development: the upgrade from 1.5.2 (#260) on the development server's database, with no apps left and 93 API keys with `/x/` access: `check-apps` listed the 93 keys before the upgrade and, from the audit log, after it; the upgrade wrote 93 audit entries; `/x/` answered 410; the model deployments were not affected | A100 host, x86-64 CPU machine | 10 | 0 |
@@ -65,6 +71,6 @@ name machines and networks. Only the hardware models and the counts are.
 | 1.4.3 | full regression (`accept_all.py`) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 303 | 0 |
 | 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
 
-The Ryzen AI MAX+ 395 machine was not part of the 1.4.5, 1.5.0, 1.5.1, 1.5.2 and 1.5.3 runs.
+The Ryzen AI MAX+ 395 machine was not part of the 1.4.5, 1.5.0, 1.5.1, 1.5.2 and 1.5.3 runs; it took part in 1.5.4.
 
 Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).

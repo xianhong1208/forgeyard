@@ -1,3 +1,3 @@
 """Forgeyard: one control plane for the GPUs (and CPUs) you own."""
 
-__version__ = "1.5.4rc1"
+__version__ = "1.5.4"

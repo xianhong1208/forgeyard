@@ -6,126 +6,146 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.4] — 2026-11-24
+
+Image embeddings and text classification on a CPU or a GPU (#141, #144). Forgeyard's own transformers engine runs
+on the `forgeyard-vision` image: it embeds images and texts with CLIP, SigLIP, SigLIP 2 or DINOv2 at
+`/v1/embeddings`, and classifies texts at `/v1/classify`, with fixed labels or with the labels each request gives
+(zero-shot). A request with images never goes to a cloud provider. An admin also learns when a machine's GPUs
+change, and a deployment's *Cloud fallback* is now *Routing and fallback*.
+
+**Update the agents.** The agent changed in 1.5.4: it counts the host's GPUs and reports the ones it does not see
+(#266). Use the **Update the agent** command on each machine's page. A 1.5.3 agent keeps working with a 1.5.4
+server: it only does not report the GPUs it cannot see, so Setup health cannot warn about those, and Setup health
+lists the agent as older than the server. GPUs added or removed are noticed from what any agent reports.
+
+**No migration, and no breaking change.** The `/v1` changes add fields and item types; OpenAI clients work as
+before. Back up before upgrading as always ([how](docs/guide/how-to.md#back-up-and-restore)).
+
 ### Added
 
-- **The built-in `vision` and `transformers` recipes pin `forgeyard-vision` 1.5.4rc1** (CPU `sha256:da2ddf69…`,
-  linux/amd64 and arm64; `-cuda` `sha256:179143ed…`), published by the `v1.5.4rc1` pre-release, so image embeddings,
-  text classification and zero-shot classification deploy on the built-in `transformers` recipe. It was 1.4.4rc1.
-- **An admin learns when a machine's GPUs change.** No migration: everything lives in the machine's
-  `runtime_info` and the audit log.
-  - **GPUs the agent does not see.** At each connection the agent counts the host's GPUs on its PCI bus
-    (`/sys/bus/pci/devices`, which a container sees whole: NVIDIA 3D/VGA controllers; AMD display, 3D and accelerator
-    functions, an APU's graphics included; never audio functions, NVSwitches or SR-IOV virtual functions) and compares
-    them with the ones NVML or amd-smi lists. It sends `runtime_info.gpu_census` (`host_gpus`, `visible_gpus`,
-    `missing` PCI addresses, per vendor, and `limited_by` when its environment or its container's `--gpus "device=…"`
-    limits it to some on purpose); servers before 1.5.4 drop it. Setup health warns `machine-gpus-hidden` (*gpu-01:
-    the host has 9 NVIDIA GPUs but the agent sees 8*) only when the agent sees some but not all of a vendor's GPUs and
-    nothing limits it, linking to the machine's update command. An agent that sees none of them (a CPU-only agent on a
-    GPU host) or was limited on purpose is not warned; the machine's GPU access section says so quietly (and shows the warning for the
-    case Setup health warns about).
-  - **GPUs added or removed.** The server compares each report with the GPUs it last trusted, by UUID (an AMD card by
-    its PCI address), never by index; a vendor whose collector failed in that report changes nothing, and a machine's
-    first report (also the first after upgrading) only sets what is known. A change is audited as `node.gpus_changed`
-    (added / removed, model, memory, and the deployments placed on a removed card), kept in
-    `runtime_info.gpu_changes` (the last 20, listed under the machine's GPU access) and, for 7 days, in Setup health:
-    `machine-gpu-not-allowed` (a new GPU on a machine with a GPU access list stays not allowed, as before, until an
-    admin ticks it), `machine-gpu-added` (no list: placement already uses it) and `machine-gpu-removed` (with the
-    deployments placed on it, which keep their place until restarted).
-  - The guide has [Add or remove a GPU on a machine](docs/guide/how-to.md#add-or-remove-a-gpu-on-a-machine) and the
-    reference [GPUs added, removed or not seen](docs/guide/reference.md#gpus-added-removed-or-not-seen).
+- **The `transformers` engine (#141, #144).** Forgeyard's vision server, on the same `forgeyard-vision` image with no
+  new dependency, gains two tasks:
+  - `--task embed`: image and text embeddings with CLIP, SigLIP, SigLIP 2 and DINOv2. It answers OpenAI's
+    `/v1/embeddings` plus typed `{"text"}` / `{"image"}` items; vectors are L2-normalised, and long texts are cut and
+    counted.
+  - `--task classify`: any sequence classifier with fixed labels, in vLLM's `/classify` shape, and zero-shot with NLI
+    models: `labels`, `multi_label`, `hypothesis_template`, probabilities in the order of the request's labels, the
+    same numbers as transformers' zero-shot pipeline. Texts x labels are capped by `max_pairs`.
 
-- **The `transformers` engine (1.5.4, #141 and #144; part 1: the engine and its recipe).** Forgeyard's vision server
-  (the same `forgeyard-vision` image, no new dependency) gains `--task embed` (image and text embeddings with CLIP,
-  SigLIP, SigLIP 2 and DINOv2: OpenAI's `/v1/embeddings` plus typed `{"text"}` / `{"image"}` items, vectors
-  L2-normalised, long texts cut and counted) and `--task classify` (any sequence classifier with fixed labels, in
-  vLLM's `/classify` shape, and zero-shot with NLI models: `labels`, `multi_label`, `hypothesis_template`, probabilities
-  in the request's label order, the same numbers as transformers' zero-shot pipeline; texts x labels capped by
-  `max_pairs`). No code from a model's repository is run. A new built-in recipe `transformers` runs it (CPU and
-  CUDA, `threads`, `max_images`, `max_pairs`), offered for CLIP-like and DINOv2 `embed` models and for text
-  classifiers, after vLLM; a text embedding model is refused on it. On a CPU the weights are held in float32 (a
-  bge-m3 NLI pass: 1.4 s in float16, 0.2 s in float32) and the estimate counts them so (`cpu_float32`). It needs a
-  vision image from 1.5.4 on (pinned below); on an older one, deploying answers 422 `vision_image_too_old`. The gateway's public
-  shapes, the catalog's rules and the console follow.
-
-- **Image embeddings and zero-shot classification through the gateway (1.5.4, #141 and #144; part 2: catalog,
-  inspector and gateway).** `/v1/embeddings` takes typed items beside OpenAI's plain strings (`{"text": …}`,
-  `{"image": …}`, Jina's shape): an image is a `data:` URI, bare base64 or an `http(s)` URL the gateway fetches under
-  the media rules (egress guard, `MEDIA_ALLOW_PRIVATE_HOSTS`, `MEDIA_FETCH_MAX_MB`); the engine never fetches. A request
-  of texts only stays an OpenAI request (typed texts are sent as plain strings), so OpenAI clients are unchanged and it
-  may spill as before; **a request with images never goes to a cloud provider**. New 400 codes: `images_not_supported`
-  (a model that embeds texts only), `text_not_supported` (an image-only model, DINOv2), `too_many_images` (over the
-  deployment's `max_images`). Usage counts `images`, `kilopixels` and `busy_ms` for a request with images.
-  `/v1/classify` takes `labels`, `multi_label` and `hypothesis_template` for zero-shot (NLI) models and refuses them for
-  fixed-label ones (400 `labels_not_supported`; a zero-shot model without labels 400 `labels_required`; texts x labels
-  over `max_pairs` 400 `too_many_pairs`); the transformers server's busy time is counted. The catalog keeps what an
-  embedding model takes (`embed`: family, modalities, vector size, text length), marks NLI classifiers `zero_shot` and
-  keeps the languages a model card names (`languages`). Try it on a deployment sends the test image to an image
-  embedder and asks a zero-shot classifier for its labels. The recommended list adds `bge-m3-zeroshot-v2.0-c`
-  (multilingual) and `roberta-base-zeroshot-v2.0-c` (English), MIT, and SigLIP 2 base, CLIP ViT-B/32 LAION-2B and
-  DINOv2 small as embedding models (a new group, Image embeddings); one repository may now be listed once per task.
-
-- **The console, the guide and the acceptance for the transformers engine (1.5.4, #141 and #144; part 3).**
+  It runs no code from a model's repository. A new built-in recipe `transformers` runs it on a CPU or CUDA
+  (`threads`, `max_images`, `max_pairs`). It is offered for CLIP-like and DINOv2 `embed` models and for text
+  classifiers, after vLLM; a text embedding model is refused on it. On a CPU the weights are held in float32 (one
+  bge-m3 NLI pass: 1.4 s in float16, 0.2 s in float32), and the estimate counts them so (`cpu_float32`). It needs a
+  vision image from 1.5.4 on; on an older one, a deploy answers 422 `vision_image_too_old`.
+- **Image embeddings through the gateway (#141).** `/v1/embeddings` takes typed items beside OpenAI's plain strings
+  (`{"text": …}`, `{"image": …}`, Jina's shape). An image is a `data:` URI, bare base64 or an `http(s)` URL that the
+  gateway fetches under the media rules (egress guard, `MEDIA_ALLOW_PRIVATE_HOSTS`, `MEDIA_FETCH_MAX_MB`); the engine
+  never fetches. A request of texts only stays an OpenAI request (typed texts are sent as plain strings), so OpenAI
+  clients are unchanged and it may spill as before; **a request with images never goes to a cloud provider**. New
+  400 codes: `images_not_supported` (a model that embeds texts only), `text_not_supported` (an image-only model,
+  DINOv2) and `too_many_images` (over the deployment's `max_images`). Usage counts `images`, `kilopixels` and
+  `busy_ms` for a request with images.
+- **Zero-shot text classification through the gateway (#144).** `/v1/classify` takes `labels`, `multi_label` and
+  `hypothesis_template` for zero-shot (NLI) models and refuses them for fixed-label ones (400
+  `labels_not_supported`). A zero-shot model without labels answers 400 `labels_required`, and texts x labels over
+  `max_pairs` 400 `too_many_pairs`. The transformers server's busy time is counted.
+- **The catalog knows what these models take.** It keeps what an embedding model takes (`embed`: family,
+  modalities, vector size, text length), marks NLI classifiers `zero_shot` and keeps the languages a model card names
+  (`languages`); the deployments API names an embedding or classification model's `languages`. A Hugging Face search
+  for embeddings also asks for `image-feature-extraction` (DINOv2), and one for text classification also for
+  `zero-shot-classification` (NLI models). **Try it** on a deployment sends the test image to an image embedder and
+  asks a zero-shot classifier for its labels.
+- **Recommended models:** `bge-m3-zeroshot-v2.0-c` (multilingual) and `roberta-base-zeroshot-v2.0-c` (English), both
+  MIT, and SigLIP 2 base, CLIP ViT-B/32 LAION-2B and DINOv2 small as embedding models, in a new group, *Image
+  embeddings*. One repository may now be listed once per task.
+- **The console for the transformers engine.**
   - **Playground → Embeddings** takes images beside texts for a model that embeds them: choose, drop or paste them,
-    or give an address the server fetches under the media rules (the browser never loads it); the answer is a
-    cosine-similarity table, texts down the side and images across for a CLIP-like model (each row's best marked),
-    every item against every other for DINOv2 or a text model, with the vectors' size, tokens, images and whether
-    they are normalised. An image-only model has no text box and says why; the deployment's *Images per request* is
-    the cap.
-  - **Playground → Text classification** for a zero-shot model: the labels as chips (Enter or a comma adds one,
-    each once), the hypothesis template with a one-click Chinese one and why (12 of 12 Chinese news lines right
-    with it, 11 with the English default), *Several labels may apply*, texts x labels counted against the
-    deployment's *Zero-shot pairs per request*; the bars keep the order of the labels asked. Chinese texts sent to a
-    model whose card names English only get a warning. Fixed-label models are unchanged.
+    or give an address that the server fetches under the media rules (the browser never loads it). The answer is a
+    cosine-similarity table: texts down the side and images across for a CLIP-like model, with each row's best
+    marked; every item against every other for DINOv2 or a text model. It shows the vectors' size, tokens, images
+    and whether they are normalised. An image-only model has no text box and says why; the deployment's *Images per
+    request* is the cap.
+  - **Playground → Text classification** for a zero-shot model: the labels as chips (Enter or a comma adds one, each
+    once), the hypothesis template with a one-click Chinese one and why (12 of 12 Chinese news lines right with it,
+    11 with the English default), *Several labels may apply*, and texts x labels counted against the deployment's
+    *Zero-shot pairs per request*. The bars keep the order of the labels asked. Chinese texts sent to a model whose
+    card names English only get a warning. Fixed-label models are unchanged.
   - **A model's page** shows what an embedding model takes and its vector size (*Texts and images · 512 dimensions ·
     texts up to 77 tokens*, *Images only · 384 dimensions*), *Zero-shot: labels in each request*, and the languages
     its card names, with a warning on an English-only classifier or CLIP-like model. **Add a model** shows the same
     and says that a CLIP-like repository does two jobs, one catalog entry each. **Serving** marks an image embedder
-    with a picture. **Deploy** says the transformers server runs on any CPU, and the estimate why a 16-bit model
-    takes about twice its size in RAM there (float32).
-  - The deployments API names an embedding or classification model's `languages`. A Hugging Face search for
-    embeddings also asks for `image-feature-extraction` (DINOv2), one for text classification also for
-    `zero-shot-classification` (NLI models). The console translates the new gateway error codes.
-  - Guide: [Classify text without training (zero-shot)](docs/guide/how-to.md#classify-text-without-training-zero-shot),
-    [Search images by text (image embeddings)](docs/guide/how-to.md#search-images-by-text-image-embeddings) and
-    [The transformers engine](docs/guide/concepts.md#the-transformers-engine), in both languages.
-  - `scripts/accept_transformers.py` and an `accept_all` group `transformers`: CLIP, DINOv2, a DistilBERT classifier
-    and `bge-m3-zeroshot-v2.0-c` on a CPU machine (CLIP and the zero-shot model also on a GPU machine), checked
-    through the gateway (a text finds its picture, a picture its smaller copy, normalised vectors, an image by
-    address, the limits and refusals, images staying local, 12 Traditional Chinese lines among 10 topics, multi-label,
-    usage, Try it, the Playground's route, the key guard). Until the built-in recipe's image moves to 1.5.4 its
-    deployments are a SKIP saying `vision_image_too_old`; `--transformers-recipe` runs them on a custom recipe.
+    with a picture. **Deploy** says that the transformers server runs on any CPU, and the estimate says why a
+    16-bit model takes about twice its size in RAM there (float32). The console translates the new gateway error
+    codes.
+  - The guide, in both languages: [Classify text without training
+    (zero-shot)](docs/guide/how-to.md#classify-text-without-training-zero-shot), [Search images by text (image
+    embeddings)](docs/guide/how-to.md#search-images-by-text-image-embeddings) and [The transformers
+    engine](docs/guide/concepts.md#the-transformers-engine).
+- **`scripts/accept_transformers.py`** and an `accept_all` group `transformers`: CLIP, DINOv2, a DistilBERT
+  classifier and `bge-m3-zeroshot-v2.0-c` on a CPU machine, with CLIP and the zero-shot model also on a GPU machine,
+  checked through the gateway: a text finds its picture, a picture its smaller copy, normalised vectors, an image by
+  address, the limits and refusals, images staying local, 12 Traditional Chinese lines among 10 topics,
+  multi-label, usage, Try it, the Playground's route and the key guard. `--transformers-recipe` runs them on a
+  custom recipe.
+- **An admin learns when a machine's GPUs change (#266).** No migration: everything lives in the machine's
+  `runtime_info` and the audit log.
+  - **GPUs the agent does not see.** At each connection the agent counts the host's GPUs on its PCI bus
+    (`/sys/bus/pci/devices`, which a container sees whole: NVIDIA 3D and VGA controllers; AMD display, 3D and
+    accelerator functions, an APU's graphics included; never audio functions, NVSwitches or SR-IOV virtual
+    functions) and compares them with the ones NVML or amd-smi lists. It sends `runtime_info.gpu_census`
+    (`host_gpus`, `visible_gpus`, the `missing` PCI addresses, per vendor, and `limited_by` when its environment or
+    its container's `--gpus "device=…"` limits it to some on purpose); servers before 1.5.4 drop it. Setup health
+    warns `machine-gpus-hidden` (*gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8*), linking to the
+    machine's update command, only when the agent sees some but not all of a vendor's GPUs and nothing limits it.
+    An agent that sees none of them (a CPU-only agent on a GPU host) or was limited on purpose is not warned; the
+    machine's GPU access section says so quietly, and shows the warning in the case Setup health warns about.
+  - **GPUs added or removed.** The server compares each report with the GPUs it last trusted, by UUID (an AMD card by
+    its PCI address), never by index. A vendor whose collector failed in that report changes nothing, and a
+    machine's first report (also the first after upgrading) only sets what is known. A change is audited as
+    `node.gpus_changed` (added or removed, model, memory, and the deployments placed on a removed card). It is kept
+    in `runtime_info.gpu_changes` (the last 20, listed under the machine's GPU access) and, for 7 days, in Setup
+    health: `machine-gpu-not-allowed` (a new GPU on a machine with a GPU access list stays not allowed, as before,
+    until an admin ticks it), `machine-gpu-added` (no list: placement already uses it) and `machine-gpu-removed`
+    (with the deployments placed on it, which keep their place until restarted).
+  - The guide has [Add or remove a GPU on a machine](docs/guide/how-to.md#add-or-remove-a-gpu-on-a-machine), and the
+    reference [GPUs added, removed or not seen](docs/guide/reference.md#gpus-added-removed-or-not-seen).
 
 ### Changed
 
-- **"Cloud fallback" is now "Routing and fallback" (分流與備援).** A later tier may hold another local deployment as
-  well as a cloud model, so the deployment page's section, its buttons (**Add a tier**, **Save routing**) and the
-  guide say so; its summary follows the tiers on screen and says *Not saved yet* until they are saved (it used to
-  say "one tier" while two were shown). The section is at `#routing` (`#cloud-fallback` still opens it); the guide
-  gains *Share requests between two local deployments*. API field names do not change.
-- **Which engine serves which embedding and classification model (1.5.4).** vLLM's pooling runner (`vllm-pooling`) is
-  offered only what it runs: not an NLI (zero-shot) model or a classifier of an architecture vLLM 0.32 does not run
-  (DeBERTa, DistilBERT, BART), and not an image embedder (CLIP-like, DINOv2); those are served by the `transformers`
+- **The built-in `vision` and `transformers` recipes pin `forgeyard-vision` 1.5.4rc1** (CPU `sha256:da2ddf69…`,
+  linux/amd64 and arm64; `-cuda` `sha256:179143ed…`), the images accepted on the lab machines before this release;
+  it was 1.4.4rc1. The `1.5.4` images this release publishes are built from the same `images/vision` source.
+- **Which engine serves which embedding and classification model.** vLLM's pooling runner (`vllm-pooling`) is offered
+  only what it runs: not an NLI (zero-shot) model or a classifier of an architecture vLLM 0.32 does not run
+  (DeBERTa, DistilBERT, BART), and not an image embedder (CLIP-like, DINOv2). Those are served by the `transformers`
   recipe alone, and a catalog entry of that kind added earlier is refused on `vllm-pooling` at deploy (422
   `incompatible`). These classifiers are no longer refused when added: 1.4.4's refusals now apply to `vllm-pooling`
-  only. A multimodal embedding model vLLM would serve with chat messages (Qwen3-VL-Embedding, GME) is refused when
-  added as `embed` (422 `no_engine`): it is planned for a later 1.5 patch. **No model's default engine changes**:
-  every model vLLM served keeps `vllm-pooling` first. Hugging Face's `image-feature-extraction` tag is read as an
-  embedding model. No migration.
-
-- **The machine page's update command finds the NVIDIA devices on the host when it runs.** For an NVIDIA agent
-  with every GPU (`--gpus all`) it now has the same `$(for d in …)` line as the Add-a-machine Docker command instead of
-  one `--device /dev/nvidiaN` per node the running agent had: a GPU installed after the agent started is passed too,
+  only. A multimodal embedding model that vLLM would serve with chat messages (Qwen3-VL-Embedding, GME) is refused
+  when added as `embed` (422 `no_engine`); it is planned for a later 1.5 patch. **No model's default engine
+  changes**: every model vLLM served keeps `vllm-pooling` first. Hugging Face's `image-feature-extraction` tag is
+  read as an embedding model.
+- **"Cloud fallback" is now "Routing and fallback" (分流與備援).** A later tier may hold another local deployment as
+  well as a cloud model, so the deployment page's section, its buttons (**Add a tier**, **Save routing**) and the
+  guide say so. The section is at `#routing` (`#cloud-fallback` still opens it), and the guide gains *Share requests
+  between two local deployments*. API field names do not change.
+- **The machine page's update command finds the NVIDIA devices on the host when it runs.** For an NVIDIA agent with
+  every GPU (`--gpus all`) it now has the same `$(for d in …)` line as the Add-a-machine Docker command, instead of
+  one `--device /dev/nvidiaN` per node the running agent had. A GPU installed after the agent started is passed too,
   and one command fits every NVIDIA machine whatever its GPU count. The shell expands the line into plain `--device`
-  options before `docker run` starts, so Docker still records each node and the agent keeps its GPUs after the host's
-  `systemctl daemon-reload` (#202). An agent limited to some GPUs (`--gpus "device=…"`, a count, or
-  `NVIDIA_VISIBLE_DEVICES`) keeps the nodes it reported, by name, and a reported node the line would not find (another
-  `/dev/nvidia…` name) is kept by name; the agent now reports such nodes too. AMD and CPU commands are unchanged. The
-  console says under the command, in both languages, that it passes every NVIDIA device of the host and that the
-  machine's GPU access setting still decides which GPUs Forgeyard uses. `GET /api/machines/{id}/agent-update` has a
-  new `nvidia_devices` field (`host`, `listed` or null).
+  options before `docker run` starts, so Docker still records each node and the agent keeps its GPUs after the
+  host's `systemctl daemon-reload` (#202). An agent limited to some GPUs (`--gpus "device=…"`, a count, or
+  `NVIDIA_VISIBLE_DEVICES`) keeps the nodes it reported, by name. A reported node the line would not find (another
+  `/dev/nvidia…` name) is kept by name too; the agent now reports such nodes. AMD and CPU commands are unchanged.
+  The console says under the command, in both languages, that it passes every NVIDIA device of the host and that
+  the machine's GPU access setting still decides which GPUs Forgeyard uses. `GET /api/machines/{id}/agent-update`
+  has a new field, `nvidia_devices` (`host`, `listed` or null).
+- The update notes under the command say models, not "models and apps".
 
-- The update notes say models, not "models and apps" (the server's notes under the command).
+### Fixed
 
+- **Routing and fallback's summary follows the tiers on screen** and says *Not saved yet* until they are saved. It
+  used to say "one tier" while a second, unsaved tier was shown.
 
 ## [1.5.3] — 2026-11-24
 

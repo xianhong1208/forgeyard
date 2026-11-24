@@ -100,6 +100,15 @@ the audit log. Before upgrading, run `python -m forgeyard check-apps` to see wha
 still need as a model, and back up ([release notes](CHANGELOG.md#153--2026-11-24),
 [how to check](docs/guide/reference.md#apps-removed)). Model deployments are not affected; the agents need no update.
 
+1.5.4 adds **image embeddings** and **text classification on a CPU or a GPU**. Forgeyard's own transformers engine,
+on the vision image, embeds images and texts with CLIP, SigLIP 2 or DINOv2 at `/v1/embeddings`, so a text finds its
+picture; a request with images never goes to a cloud provider. `/v1/classify` takes the labels in each request for a
+zero-shot model, Chinese included ([how](docs/guide/how-to.md#classify-text-without-training-zero-shot)). The
+agent now counts the host's GPUs, so Setup health says when a GPU is added, removed or not seen by the agent
+([how](docs/guide/how-to.md#add-or-remove-a-gpu-on-a-machine)). *Cloud fallback* on a deployment's page is now
+**Routing and fallback**, since a later tier may hold another local deployment. No migration. Update the agents with
+the machine page's command to get the GPU notices; a 1.5.3 agent keeps working.
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
@@ -131,7 +140,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.3
+  docker.io/tonyhuang1101/forgeyard:1.5.4
 sudo docker logs forgeyard
 ```
 
@@ -177,7 +186,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
@@ -302,7 +311,7 @@ and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Tur
 | **Vision (1.4)** | | |
 | RT-DETRv2 R18 and R50, SAM 2.1 Hiera tiny, Depth Anything V2 Small | Forgeyard's vision server (`vision`) | CPU (as a process, before the 1.4 image is published) |
 | **Image embeddings and text classification (1.5.4)** | | |
-| CLIP ViT-B/32 LAION-2B and DINOv2 small embeddings; DistilBERT multilingual sentiment; bge-m3-zeroshot-v2.0-c and roberta-base-zeroshot-v2.0-c (zero-shot) | Forgeyard's transformers server (`transformers`) | CPU (as a process, before the 1.5.4 image is published) |
+| CLIP ViT-B/32 LAION-2B and DINOv2 small embeddings; DistilBERT multilingual sentiment; bge-m3-zeroshot-v2.0-c and roberta-base-zeroshot-v2.0-c (zero-shot) | Forgeyard's transformers server (`transformers`) | CPU; NVIDIA A100 (CUDA); AMD Strix Halo (CPU) |
 | **Cloud** | | |
 | Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
 
