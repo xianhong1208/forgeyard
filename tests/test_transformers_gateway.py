@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -95,6 +96,19 @@ def test_fy_tgw_001_each_engine_is_offered_what_it_runs():
     assert not encoders.is_vllm(all_r["vllm"][0], "chat")
     # Rerank on vllm-pooling is untouched: a reranker with a vision tower is not refused.
     assert encoders.offered(pool, "rerank", vl)
+    # At the gateway, vLLM embeds texts only, whatever the entry (one from before these rules, deployed on it, takes
+    # no images there); the transformers server what its model takes, with the deployment's max_images.
+    clip = meta_of("clip-vit-b-32-laion2b", "embed")
+    tf = all_r["transformers"][0]
+    assert gembed.embeds(pool, {"max_images": 8}, clip) == gembed.Embeds(("text",), 0)
+    assert gembed.embeds(tf, {}, clip) == gembed.Embeds(("text", "image"), 32)
+    assert gembed.embeds(tf, {"max_images": 3}, meta_of("dinov2-small", "embed")) == gembed.Embeds(("image",), 3)
+    # The spill estimate counts an image as so many tokens, not the size of its base64 text.
+    from forgeyard.gateway import body as gbody, fit as gfit, media as gmedia
+    obj = {"model": "m", "input": ["hi", {"image": "data:image/png;base64," + "A" * 300_000}]}
+    parsed = gbody.Parsed(model="m", obj=obj)
+    parsed.embed = gembed.check(obj)
+    assert gfit.prompt_estimate(parsed) < gmedia.TOKENS_PER_ITEM + 100
 
 
 RECOMMENDED_CONFIGS = {   # the real config of each recommended embed / classify entry
@@ -283,6 +297,7 @@ class FakeTransformers:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                time.sleep(0.03)       # the model's work: the replica's busy time is counted
                 me.seen.append({"path": self.path, "auth": self.headers.get("Authorization"), "body": body})
                 if self.headers.get("Authorization") != f"Bearer {me.secret}":
                     return self._json(401, {"error": {"message": "key", "code": "unauthorized"}})
@@ -407,7 +422,7 @@ def test_fy_tgw_006_typed_items_reach_the_transformers_server(gw):
     assert one.status_code == 200 and gw.e["dino"].posts()[-1]["body"]["input"] == [{"image": PNG_URI}]
     rows = usage_rows(gw.owner)
     assert rows["clip"]["requests"] == 2 and rows["clip"]["prompt_tokens"] == 6 + 6
-    assert rows["clip"]["images"] == 2 and rows["clip"]["kilopixels"] == 14 and rows["clip"]["busy_ms"] >= 0
+    assert rows["clip"]["images"] == 2 and rows["clip"]["kilopixels"] == 14 and rows["clip"]["busy_ms"] >= 2 * 25
     assert rows["dino"]["images"] == 1 and rows["dino"]["kilopixels"] == 7
     # A text request to vLLM is unchanged: no image units, no busy time.
     assert gw.api.post("/v1/embeddings", json={"model": "emb", "input": [{"text": "hello"}]}).status_code == 200
@@ -542,7 +557,7 @@ def test_fy_tgw_010_zero_shot_fields_on_classify(gw):
     assert gw.api.post("/v1/classify", json={"model": "stars", "input": "I love it"}).status_code == 200
     rows = usage_rows(gw.owner)
     assert rows["nli"]["requests"] >= 2 and rows["nli"]["prompt_tokens"] == 5 * 3 + 5 * 6
-    assert rows["nli"]["busy_ms"] >= 0 and rows["stars"]["busy_ms"] == 0
+    assert rows["nli"]["busy_ms"] >= 2 * 25 and rows["stars"]["busy_ms"] == 0
     # The zero-shot flags of the route's deployments come from the catalog.
     from forgeyard.db import new_session
     from forgeyard.gateway import proxy

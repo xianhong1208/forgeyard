@@ -141,8 +141,7 @@ __all__ = [
     "parse_vision", "read_body", "streams", "upstream_body",
     # fit.py
     "BYTES_PER_TOKEN", "KIND_WORDS", "MEDIA_ENDPOINTS", "_takes", "body_size", "fit_classify", "fit_embeddings",
-    "fit_images",
-    "fit_route", "fit_speech", "prompt_estimate", "scan_media",
+    "fit_images", "fit_route", "fit_speech", "prompt_estimate", "scan_media",
     # upstream.py
     "CLIENT_CLOSED", "NOT_TAKEN_HEADER", "RETRYABLE", "SENT_BROKE", "ClientGone", "EngineUnreachable", "Failed",
     "_clients", "_empty", "_until_disconnect", "client", "close_client", "not_taken", "unless_gone",
