@@ -123,6 +123,7 @@ function RecommendedList({ data, error, onPick, chosen }: {
                   <span className="chip">{TASK_LABEL[m.task]}</span>
                   {m.device === "cpu" && <span className="chip"><IconCpu size={11} aria-hidden="true" /> CPU</span>}
                   {m.inputs.length > 0 && <span className="chip chip-tone-run">{mediaText(m.inputs)}</span>}
+                  {(m.can ?? []).map((c) => <span key={c} className="chip chip-tone-run" title={t("addmodel.rec.canTitle")}>{t(`addmodel.rec.can.${c}`)}</span>)}
                   {m.languages && m.languages.length > 0 && <span className="chip" title={t("addmodel.rec.languages")}>{languagesText(m.languages)}</span>}
                   <span className={`chip mono${licenceTerms(m.license) ? " chip-tone-run" : ""}`} title={m.license_from ? t("addmodel.rec.licenceFrom", { source: m.license_from.replace("hf://", "") }) : t("addmodel.rec.licence")}>{m.license}</span>
                 </div>

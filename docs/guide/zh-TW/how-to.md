@@ -552,6 +552,60 @@ media: {inputs: [image, audio, video], files: false}
 
 **要多久：** 每段影片要幾分鐘，每個副本一次做一段；其他的在它上面排隊。影片長或尺寸大時，在 **進階** 調高 *Longest job*。
 
+## 編輯圖片
+
+從 1.5.5 起，會編輯圖片的模型可以依照指示修改你給它的圖片，例如「把天空改成紫色」、「把第二張圖裡的沙發放進房間」。它在 `/v1/images/edits` 回應，和 OpenAI 的 API 一樣。
+
+1. **加入會編輯圖片的模型。** 在 **模型 → 加入模型 → 推薦** 的 **圖片** 群組裡有 FLUX.2 [klein] 4B（Apache-2.0，標示 *可編輯圖片*），它也能用文字產生圖片：
+   - 給 NVIDIA GPU 用（vLLM-Omni）：在預設上限下大約需要 35 GiB 的 GPU 記憶體（Forgeyard 的估算，還沒實測）；
+   - 給 stable-diffusion.cpp 用，來自 Comfy-Org 的儲存庫（模型、它的 Qwen3-4B 文字編碼器和 VAE 都在同一個地方）：AMD GPU 或 APU（Vulkan）、NVIDIA GPU（CUDA），或 CPU（每張要幾分鐘）。1024x1024 時大約 30 GiB。
+
+   模型頁面會標示 *可編輯圖片*（只會編輯、不會只靠文字產生圖片的模型，例如 Qwen-Image-Edit，則標示 *只能編輯圖片*），也會寫它接受幾張輸入圖片。
+2. **照常部署。** 在 **進階** 底下，*Input images* 是一個請求最多能給幾張圖片（預設 1 張；FLUX.2 [klein] 最多 4 張），*Largest input* 是每張圖片的寬或高最多幾像素（vLLM-Omni 是 2,048，stable-diffusion.cpp 是 1,024）。每多一張輸入圖片，請求就需要更多記憶體，估算也會算進去。
+3. **用 OpenAI SDK 呼叫：**
+
+   ```python
+   import base64
+
+   out = client.images.edit(model="flux.2-klein-4b", image=open("room.png", "rb"),
+                            prompt="Make it a watercolour painting; keep everything where it is")
+   with open("room-watercolour.png", "wb") as f:
+       f.write(base64.b64decode(out.data[0].b64_json))
+   ```
+
+   多張圖片用清單傳：`image=[open("room.png", "rb"), open("sofa.png", "rb")]`；第一張決定結果的比例，指示裡可以提到其他幾張（「第二張圖裡的沙發」）。沒給 `size` 時，結果會保留第一張圖片的比例，大小是部署的預設尺寸。用 JSON 時，圖片以位址傳送：base64 的 `data:` URL，或由伺服器去抓的 `http(s)` 位址（只限公開位址，除非伺服器允許私有位址）：
+
+   ```bash
+   curl https://192.168.1.20:7860/v1/images/edits -H "Authorization: Bearer $FORGEYARD_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model": "flux.2-klein-4b", "prompt": "Make the sky purple",
+          "images": [{"image_url": "https://example.com/street.jpg"}]}'
+   ```
+
+4. **在試用區試試看：** 會編輯圖片的模型，在 **圖片** 面板的 **用文字產生** 旁邊多了 **編輯圖片**。拖放、貼上或選擇 1 張到 *Input images* 張圖片（PNG、JPEG 或 WebP），寫好指示，選擇尺寸（預設 *和第一張圖片同比例*）、張數和格式，再按 **編輯**。你提供的圖片會顯示在結果旁邊，每張結果都有下載連結。只會編輯的模型會直接開在這個模式。
+
+**不接受的東西：** 遮罩（OpenAI 的 `mask`：400 `mask_not_supported`；請改在指示裡描述要改什麼）、`file_id`（Forgeyard 不保留檔案），以及 `/v1/images/variations`（OpenAI 也已經關閉它：請把圖片送到 `/v1/images/edits`，加上 `n` 和「這張圖片的變化版」之類的指示）。被拒絕的原因和處理方式見[圖片編輯被拒絕](troubleshooting.md#an-image-edit-is-refused)。
+
+**人物照片。** Forgeyard 檢查的是請求的格式，不是圖片裡有什麼或指示要求什麼，而編輯模型改起真實照片來非常逼真。把這樣的部署開放給其他人之前，請先讀模型卡上的負責任使用說明和授權條款（模型頁面有連結）；如果你的使用者需要，請在前面加上過濾機制。編輯的任何內容都不會保留：指示和圖片都不會。
+
+## 從圖片產生影片
+
+從 1.5.5 起，接受**起始圖片**的影片模型可以讓影片從你的圖片開始，再照提示詞發展（`/v1/videos` 上 OpenAI 的 `input_reference`）。
+
+1. **加入接受起始圖片的模型。** 在 **模型 → 加入模型 → 推薦** 的 **影片** 群組裡有 Wan2.2-TI2V-5B，標示 *圖片生成影片*：起始圖片可省略，所以它也能只用文字產生影片。大約需要 33 GiB 的 GPU 記憶體（還沒實測），用 NVIDIA GPU（vLLM-Omni）。每次都需要起始圖片的圖片生成影片 pipeline（`WanImageToVideoPipeline`，例如需要一張空出來的 80 GB 卡的 Wan2.2-I2V-A14B）可以從 **搜尋 Hugging Face** 加入；它們的頁面會標示 *只能從圖片生成影片*。Wan2.1-T2V-1.3B 不接受起始圖片。
+2. **照生成影片的方式部署。** **進階** 底下的 *Largest start image* 是圖片的寬或高最多幾像素（2,048）。
+3. **用 OpenAI SDK 呼叫：**
+
+   ```python
+   video = client.videos.create(model="wan2.2-ti2v-5b", prompt="The boats rock gently in the harbour",
+                                input_reference=open("harbour.png", "rb"), seconds="5", size="1280x704")
+   ```
+
+   接著照[生成影片](#generate-videos)的方式輪詢和下載。用 JSON 時，圖片以位址傳送：`"input_reference": {"image_url": "data:image/png;base64,…"}`，或由伺服器去抓的 `http(s)` 位址。
+4. **在試用區試試看：** 這種模型的 **影片** 面板有一個 **起始圖片** 欄位：可省略或必填（必填時要先選圖片才能按 **產生**）。這張圖片會顯示在工作旁邊，也會顯示在完成的影片下方。
+
+推論引擎會把圖片縮放成影片的大小：圖片比例和影片相同時，構圖就不會變。只接受 PNG、JPEG 或 WebP（iPhone 的 HEIC 照片請先轉檔）。被拒絕的原因和處理方式見[影片失敗或被拒絕](troubleshooting.md#a-video-fails-or-is-refused)。和編輯一樣，沒有任何過濾機制會檢查這些圖片：把部署開放給其他人之前，請先讀模型卡上的負責任使用說明。
+
 ## 文字分類
 
 文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡；從 1.5.4 起，DeBERTa、DistilBERT 或 BART 分類模型，以及在沒有 GPU 的機器上的任何分類模型，都由 Forgeyard 的 transformers 伺服器（配方 `transformers`，任何 CPU 都行）執行。想在每個請求裡自己指定標籤，見[不用訓練就能分類文字（零樣本）](#classify-text-without-training-zero-shot)。

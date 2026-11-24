@@ -34,6 +34,8 @@
 #                 text-to-speech GGUFs, the audio decoder)
 #   languages     tts: the languages it speaks; embed and classify (1.5.4): the languages of its texts, from its
 #                 card, or given here when the card names none (kept with the catalog entry; shown on the list)
+#   can           1.5.5: what it does with images given to it, shown on the list: edit (an image model that edits
+#                 images at /v1/images/edits), image-to-video (a video model that takes a start image at /v1/videos)
 #   components    image models for stable-diffusion.cpp: the files beside `file` (vae, llm, t5xxl, clip_l,
 #                 clip_g); without it they are found by their names
 #   engine_args   optional: extra engine arguments per recipe, stored with the catalog entry
@@ -56,11 +58,11 @@ groups:
     title: Text to speech
     description: Built-in voices for /v1/audio/speech. Qwen3-TTS speaks Chinese (Mandarin and dialects), English and eight more languages on NVIDIA GPUs with vLLM-Omni, or as GGUF with llama.cpp on an AMD APU or the CPU; Kokoro and Chatterbox are small English voices that run on a CPU. No voice cloning.
   - id: images
-    title: Images (text to image)
-    description: Models for /v1/images/generations. Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell on NVIDIA GPUs with vLLM-Omni; GGUF versions for stable-diffusion.cpp on AMD (Vulkan) or NVIDIA (CUDA), and Stable Diffusion 1.5 small enough for a CPU. Apache-2.0 and OpenRAIL licences only.
+    title: Images (text to image, edits)
+    description: Models for /v1/images/generations and /v1/images/edits. Z-Image-Turbo, SDXL, FLUX.1-schnell and FLUX.2 [klein] 4B (it also edits images) on NVIDIA GPUs with vLLM-Omni; stable-diffusion.cpp versions for AMD (Vulkan), NVIDIA (CUDA) or the CPU. Apache-2.0 and OpenRAIL licences only.
   - id: video
-    title: Video (text to video)
-    description: Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p and needs more memory. Apache-2.0.
+    title: Video (text or image to video)
+    description: Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p, also from a start image, and needs more memory. Apache-2.0.
   - id: detection
     title: Object detection, segmentation and depth
     description: Vision models for /v1/vision/detect, /segment and /depth on Forgeyard's own vision server, including detectors that find what you name. Small and quick on a CPU, faster on an NVIDIA GPU. Apache-2.0 only.
@@ -702,6 +704,43 @@ models:
     memory_gib: 4.1
     engine_args: {sd-cpp: [--steps, "20", --cfg-scale, "7"]}
     note: Small and old (512x512), but it runs on a CPU without a GPU. A check that images work, not for quality.
+  # ---------------------------------------------------------------- image edits (1.5.5, #143)
+  # FLUX.2 [klein] 4B: Apache-2.0, every part too (the 4B transformer, the Qwen3-4B text encoder, the FLUX.2 VAE); it
+  # makes images from text and edits up to 4 input images, in 4 steps. Not listed, by licence: FLUX.1 Kontext dev and
+  # FLUX.2 [klein] 9B (non-commercial), FLUX.3 Image Klein (FLUX Kommunity License); OmniGen2 (its Qwen2.5-VL-3B part
+  # is qwen-research) and HiDream-E1-1 (a Llama 3.1 text encoder) carry a restricted component. Qwen-Image-Edit-2511
+  # (Apache-2.0) is left out by size: about 54 GiB.
+  # Candidate, added only once it passes a lab run: LongCat-Image-Edit (meituan-longcat/LongCat-Image-Edit, Apache-2.0,
+  # revision 7b54ef423aa7854be7861600024be5c56ab7875a, 27.3 GiB: a 6B transformer and Qwen2.5-VL-7B), vLLM-Omni.
+  - name: flux.2-klein-4b
+    title: FLUX.2 [klein] 4B (vLLM-Omni)
+    source: hf://black-forest-labs/FLUX.2-klein-4B
+    revision: e7b7dc27f91deacad38e78976d1f2b499d76a294
+    license: apache-2.0
+    group: images
+    task: image
+    format: diffusers
+    recipe: vllm-omni-image
+    can: [edit]
+    download_gib: 14.9
+    memory_gib: 34.7
+    note: Makes images from text and edits up to 4 images from an instruction, in 4 steps. NVIDIA.
+  - name: flux.2-klein-4b-sdcpp
+    title: FLUX.2 [klein] 4B (stable-diffusion.cpp)
+    source: hf://Comfy-Org/Flux-2-Klein-4B
+    revision: 5b3abca5c0dc1ecd4eaf3340868d09063fc1c965
+    file: split_files/diffusion_models/flux-2-klein-4b.safetensors
+    components: {llm: split_files/text_encoders/qwen_3_4b.safetensors, vae: split_files/vae/flux2-vae.safetensors}
+    license: apache-2.0
+    group: images
+    task: image
+    format: safetensors
+    recipe: sd-cpp
+    can: [edit]
+    download_gib: 15.0
+    memory_gib: 29.8
+    engine_args: {sd-cpp: [--cfg-scale, "1", --steps, "4"]}
+    note: FLUX.2 [klein] 4B for an AMD GPU or APU (Vulkan), an NVIDIA GPU (CUDA) or the CPU; makes and edits images.
   # ---------------------------------------------------------------- video (1.3)
   - name: wan2.1-t2v-1.3b
     title: Wan2.1 T2V 1.3B (vLLM-Omni)
@@ -724,9 +763,10 @@ models:
     task: video
     format: diffusers
     recipe: vllm-omni-video
+    can: [image-to-video]
     download_gib: 31.9
     memory_gib: 32.8
-    note: Text to video at 1280x704 and 24 fps; better than 1.3B, about 33 GiB on the card (not yet measured). NVIDIA.
+    note: Text to video at 1280x704 and 24 fps, or from a start image; about 33 GiB on the card (not yet measured). NVIDIA.
   # ---------------------------------------------------------------- object detection, segmentation, depth (1.4)
   # The models of the 1.3 workload templates (images/vision/models.json), at the same revisions.
   - name: rtdetr-v2-r18

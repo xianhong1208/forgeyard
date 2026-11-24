@@ -406,7 +406,8 @@ async def unknown(rest: str):
 def image_options(model: Optional[str], caller: KeyCaller) -> dict:
     """What an image model's deployments take (1.3), for the Playground's Image tab: the most images per
     request, the largest side, the default size, the multiple sizes must be of, the formats, the most
-    steps, the longest prompt (over every deployment of the route: what at least one takes)."""
+    steps, the longest prompt, and (1.5.5) what it does with images given to it (over every deployment of the
+    route: what at least one takes)."""
     if not model:
         raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
     route = proxy.check_access(caller, _route(model), model, imagegen.ENDPOINT)
@@ -414,10 +415,16 @@ def image_options(model: Optional[str], caller: KeyCaller) -> dict:
     if not ds:
         raise GatewayError(503, "no_target", f"{model!r} has no image deployment.")
     first = ds[0]
+    eds = [d for d in ds if d.edit > 0]
     return {"model": model, "max_n": max(d.max_n for d in ds), "max_side": max(d.max_side for d in ds),
             "default_size": f"{first.width}x{first.height}", "multiple": min(d.multiple for d in ds),
             "formats": sorted({f for d in ds for f in d.formats}, key=imagegen.FORMATS.index),
-            "max_steps": max(d.max_steps for d in ds), "max_prompt_chars": max(d.max_prompt for d in ds)}
+            "max_steps": max(d.max_steps for d in ds), "max_prompt_chars": max(d.max_prompt for d in ds),
+            # 1.5.5 (#143): whether it makes images from text, and its edits: the most input images a request may
+            # give (0: it edits nothing), the largest of them, the formats an edit comes back in.
+            "generate": any(d.generate for d in ds), "edit": max((d.edit for d in eds), default=0),
+            "max_input_side": max((d.max_input_side for d in eds), default=0),
+            "edit_formats": sorted({f for d in eds for f in d.edit_formats}, key=imagegen.FORMATS.index)}
 
 
 @console.get("/images/options")

@@ -812,6 +812,32 @@ added from search has none: add them to its entry.
 (Ubuntu 24.04, Debian 13) and a 1.3 agent, which unpacks `.zip` engines. An older agent shows "cannot
 unpack .zip engines" in the placement: update it.
 
+## An image edit is refused
+
+**You see:** `/v1/images/edits` (or **Edit** in the Playground) answers 400 or 413; the `code` says why. Nothing
+reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `edits_not_supported` | The model makes images from text and edits none | Use `/v1/images/generations`, or a model whose page says *Edits images* (FLUX.2 [klein]) |
+| `generation_not_supported` | The model only edits (Qwen-Image-Edit), and the request went to `/v1/images/generations` | Send it a picture at `/v1/images/edits` |
+| `missing_image` | No picture in the request | Send it as `image` (multipart) or `images: [{"image_url": …}]` (JSON) |
+| `too_many_input_images` | More pictures than the deployment's *Input images* (1 by default) | Send fewer, or raise *Input images* under **Advanced** (up to what the model takes: 4 for FLUX.2 [klein]) |
+| `input_image_too_large` | A picture wider or taller than *Largest input* | Scale it down, or raise *Largest input* (the estimate grows with it) |
+| `unsupported_image_format` | Not a PNG, JPEG or WebP (an iPhone's HEIC photo, a GIF) | Convert it first |
+| `invalid_image` | Its header does not say its size, or the data: URL is not base64 | Send the file again; check how it was encoded |
+| `mask_not_supported` | A `mask` | Leave it out and describe the change in the instruction |
+| `file_id_not_supported` | A picture given as a `file_id` | Send the picture itself, or its address |
+| `media_url_refused`, `media_fetch_failed` | An address the server may not or could not fetch (a private address, a failed download) | Send the picture itself as a file or a data: URL |
+| `unsupported_output_format` | A format the engine does not make for edits (stable-diffusion.cpp: `png` and `jpeg` only) | Ask for one it makes |
+
+**413 `media_too_large`:** a picture over `MEDIA_FETCH_MAX_MB` (the server's setting). **413 on the whole request:**
+it is larger than the deployment's *Largest request*. The rest (`too_many_images`, `image_too_large`, `invalid_size`,
+429, 504) is as for [image requests](#an-image-request-is-refused-or-slow).
+
+**The result ignores the second picture:** the deployment takes one (*Input images* 1, the default): it answered
+`too_many_input_images`, or you sent one. Raise *Input images*.
+
 ## A video fails, or is refused
 
 **You see:** `POST /v1/videos` answers 400; the `code` says why. Nothing reached the engine.
@@ -823,6 +849,7 @@ unpack .zip engines" in the placement: update it.
 | `invalid_size` | Not `WIDTHxHEIGHT`, or sides that are not multiples of 16 (32 for Wan2.2-5B) | Use the size the message suggests |
 | `input_reference_not_supported` | A start image for a model that makes videos from text only, or a reference the engine would fetch itself (`image_reference`, `video_reference`, `audio_reference`) | Leave it out, or use a model that takes a start image (Wan2.2-TI2V-5B) |
 | `input_reference_required` | An image-to-video model without a start image | Send it as `input_reference` |
+| `input_image_too_large`, `unsupported_image_format`, `invalid_image`, `file_id_not_supported` | The start image is wider or taller than *Largest start image*, not a PNG, JPEG or WebP (convert HEIC photos first), unreadable, or a `file_id` | Send a smaller PNG, JPEG or WebP picture itself (a file, a data: URL or an address) |
 | `too_many_steps`, `prompt_too_long` | Over *Most steps* or *Longest prompt* | Ask for fewer, or shorten the prompt |
 
 **429 `too_many_jobs`:** your key (or you, in the Playground) already has *Jobs per key* videos waiting

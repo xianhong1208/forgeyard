@@ -833,7 +833,8 @@ def test_fy_igen_018_try_it_and_the_playground(img):
     assert out["request"]["size"] == "256x256"
     o = img.owner.get("/api/playground/images/options?model=sd").json()
     assert o == {"model": "sd", "max_n": 4, "max_side": 512, "default_size": "512x512", "multiple": 64,
-                 "formats": ["png", "jpeg", "webp"], "max_steps": 50, "max_prompt_chars": 4000}
+                 "formats": ["png", "jpeg", "webp"], "max_steps": 50, "max_prompt_chars": 4000,
+                 "generate": True, "edit": 0, "max_input_side": 0, "edit_formats": []}
     assert img.owner.get("/api/playground/images/options?model=nope").status_code == 404
     r = img.owner.post("/api/playground/images/generations", json={"model": "omni", "prompt": "a fox", "size": "512x512"})
     assert r.status_code == 200 and len(r.json()["data"]) == 1

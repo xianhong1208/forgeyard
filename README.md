@@ -111,6 +111,14 @@ agent now counts the host's GPUs, so Setup health says when a GPU is added, remo
 **Routing and fallback**, since a later tier may hold another local deployment. No migration. Update the agents with
 the machine page's command to get the GPU notices; a 1.5.3 agent keeps working.
 
+1.5.5 adds **image edits** and **image to video**. A model that edits, such as FLUX.2 [klein] 4B (recommended for
+vLLM-Omni and for stable-diffusion.cpp, Apache-2.0), changes the pictures you give it at `/v1/images/edits`, and
+Wan2.2-TI2V-5B makes a video that starts from your picture (`input_reference` on `/v1/videos`). The gateway checks
+every picture and fetches addresses itself; no engine gets a URL. The Playground has **Edit images** and a **Start
+image**, and model pages say what a model does with pictures ([edit an image](docs/guide/how-to.md#edit-an-image),
+[a video from a picture](docs/guide/how-to.md#make-a-video-from-a-picture)). No filter checks the pictures: read the
+model card before you open such a deployment to others. No migration; the agents need no update.
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for

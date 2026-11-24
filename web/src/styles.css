@@ -845,6 +845,14 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .img-item { margin: 0; display: grid; gap: 6px; min-width: 0; }
 .img-item img { width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); }
 .img-item figcaption { display: flex; justify-content: flex-end; }
+/* 1.5.5 (#143): Edit mode, the images given beside the results, and a video's start image. */
+.img-modes { margin-bottom: 12px; }
+.img-lead { margin: 0 0 10px; max-width: 90ch; }
+.img-given { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.img-given-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.img-given-list img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); display: block; }
+.vid-start { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; min-width: 0; }
+.vid-start span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* The Playground's Video panel (1.3): a job followed until it is made, then played in the page. */
 .vid-lead { margin: 6px 0 0; max-width: 75ch; }
 .vid-frames { align-self: center; margin: 0 0 8px; }

@@ -42,8 +42,30 @@ version until 1.0.
   `required`), from its diffusers pipeline class. No migration: entries from before are read from their class, so a
   Wan2.2-TI2V-5B added in 1.3 takes start images without being added again. The Playground's video options say it
   too (`image_input`, `max_input_side`).
+- **The console for images given to a model (#143).** The Playground's **Image** panel has **Edit images** beside
+  **Make from text** for a model that edits: 1 to the deployment's *Input images* pictures (dropped, pasted or chosen;
+  PNG, JPEG or WebP), an instruction, a size (*Like the first image* by default), how many and a format, sent as
+  `/v1/images/edits` multipart; the pictures given are shown beside the results. A model that only edits opens in Edit.
+  The **Video** panel has a **Start image** for a model that takes one (optional, or required: then **Generate** waits
+  for it), sent as `input_reference`. The gateway's new error codes read in Traditional Chinese too.
+- Model pages and the catalog mark *Edits images* (*only*, for a model that makes nothing from text) with how many
+  input images it takes, and *Image to video* (start image optional or required). Such a model's page says that no
+  filter checks the pictures and links its model card's responsible-use notes and licence. The deploy form shows
+  *Input images* and *Largest input* (or *Largest start image*) only for a model that takes images; the Playground's
+  image options say what the model does with images (`generate`, `edit`, `max_input_side`, `edit_formats`).
+- Recommended models: FLUX.2 [klein] 4B (Apache-2.0; makes and edits images, up to 4 inputs) for vLLM-Omni, and from
+  Comfy-Org's repository for stable-diffusion.cpp (AMD Vulkan, NVIDIA CUDA, the CPU); Wan2.2-TI2V-5B is marked
+  *Image to video*. Entries say what they do with images (`can`). Their memory is Forgeyard's estimate, not yet measured.
+- Acceptance: `scripts/accept_img.py --edit` (one and two inputs, multipart and JSON with a data: URL and an http(s)
+  URL, the refusals, usage) and `scripts/accept_video.py --image` (a video from a start image uploaded and as a data:
+  URL, checked for size and length; required / optional / none; the refusals; usage), both in `accept_all`'s img and
+  video groups (`--img-edit-url`).
+- Guide (English and Traditional Chinese): *Edit an image*, *Make a video from a picture*, the Playground's new
+  modes, and *An image edit is refused*.
 
 ### Changed
+
+- *Input images* is under **Advanced** on the deploy form, with *Largest input*.
 
 - `/v1/images/variations` stays closed (404 `endpoint_not_supported`), now saying to send the image to
   `/v1/images/edits` with `n` and a prompt.

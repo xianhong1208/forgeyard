@@ -228,7 +228,9 @@ The **Playground** tries a model through the same gateway, as you, without an AP
 picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,
 Multimodal chat, Embeddings, Rerank, Text classification, Speech to text, Text to speech, Images, Video,
 Vision), and picking one opens its panel: chat (with streaming, and images for models that read them),
-embeddings, rerank, text classification (texts in, each one's labels as bars out), speech to text, **Speak**, **Image**, **Video**, or the vision panel (a picture in; boxes, a mask or a
+embeddings, rerank, text classification (texts in, each one's labels as bars out), speech to text, **Speak**, **Image**
+(and, for a model that edits, **Edit images**: pictures and an instruction in, edited pictures out, 1.5.5), **Video**
+(with a **Start image** for a model that takes one, 1.5.5), or the vision panel (a picture in; boxes, a mask or a
 depth map out). The address keeps the model (`/playground?model=<name>`); 1.3's Vision tab address
 (`/playground?tab=vision`) opens the first ready vision model, or the picker when there is none. With no
 model ready, the page says so and points to **Models → Catalog** to deploy one. Its requests count as

@@ -496,6 +496,28 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 **`sd-cpp` 副本在 CPU 機器上無法啟動：** 它的行程推論引擎需要 glibc 2.39 以上（Ubuntu 24.04、Debian 13），以及能解開 `.zip` 推論引擎的 1.3 版 agent。舊版 agent 會在配置結果裡顯示 "cannot unpack .zip engines"：請更新它。
 
+## 圖片編輯被拒絕
+
+**你看到：** `/v1/images/edits`（或試用區的 **編輯**）回應 400 或 413；`code` 說明原因。任何內容都沒有送到推論引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `edits_not_supported` | 這個模型只用文字產生圖片，不會編輯 | 改用 `/v1/images/generations`，或改用模型頁面標示 *可編輯圖片* 的模型（FLUX.2 [klein]） |
+| `generation_not_supported` | 這個模型只會編輯（Qwen-Image-Edit），請求卻送到 `/v1/images/generations` | 把圖片送到 `/v1/images/edits` |
+| `missing_image` | 請求裡沒有圖片 | 以 `image`（multipart）或 `images: [{"image_url": …}]`（JSON）附上 |
+| `too_many_input_images` | 圖片比部署的 *Input images*（預設 1 張）多 | 少送幾張，或在 **進階** 調高 *Input images*（最多到模型接受的張數：FLUX.2 [klein] 是 4 張） |
+| `input_image_too_large` | 有一張圖片的寬或高超過 *Largest input* | 先縮小，或調高 *Largest input*（估算會跟著變大） |
+| `unsupported_image_format` | 不是 PNG、JPEG 或 WebP（iPhone 的 HEIC 照片、GIF） | 先轉檔 |
+| `invalid_image` | 圖片檔頭沒有寫尺寸，或 data: URL 不是 base64 | 重新傳送檔案；檢查它的編碼方式 |
+| `mask_not_supported` | 帶了 `mask` | 拿掉它，在指示裡描述要改什麼 |
+| `file_id_not_supported` | 圖片是以 `file_id` 給的 | 直接傳送圖片本身或它的位址 |
+| `media_url_refused`、`media_fetch_failed` | 伺服器不能抓或抓不到的位址（私有位址、下載失敗） | 改用檔案或 data: URL 直接傳送圖片 |
+| `unsupported_output_format` | 推論引擎編輯時不產生這種格式（stable-diffusion.cpp 只有 `png` 和 `jpeg`） | 改要它會產生的格式 |
+
+**413 `media_too_large`：** 圖片超過 `MEDIA_FETCH_MAX_MB`（伺服器的設定）。**整個請求 413：** 請求比部署的 *Largest request* 大。其他的（`too_many_images`、`image_too_large`、`invalid_size`、429、504）和[圖片請求](#an-image-request-is-refused-or-slow)相同。
+
+**結果沒有用到第二張圖片：** 部署只收一張（*Input images* 是預設的 1）：它回應了 `too_many_input_images`，或你只送了一張。請調高 *Input images*。
+
 ## 影片失敗或被拒絕
 
 **你看到：** `POST /v1/videos` 回應 400；`code` 說明原因。任何內容都沒有送到推論引擎。
@@ -507,6 +529,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 | `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Wan2.2-5B 為 32） | 使用訊息建議的尺寸 |
 | `input_reference_not_supported` | 只從文字做影片的模型收到起始圖片，或帶了推論引擎會自己下載的參考輸入（`image_reference`、`video_reference`、`audio_reference`） | 拿掉它，或改用接受起始圖片的模型（Wan2.2-TI2V-5B） |
 | `input_reference_required` | 圖片轉影片的模型沒有收到起始圖片 | 以 `input_reference` 附上 |
+| `input_image_too_large`、`unsupported_image_format`、`invalid_image`、`file_id_not_supported` | 起始圖片的寬或高超過 *Largest start image*、不是 PNG、JPEG 或 WebP（HEIC 照片請先轉檔）、無法讀取，或是以 `file_id` 給的 | 直接傳送一張較小的 PNG、JPEG 或 WebP 圖片（檔案、data: URL 或位址） |
 | `too_many_steps`、`prompt_too_long` | 超過 *Most steps* 或 *Longest prompt* | 少一點步數，或縮短提示 |
 
 **429 `too_many_jobs`：** 你的金鑰（或在試用區裡的你）在那個部署上已經有 *Jobs per key* 段影片在等待或製作中。**429 `queue_full`：** 部署已經有 *Jobs at once* 個工作。等待 `Retry-After` 秒，或刪掉不再需要的工作。

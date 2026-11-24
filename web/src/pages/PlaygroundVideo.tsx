@@ -1,18 +1,23 @@
 import { IconDownload, IconMovie, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
+import { HelpLink } from "../components/HelpLink";
+import { ImagePick } from "../components/ImagePick";
 import { Notice } from "../components/ui";
 import { labels, t as tNow } from "../i18n/core";
 import { getLang, locale } from "../i18n/lang";
 import { useT } from "../i18n/react";
 import { notifyUnauthorized } from "../lib/api";
 import { videoFrames, videoSizes, type Video, type VideoOptions } from "../lib/gateway";
+import { startImage, videoForm, type Picked } from "../lib/imageEdit";
 import { clock, playError } from "../lib/playground";
 
 // The Playground's Video panel (1.3): a video is a job. It is asked for at /api/playground/videos (the
 // gateway's /v1/videos rules, as the signed-in person: the session cookie and the CSRF header, counted as
 // "console" in Usage), followed until it is made, then played from …/content. Jobs belong to the person,
-// so a video asked for earlier is still listed when the page is opened again. No API key.
+// so a video asked for earlier is still listed when the page is opened again. No API key. 1.5.5 (#143): a model that
+// takes a start image (input_reference) gets a picker for one, optional or required as the model says; with an image
+// the request is multipart, as the OpenAI SDK sends it.
 const SAMPLE = "A red kite flying over a green hill on a sunny day, slow camera pan.";
 const POLL_MS = 3000;
 const HEADERS = { "X-Forgeyard": "1" };
@@ -56,6 +61,8 @@ export function Videos({ model }: { model: string }) {
   const [job, setJob] = useState<Video | null>(null);
   const [mine, setMine] = useState<Video[]>([]);
   const [now, setNow] = useState(() => Date.now() / 1000);
+  const [start, setStart] = useState<Picked[]>([]);
+  const [startedFrom, setStartedFrom] = useState<{ id: string; p: Picked } | null>(null);
   const live = useRef(true);
 
   useEffect(() => {
@@ -116,16 +123,23 @@ export function Videos({ model }: { model: string }) {
   const lengths = Array.from({ length: opts?.max_seconds ?? 0 }, (_, i) => i + 1);
   const cap = opts?.max_prompt_chars;
   const chars = prompt.length;
+  const takes = startImage(opts?.image_input);
+  const needsImage = takes === "required" && start.length === 0;
 
   const go = async (e: FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim() || sending || active) return;
+    if (!prompt.trim() || sending || active || needsImage) return;
     setSending(true); setErr(null);
+    const length = String(seconds || opts?.seconds || 5);
+    const image = takes !== "none" ? start[0] : undefined;
     try {
-      const res = await call("", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, prompt, size: size || undefined, seconds: String(seconds || opts?.seconds || 5) }) });
+      const res = image
+        ? await call("", { method: "POST", body: videoForm(model, prompt, size, length, image) })
+        : await call("", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model, prompt, size: size || undefined, seconds: length }) });
       if (!res.ok) { setErr(await failure(res)); return; }
       const v = (await res.json()) as Video;
+      setStartedFrom(image ? { id: v.id, p: image } : null);
       setJob(v);
       setNow(Date.now() / 1000);
       void loadMine();
@@ -152,10 +166,18 @@ export function Videos({ model }: { model: string }) {
   const expired = shown?.expires_at ? shown.expires_at <= now : false;
   return (
     <section className="panel play" aria-labelledby="vid-title">
-      <h2 id="vid-title">{t("playground.video.title")}</h2>
+      <div className="panel-head">
+        <h2 id="vid-title">{t("playground.video.title")}</h2>
+        {takes !== "none" && <HelpLink page="how-to" anchor="make-a-video-from-a-picture">{t("playground.video.howTo")}</HelpLink>}
+      </div>
       <p className="muted small vid-lead">{t("playground.video.lead")}</p>
       {optsErr && <Notice tone="error">{optsErr}</Notice>}
       <form onSubmit={go} className="img-form">
+        {takes !== "none" && (
+          <ImagePick id="vid-start" label={t(takes === "required" ? "playground.video.start.required" : "playground.video.start.optional")} max={1}
+            images={start} onChange={setStart} disabled={sending || active}
+            hint={t(takes === "required" ? "playground.video.start.hintRequired" : "playground.video.start.hintOptional", { side: String(opts?.max_input_side ?? 0) })} />
+        )}
         <div className="field">
           <label htmlFor="vid-prompt">{t("playground.prompt")}</label>
           <textarea id="vid-prompt" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
@@ -177,9 +199,10 @@ export function Videos({ model }: { model: string }) {
           {opts && <p className="field-hint vid-frames">{t("playground.video.frames", { frames: String(videoFrames(seconds || opts.seconds, opts.fps)), fps: String(opts.fps) })}</p>}
         </div>
         <div className="row-gap">
-          <button type="submit" className="btn btn-primary" disabled={!opts || sending || active || !prompt.trim() || (cap !== undefined && chars > cap)}>
+          <button type="submit" className="btn btn-primary" disabled={!opts || sending || active || needsImage || !prompt.trim() || (cap !== undefined && chars > cap)}>
             <IconMovie size={16} aria-hidden="true" /> {t("playground.generate")}
           </button>
+          {needsImage && opts && <span className="muted small">{t("playground.video.start.needOne")}</span>}
           {active && <button type="button" className="btn" onClick={() => job && remove(job)}><IconX size={16} aria-hidden="true" /> {t("common.cancel")}</button>}
         </div>
       </form>
@@ -194,6 +217,7 @@ export function Videos({ model }: { model: string }) {
             <span style={shown.progress ? { width: `${shown.progress}%` } : undefined} />
           </span>
           <p className="muted small">{t("playground.video.jobLine", { size: shown.size, seconds: shown.seconds })}<span className="mono">{shown.id}</span></p>
+          {startedFrom?.id === shown.id && <StartedFrom p={startedFrom.p} />}
         </div>
       )}
       {shown && shown.status === "failed" && (
@@ -203,6 +227,7 @@ export function Videos({ model }: { model: string }) {
         <figure className="vid-out" aria-label={t("playground.video.made")}>
           {expired ? <p className="muted">{t("playground.video.expired")}</p>
             : <video src={contentUrl(shown.id)} controls playsInline preload="metadata" aria-label={t("playground.video.alt", { prompt: prompt.slice(0, 80) })} />}
+          {startedFrom?.id === shown.id && <StartedFrom p={startedFrom.p} />}
           <figcaption>
             <span className="msg-meta">{t("playground.video.caption", { size: shown.size, seconds: shown.seconds, took: clock((shown.completed_at ?? now) - shown.created_at),
               until: when(shown.expires_at) })}</span>
@@ -234,5 +259,14 @@ export function Videos({ model }: { model: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+// The start image a job was asked with, beside it while it is made and under the video once it is.
+function StartedFrom({ p }: { p: Picked }) {
+  const t = useT();
+  const line = t("playground.video.start.used", { name: p.name });
+  return (
+    <p className="vid-start small muted"><img className="emb-thumb" src={p.uri} alt="" /><span title={p.name}>{line}</span></p>
   );
 }
