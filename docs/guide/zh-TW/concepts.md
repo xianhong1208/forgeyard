@@ -202,11 +202,31 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 文字分類模型（1.4.4）替一段文字從固定的一組標籤裡挑一個：情緒、語言、有害內容、主題。它是附有分類頭的小型編碼器（1 億到 6 億參數），所以在 GPU 上每秒能處理上千段文字，標籤和分數穩定，成本只有對話模型的一小部分。
 
-- **一個推論引擎：**`vllm-pooling`（vLLM 的 pooling runner，和嵌入、重排序模型用同一個映像檔），在 NVIDIA GPU 上執行，以記憶體共用一張卡（同一個配方的 ROCm 版本應該也能在 AMD GPU 上執行，尚未測試）。目前還沒有 CPU 推論引擎：給 CPU 用的 transformers 推論引擎在 1.5（#144）。
-- **哪些模型：**目錄會讀 `config.json`。vLLM 能當分類模型執行的架構（BERT、RoBERTa、XLM-RoBERTa、ModernBERT、GTE、GPT-2、Jamba：`…ForSequenceClassification`），而且有兩個以上標籤。標籤會存在目錄項目裡，顯示在模型的頁面上。不接受：只有一個輸出的模型（那是 reranker）、迴歸（regression）頭、零樣本（NLI）模型（標籤是 entailment 和 contradiction：請求裡要帶標籤，1.5 才支援），以及 DeBERTa、DistilBERT 或 BART 分類模型（vLLM 不支援；同樣在 1.5）。
-- **它自己的 API：**`/v1/classify`，格式和 vLLM 一樣：`input` 是一段文字或一串文字；每段都會傳回最可能的 `label`，以及每個標籤的機率（`probs`，順序和 `config.json` 相同）。訓練成同時給多個標籤的模型（`multi_label_classification`，例如 toxic-bert）會各自評分每個標籤，所以機率加起來不一定是 1。
-- **現在就想用自己的標籤：**對話模型已經能用結構化輸出分到你指定的任何標籤：在 `/v1/chat/completions` 把標籤放進 `structured_outputs.choice`（vLLM），或用 JSON schema 的 `enum`（vLLM、llama.cpp、雲端供應商）。比分類模型慢、成本也高，但不用另外部署。見[操作指南](how-to.md#classify-text)。
-- 用量計它的 **prompt token**，和嵌入一樣。文字只留在你自己的部署上：絕不送往雲端供應商。
+- **兩個推論引擎**（見 [transformers 推論引擎](#the-transformers-engine)）：`vllm-pooling`（vLLM 的 pooling runner）在 NVIDIA GPU 上執行 vLLM 支援的架構（BERT、RoBERTa、XLM-RoBERTa、ModernBERT、GTE…）；從 1.5.4 起，Forgeyard 自己的 `transformers` 伺服器在任何 CPU 或共用的 GPU 上執行所有序列分類模型，包含 DeBERTa、DistilBERT 和 BART。兩者都能執行的模型預設用 vLLM。
+- **哪些模型：**目錄會讀 `config.json`：有兩個以上標籤的 `…ForSequenceClassification`。標籤會存在目錄項目裡，顯示在模型的頁面上，旁邊還有模型說明卡列出的語言。不接受：只有一個輸出的模型（那是 reranker）或迴歸（regression）頭。
+- **零樣本（1.5.4）：**NLI 模型（標籤是 entailment 和 contradiction）在**每個請求裡接受你的標籤**：它把文字和一句像「這段文字是關於{標籤}。」的句子一起讀，替每個標籤評分，所以每段文字配每個標籤各跑一次。目錄會把它標成 *零樣本*；它只在 transformers 伺服器上執行。見[操作指南](how-to.md#classify-text-without-training-zero-shot)。
+- **它自己的 API：**`/v1/classify`，格式和 vLLM 一樣：`input` 是一段文字或一串文字；每段都會傳回最可能的 `label`，以及每個標籤的機率（`probs`，順序和 `config.json` 相同，零樣本模型則依請求的 `labels`）。訓練成同時給多個標籤的模型（`multi_label_classification`，例如 toxic-bert）會各自評分每個標籤，所以機率加起來不一定是 1；零樣本請求帶 `"multi_label": true` 也是一樣。
+- **對話模型**也能用結構化輸出分到你指定的任何標籤：在 `/v1/chat/completions` 把標籤放進 `structured_outputs.choice`（vLLM），或用 JSON schema 的 `enum`（vLLM、llama.cpp、雲端供應商）。比分類模型慢、成本也高，最適合細微的文字。見[操作指南](how-to.md#classify-text)。
+- 用量計它的 **prompt token**，和嵌入一樣（零樣本：每組文字和標籤的 token），在 transformers 伺服器上還計忙碌時間。文字只留在你自己的部署上：絕不送往雲端供應商。
+
+## transformers 推論引擎
+
+Forgeyard 自己的模型伺服器（1.5.4），也就是 `transformers` 配方：視覺映像檔（`forgeyard-vision`，和 `vision` 配方同一個，有 x86-64 與 Arm 的 CPU 版和 NVIDIA 版），以 Hugging Face transformers 啟動來產生嵌入或做文字分類。它很小，在 CPU 上就跑得很好：沒有 GPU 的機器也能提供這些模型，在 GPU 上則預設和其他部署共用顯示卡。
+
+| 模型 | 推論引擎 |
+|---|---|
+| 文字嵌入模型（Qwen3-Embedding、BGE-M3…）、reranker | `vllm-pooling`（GPU） |
+| CLIP 類模型（CLIP、SigLIP、SigLIP 2）和 DINOv2 當嵌入模型 | `transformers` |
+| vLLM 支援的文字分類模型（BERT、RoBERTa、XLM-R、ModernBERT） | `vllm-pooling` 優先，`transformers` 也可以（CPU） |
+| DeBERTa、DistilBERT、BART 分類模型；零樣本（NLI）模型 | `transformers` |
+| 多模態嵌入模型（Qwen3-VL-Embedding、GME） | 還沒有：加入時會被拒絕（之後的 1.5 修補版） |
+
+- **圖片嵌入：**CLIP 類模型把文字和圖片放在同一個空間（文字能找到圖片）；DINOv2 只收圖片（找重複圖、相似圖）。兩者都在 `/v1/embeddings` 回應，它在一般字串之外也接受有型別的項目 `{"image": …}`；只有文字的請求仍是 OpenAI 的請求。帶圖片的請求絕不溢出到雲端供應商：另一個模型的向量對不上。見[操作指南](how-to.md#search-images-by-text-image-embeddings)。
+- **一個目錄項目做一件事：**CLIP 類的儲存庫既是圖片分類模型（`/v1/vision/classify`，配方 `vision`），也是嵌入模型（`transformers`）：用兩個名稱各加入一次，各自部署。
+- **在 CPU 上**權重以 float32 保存（半精度在 CPU 上慢好幾倍），所以 16 位元的模型大約需要檔案大小兩倍的 RAM；估算已經算進去。*CPU threads*（`threads`，4）設定 torch 用幾個。一個副本一次處理一個請求；要更大的吞吐量就多開副本或改用 CUDA 版本。
+- **每個請求的上限：**嵌入用 *Images per request*（`max_images`，32），零樣本用 *Zero-shot pairs per request*（`max_pairs`，256：文字數 × 標籤數）。
+- **模型儲存庫裡的程式碼絕不執行**（`auto_map` 會被拒絕），映像檔只從模型快取讀模型（`HF_HUB_OFFLINE`）。
+- **它的映像檔跟著版本走：**內建配方的映像檔以 digest 釘選，在發布新視覺映像檔的版本推出後立刻換過去；在那之前，用它部署會得到 422 `vision_image_too_old`，自訂配方（推論引擎的複本）可以指定較新的映像檔。
 
 ## API 金鑰、限制與用量
 

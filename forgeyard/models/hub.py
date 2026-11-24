@@ -30,7 +30,9 @@ MAX_ANSWER = 8 * 1024**2
 # some the other; many rerankers are tagged text classification).
 TASK_TAGS: dict[str, tuple[str, ...]] = {
     "chat": ("text-generation",),
-    "embed": ("feature-extraction", "sentence-similarity"),
+    # 1.5.4 (#141): image-feature-extraction too (DINOv2 and other image embedders, on the transformers engine). CLIP-like
+    # models are tagged zero-shot-image-classification: they show under image classification, and may be added twice.
+    "embed": ("feature-extraction", "sentence-similarity", "image-feature-extraction"),
     "rerank": ("text-ranking", "text-classification"),
     "asr": ("automatic-speech-recognition",),
     "tts": ("text-to-speech",),
@@ -43,8 +45,9 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "depth": ("depth-estimation",),
     # 1.4.4 (#141): classifiers with fixed classes and CLIP-like zero-shot ones
     "image-classify": ("image-classification", "zero-shot-image-classification"),
-    # 1.4.4: text classifiers (the rerankers tagged text-classification come last, see rank)
-    "classify": ("text-classification",),
+    # 1.4.4: text classifiers (the rerankers tagged text-classification come last, see rank); 1.5.4 (#144): zero-shot
+    # (NLI) classifiers too, which the transformers engine runs
+    "classify": ("text-classification", "zero-shot-classification"),
 }
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 EXPAND = ("downloads", "likes", "lastModified", "gated", "private", "pipeline_tag", "library_name", "tags",

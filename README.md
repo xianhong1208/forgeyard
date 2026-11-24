@@ -58,6 +58,11 @@ them where they fit, and every program calls them at `/v1` with an API key.
   `/v1/classify` (1.4.4), speech to text, text to speech, image generation, video generation as jobs, and
   vision models: object detection (1.4.4: also detectors that find what you name), segmentation, depth and
   (1.4.4) image classification at `/v1/vision/…`, deployed like any other model.
+- **Search images by text, classify without training (1.5.4).** Forgeyard's own transformers engine runs on any
+  CPU: image embeddings with CLIP, SigLIP 2 or DINOv2 at `/v1/embeddings` (images beside texts, a text finds
+  pictures; images never go to a cloud provider), and text classifiers with fixed labels or zero-shot ones that
+  choose among the labels each request names, Chinese included. The Playground shows a similarity table and
+  the labels as chips; each model's page shows the languages it reads.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted. Admins download the key and the CA
   as one passphrase-encrypted backup file from the console (1.4.2). From 1.4.5 the gateway reaches every replica
@@ -296,6 +301,8 @@ and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Tur
 | Wan2.1-T2V-1.3B | vLLM-Omni (`vllm-omni-video`) | NVIDIA A100 |
 | **Vision (1.4)** | | |
 | RT-DETRv2 R18 and R50, SAM 2.1 Hiera tiny, Depth Anything V2 Small | Forgeyard's vision server (`vision`) | CPU (as a process, before the 1.4 image is published) |
+| **Image embeddings and text classification (1.5.4)** | | |
+| CLIP ViT-B/32 LAION-2B and DINOv2 small embeddings; DistilBERT multilingual sentiment; bge-m3-zeroshot-v2.0-c and roberta-base-zeroshot-v2.0-c (zero-shot) | Forgeyard's transformers server (`transformers`) | CPU (as a process, before the 1.5.4 image is published) |
 | **Cloud** | | |
 | Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
 

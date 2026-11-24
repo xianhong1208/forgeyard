@@ -133,8 +133,12 @@ describe("the Playground in Traditional Chinese", () => {
         url === "/api/playground/embeddings" ? { status: 200, body: { data: [{ embedding: [0.1, 0.2, 0.3] }], usage: { prompt_tokens: 9 } } } : undefined);
     mount("/playground?model=bge-m3");
     const emb = (await screen.findByRole("heading", { name: "嵌入" })).closest("section") as HTMLElement;
+    // 1.5.4: texts one per line; one text gives one vector (no table), its first values folded under the line.
+    fireEvent.change(within(emb).getByLabelText("文字，每行一段"), { target: { value: "你好" } });
     fireEvent.click(within(emb).getByRole("button", { name: "產生嵌入" }));
-    expect((await within(emb).findByLabelText("回答")).textContent).toMatch(/^3 維，耗時 \d+ 毫秒 · 9 個 token\n\[0\.1000, 0\.2000, 0\.3000, …\]$/);
+    const answer = await within(emb).findByLabelText("回答");
+    expect(within(answer).getByRole("status").textContent).toMatch(/^1 個向量（3 維） · \d+ 毫秒 · 9 個 token$/);
+    expect(answer.querySelector("pre")?.textContent).toBe("T1 你好\n[0.1000, 0.2000, 0.3000, …]");
     noEnglish(emb);
     cleanup();
     server([route(2, "reranker", "rerank")], [dep(2, "rerank")]);

@@ -618,3 +618,26 @@ def test_fy_tgw_012_the_recommended_entries():
         rec.check({**raw, "models": raw["models"] + [{**entry, "name": "clip-again"}]})
     with pytest.raises(rec.RecommendedError, match="a model of the transformers server has a permissive licence"):
         rec.check({**raw, "models": [{**entry, "license": "openrail"}]})
+
+
+def test_fy_tgw_013_deployments_carry_what_the_playground_shows(owner):
+    """FY-TGW-013 (1.5.4, PR 3): a deployment's model names the languages its card names (embedding and classification
+    models only: the Playground warns before Chinese texts go to an English-only one) next to what it embeds and its
+    labels; another task's deployment has no `languages`; a card that names none gives null."""
+    seed_catalog()
+    for name, conf, task, langs in (("clip", "clip-vit-b-32-laion2b", "embed", ["en"]), ("dino", "dinov2-small", "embed", None),
+                                    ("nli", "bge-m3-zeroshot-v2.0-c", "classify", ["multilingual"])):
+        add_catalog(name, meta_of(conf, task, **({"languages": langs} if langs else {})), task=task, fmt="safetensors",
+                    source=f"hf://acme/{conf}")
+    cpu = make_node("cpu-a", features=FEATURES)
+    tf = copy_on(owner, NEW_CPU, NEW_CUDA, "transformers-154")
+    for name in ("clip", "dino", "nli"):
+        deploy(owner, name, name, tf, params={"gpus": 0}, machine_id=cpu)
+    deploy(owner, "emb", "qwen3-embedding-0.6b", "vllm-pooling")
+    deps = {d["name"]: d["model"] for d in owner.get("/api/deployments").json()["deployments"]}
+    assert deps["clip"]["languages"] == ["en"] and deps["clip"]["embed"]["modalities"] == ["text", "image"]
+    assert deps["dino"]["languages"] is None and deps["dino"]["embed"]["modalities"] == ["image"]
+    assert deps["nli"]["languages"] == ["multilingual"] and deps["nli"]["classify"]["zero_shot"] is True
+    assert "languages" in deps["emb"]
+    one = owner.get(f"/api/deployments/{owner.get('/api/deployments').json()['deployments'][0]['id']}").json()["deployment"]
+    assert "languages" in one["model"]

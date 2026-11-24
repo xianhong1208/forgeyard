@@ -1,7 +1,7 @@
 // 1.4.3 (#140): a catalog model's page, /models/<name>: what it is, which machines have it and where it fits, its
 // deployments, the engines that run it, and its files (folded to one line). Everyone signed in may look; operators
 // and admins deploy and download it; admins change its display name and remove it.
-import { IconDownload, IconExternalLink, IconLock, IconPencil, IconPhoto, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconAlertTriangle, IconDownload, IconExternalLink, IconLanguage, IconLock, IconPencil, IconPhoto, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -13,6 +13,7 @@ import { Notice } from "../components/ui";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
+import { embedSummary, embedsImages, embedsText, englishOnly, languagesLine } from "../lib/encoders";
 import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource, taskLabel } from "../lib/models";
 import { catalogKind, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
@@ -107,6 +108,9 @@ function ModelView({ p, machines, deployments, reload }: {
       <p className="mk-facts">
         <span className="chip">{taskLabel(m)}</span>
         {m.modalities && m.modalities.length > 0 && <span className="chip chip-tone-run"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>}
+        {m.task === "embed" && m.embed && <span className={`chip${embedsImages(m.embed) ? " chip-tone-run" : ""}`}>{embedsImages(m.embed) && <><IconPhoto size={11} aria-hidden="true" />{" "}</>}{embedSummary(m.embed)}</span>}
+        {m.classify?.zero_shot && <span className="chip chip-tone-wait">{t("modelpage.zeroShot")}</span>}
+        {m.languages && m.languages.length > 0 && <LanguagesChip m={m} />}
         <span><strong>{bytes(m.size_bytes)}</strong> {m.format}</span>
         {m.summary.params ? <span>{t.rich("modelpage.params", { params: <strong>{params(m.summary.params)}</strong> })}</span> : null}
         <span className="mono">{m.license ?? t("modelpage.noLicence")}{m.license_from ? "*" : ""}</span>
@@ -114,6 +118,7 @@ function ModelView({ p, machines, deployments, reload }: {
         {est && recipe && <span>{t.rich("modelpage.needs", { amount: <strong>{est.device === "gpu" ? t("modelpage.perGpu", { size: gib(est.per_gpu) }) : t("modelpage.ram", { size: gib(est.ram) })}</strong>, recipe })}</span>}
         <span>{m.deployments ? <strong>{t("modelpage.deployed", { count: String(m.deployments) })}</strong> : t("modelpage.notDeployed")}</span>
       </p>
+      <LanguageWarning m={m} />
       <Jump links={[["overview", t("modelpage.jump.overview")], ["machines", t("modelpage.jump.machines")], ["deployments", t("modelpage.jump.deployments")],
         ["engines", t("modelpage.jump.engines")], ["files", t("modelpage.jump.files")]]} />
 
@@ -149,6 +154,34 @@ function ModelView({ p, machines, deployments, reload }: {
       </HelpLinks>
     </>
   );
+}
+
+// 1.5.4: the languages its card names, beside the task: prominent for a text classifier or an embedding model that
+// reads texts (a zero-shot classifier answers in whatever language its labels are, right or wrong).
+function LanguagesChip({ m }: { m: CatalogModel }) {
+  const t = useT();
+  const line = languagesLine(m.languages ?? []);
+  const warn = englishOnly(m.languages) && (m.task === "classify" || (m.task === "embed" && embedsText(m.embed)));
+  return (
+    <span className={`chip${warn ? " chip-tone-run" : m.classify?.zero_shot ? " chip-tone-ok" : ""}`} title={t("modelpage.lang.title", { names: line.full })}>
+      <IconLanguage size={11} aria-hidden="true" /> {englishOnly(m.languages) ? t("modelpage.lang.englishOnly") : line.text}
+    </span>
+  );
+}
+
+// 1.5.4: an English-only model that reads texts says so before anyone sends it Chinese: a zero-shot classifier
+// answers wrong with confidence (1 or 2 of 12 Traditional Chinese texts in our test), a CLIP-like model puts a
+// Chinese text in the wrong place, so text -> image search finds the wrong pictures.
+function LanguageWarning({ m }: { m: CatalogModel }) {
+  const t = useT();
+  if (!englishOnly(m.languages)) return null;
+  if (m.task === "classify") {
+    return <p className="lang-warn" role="note"><IconAlertTriangle size={16} aria-hidden="true" /> <span>{m.classify?.zero_shot ? t("modelpage.lang.warnZeroShot") : t("modelpage.lang.warnClassify")}</span></p>;
+  }
+  if (m.task === "embed" && embedsText(m.embed)) {
+    return <p className="lang-warn" role="note"><IconAlertTriangle size={16} aria-hidden="true" /> <span>{embedsImages(m.embed) ? t("modelpage.lang.warnClip") : t("modelpage.lang.warnEmbed")}</span></p>;
+  }
+  return null;
 }
 
 // An admin changes the name the console shows; the catalog name stays, because deployments record it.
@@ -200,7 +233,10 @@ function ModelAbout({ p }: { p: Page }) {
       {(m.summary.layers || m.summary.max_context) ? (
         <div className="fact"><dt>{t("modelpage.fact.shape")}</dt><dd>{[m.summary.layers && t("modelpage.fact.layers", { count: String(m.summary.layers) }), m.summary.kv_heads && t("modelpage.fact.kvHeads", { count: String(m.summary.kv_heads) }), m.summary.head_dim && t("modelpage.fact.head", { count: String(m.summary.head_dim) }), m.summary.max_context && t("modelpage.fact.context", { count: t.num(m.summary.max_context) })].filter(Boolean).join(" · ")}</dd></div>
       ) : null}
-      {m.classify?.labels ? <div className="fact"><dt>{t("modelpage.fact.labels")}</dt><dd>{m.classify.labels}{m.classify.label_names?.length ? <span className="muted small"> · {m.classify.label_names.slice(0, 8).join(", ")}{m.classify.label_names.length > 8 ? ", …" : ""}</span> : null}{m.classify.problem === "multi_label_classification" ? <span className="muted small">{t("modelpage.fact.multiLabel")}</span> : null}</dd></div> : null}
+      {m.task === "embed" && m.embed ? <div className="fact"><dt>{t("modelpage.fact.embeds")}</dt><dd>{embedSummary(m.embed)}{embedsImages(m.embed) ? <span className="muted small">{embedsText(m.embed) ? t("modelpage.fact.embedsBoth") : t("modelpage.fact.embedsImages")}</span> : null}</dd></div> : null}
+      {m.classify?.zero_shot ? <div className="fact"><dt>{t("modelpage.fact.labels")}</dt><dd>{t("modelpage.fact.labelsAsked")} <span className="muted small">{t.rich("modelpage.fact.labelsAskedHow", { labels: <code>labels</code>, template: <code>hypothesis_template</code> })}</span></dd></div> : null}
+      {m.languages && m.languages.length > 0 ? <div className="fact"><dt>{t("modelpage.fact.languages")}</dt><dd>{languagesLine(m.languages, 50).text}</dd></div> : null}
+      {!m.classify?.zero_shot && m.classify?.labels ? <div className="fact"><dt>{t("modelpage.fact.labels")}</dt><dd>{m.classify.labels}{m.classify.label_names?.length ? <span className="muted small"> · {m.classify.label_names.slice(0, 8).join(", ")}{m.classify.label_names.length > 8 ? ", …" : ""}</span> : null}{m.classify.problem === "multi_label_classification" ? <span className="muted small">{t("modelpage.fact.multiLabel")}</span> : null}</dd></div> : null}
       {m.vision?.zero_shot ? <div className="fact"><dt>{t("modelpage.fact.classes")}</dt><dd>{t("modelpage.fact.findsWhatYouName")} <span className="muted small">{t.rich("modelpage.fact.zeroShot", { labels: <code>labels</code> })}</span></dd></div> : null}
       {!m.vision?.zero_shot && m.vision?.labels ? <div className="fact"><dt>{t("modelpage.fact.classes")}</dt><dd>{m.vision.labels}{m.vision.label_examples?.length ? <span className="muted small"> · {m.vision.label_examples.slice(0, 6).join(", ")}…</span> : null}</dd></div> : null}
       {m.image?.size ? <div className="fact"><dt>{t("modelpage.fact.nativeSize")}</dt><dd>{t("modelpage.fact.nativeSizeValue", { size: String(m.image.size) })}{m.image.pipeline ? <span className="muted small"> · {m.image.pipeline}</span> : null}</dd></div> : null}

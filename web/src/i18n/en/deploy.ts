@@ -53,6 +53,8 @@ export default {
   "deploy.est.perGpu": "per GPU{gpus}",
   "deploy.est.gpus": " ({count} GPUs)",
   "deploy.est.ofRam": "of RAM",
+  "deploy.anyCpu": "Forgeyard's transformers server: runs on any CPU (x86-64 or Arm), no GPU needed; on a GPU it shares the card.",
+  "deploy.est.float32": "On a CPU the weights are held in float32 (half precision is several times slower there), so a 16-bit model needs about twice its file size in RAM.",
   "deploy.shareHintLabel": "GPU sharing hint",
   "deploy.useShare": "Use Share VRAM",
   "deploy.ctx.use": "Use {label}: {n} tokens",

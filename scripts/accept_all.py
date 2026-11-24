@@ -51,6 +51,14 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              detector also on the CPU machine: two cats found in the COCO photo (multipart and JSON), the mask
              of a square, a 16-bit depth map, the wrong endpoint, no image, no key, a key without the model,
              the replica's port behind its key
+  transformers  the transformers engine (1.5.4, scripts/accept_transformers.py's checks): CLIP ViT-B/32, DINOv2 small, a
+             DistilBERT sentiment classifier and bge-m3-zeroshot-v2.0-c on the CPU machine, CLIP and the zero-shot model
+             on the GPU machine (the CUDA variant), with the recipe --transformers-recipe (default transformers): a text
+             finds its picture, a picture its smaller copy, every vector of length 1, an image by address fetched by the
+             gateway, the image cap and the media refusals, images staying local (with --cloud-provider), fixed labels,
+             12 Traditional Chinese lines among 10 topics with a Chinese template, multi-label, the zero-shot refusals,
+             Try it, the Playground's route, the replica's key guard, usage. Until the built-in recipe's image moves to
+             1.5.4 its deployments are a SKIP saying vision_image_too_old
   relay      models through the server (1.4): on the relay machine (--relay-machine, default the CPU machine)
              with its fetch_via set to "server", Download to… a small GGUF (RELAY_MODEL, 26 MB): done, "via"
              server, the file and its size in the machine's model cache; then on a second machine
@@ -82,7 +90,7 @@ chosen. A machine that is not given skips what would run on it, saying so.
 Waiting has two limits (1.4.5): --timeout (40 minutes) for a deployment or workload to download and start, and
 --place-timeout (5 minutes) for one the server cannot place at all (no machine has the room: "Cannot be placed:
 GPU #4 has 1.8 GiB available, needs 3 GiB"), after which its checks are a SKIP naming that shortage. Before each
-group that deploys on the GPU machine (tts, img, video, vision, scale: GPU_GROUPS) the run stops what earlier
+group that deploys on the GPU machine (tts, img, video, vision, transformers, scale: GPU_GROUPS) the run stops what earlier
 groups left on a GPU and no later group needs, waits until it is stopped and the machine has reported its memory
 again, and removes it; the models group's deployments are only stopped (the console shows one, the cleanup removes
 them), and its speech-to-text one stays while the tts group may use it. So on a card shared with other people's
@@ -154,7 +162,7 @@ PLACE_TIMEOUT = 300
 # no group still to run needs is stopped, and then removed (the models group's deployments only stopped: the
 # console shows one), so that a card shared with other people's work has room for the next group's models. The
 # models group's speech-to-text deployment stays while the tts group (--tts-asr) may still use it.
-GPU_GROUPS = ("tts", "img", "video", "vision", "scale")
+GPU_GROUPS = ("tts", "img", "video", "vision", "transformers", "scale")
 FREE_WAIT = 120
 SDK_SPEC = "openai>=2,<4"
 PLAYWRIGHT_SPEC = "playwright>=1.48,<2"
@@ -443,6 +451,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     ap.add_argument("--place-timeout", type=float, default=PLACE_TIMEOUT, help="seconds a workload or deployment may "
                     "wait for room on a machine (the server places none of its replicas) before its checks are skipped, "
                     "naming the shortage (default 300)")
+    ap.add_argument("--transformers-recipe", default="transformers", help="the transformers group's recipe: a custom one "
+                    "naming a newer vision image before the built-in one's pin moves (default transformers)")
     ap.add_argument("--kill-local", action="store_true",
                     help="kill the engine of a CPU replica running on THIS computer to show failover")
     ap.add_argument("--tts-asr", default="auto", help="the tts group's intelligibility check: auto (a ready "
@@ -2135,6 +2145,26 @@ def group_vision(run: Run) -> None:
         accept_vision.exercise(run.args.server, d, d["name"], spec, run.check, key, narrow, image, filename, report, c)
         run.report.info.setdefault("vision", {})[d["name"]] = report.get(d["name"])
         _delete_deployment(c, d0["id"])
+
+
+# ------------------------------------------------------------------ group: transformers
+@group("transformers", "the transformers engine: image embeddings, fixed and zero-shot text classification")
+def group_transformers(run: Run) -> None:
+    sys.path.insert(0, str(HERE))
+    import accept_m3
+    import accept_transformers as at
+
+    accept_m3.TLS = run.tls
+    machines = {"cpu": run.fresh_machine("cpu"), "gpu": run.fresh_machine("gpu")}
+    opts = argparse.Namespace(only=at.DEFAULT_ONLY, gpu_only=at.DEFAULT_GPU, transformers_recipe=run.args.transformers_recipe,
+                              photo=None, image_url=at.COCO_CATS, cloud_provider=run.args.cloud_provider, zh_pass=11, threads=8,
+                              timeout=run.args.timeout, place_timeout=run.args.place_timeout, keep=False)
+    x = at.Ctx(run.admin, run.args.server, run.tls, run.check, opts, prefix=run.name("tf-"))
+    try:
+        at.run(x, machines)
+    finally:
+        at.undo(x)
+    run.report.info["transformers"] = {"recipe": opts.transformers_recipe, "deployed": sorted(x.served), "too_old": x.too_old}
 
 
 # ------------------------------------------------------------------ group: relay

@@ -320,6 +320,12 @@ def _rollout(w: Workload) -> Optional[dict]:
             "next": min(r.ordinal for r in old)}
 
 
+def _languages(meta: dict) -> Optional[list[str]]:
+    """The languages a model's card names (as the catalog's `languages`), or None: unknown (1.5.4)."""
+    langs = meta.get("languages")
+    return [str(x) for x in langs] if isinstance(langs, list) and langs else None
+
+
 def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool = False) -> dict:
     w = d.workload
     route = routes.own_route(db, d.id)
@@ -334,7 +340,10 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
                   # 1.4.4: a text classifier's labels, so the Playground names every probability.
                   **({"classify": textcls.out(d.model.meta or {})} if d.model.task == textcls.TASK else {}),
                   # 1.5.4: what an embedding model takes (text, image or both), for Try it and the Playground.
-                  **({"embed": encoders.embed_of(d.model.meta or {})} if d.model.task == "embed" else {})},
+                  **({"embed": encoders.embed_of(d.model.meta or {})} if d.model.task == "embed" else {}),
+                  # 1.5.4: the languages its card names, so the Playground warns before Chinese texts go to an
+                  # English-only classifier or CLIP.
+                  **({"languages": _languages(d.model.meta or {})} if d.model.task in ("embed", textcls.TASK) else {})},
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
         "route": {"served_name": route.served_name, "api": route.api,
                   "upstream_model": own.upstream_model if own else d.served_name}

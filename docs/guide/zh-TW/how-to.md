@@ -554,9 +554,9 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 文字分類
 
-文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。它在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡。
+文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡；從 1.5.4 起，DeBERTa、DistilBERT 或 BART 分類模型，以及在沒有 GPU 的機器上的任何分類模型，都由 Forgeyard 的 transformers 伺服器（配方 `transformers`，任何 CPU 都行）執行。想在每個請求裡自己指定標籤，見[不用訓練就能分類文字（零樣本）](#classify-text-without-training-zero-shot)。
 
-1. **模型 → 加入模型 → 推薦**：*文字分類* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **文字分類** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
+1. **模型 → 加入模型 → 推薦**：*文字分類* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **文字分類** 搜尋 Hugging Face：有兩個以上標籤的分類模型都能加入，目錄會列出能執行它的推論引擎（能用 vLLM 時 vLLM 排第一）。目錄會顯示它的標籤，以及模型說明卡列出的語言；reranker（只有一個輸出）或迴歸（regression）頭會被拒絕，並說明原因。
 2. **部署**。模型本身的最大長度比推論引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
 3. 它會出現在 **服務中 → 文字分類**。部署頁面的 **試試看** 會送一句話；**試用區** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
 
@@ -608,7 +608,74 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
        "structured_outputs": {"choice": ["billing", "shipping", "technical", "other"]}}'
 ```
 
-回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型（請求裡帶你的標籤的 NLI 模型，也能在 CPU 上執行）會在 1.5 和 transformers 推論引擎一起推出（#144）。
+回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型同樣在每個請求裡接受你的標籤，成本卻只有一小部分：見下一節。
+
+## 不用訓練就能分類文字（零樣本）
+
+零樣本分類模型（1.5.4）從**你在每個請求裡指定的標籤**中挑選：今天是 `["billing", "technical problem", "praise"]`，明天可以換一組，不用訓練。它是 NLI 模型：對每個標籤，它讀文字和一句像「這段文字是關於帳務。」的句子，評估文字有多支持這句話。它在 Forgeyard 的 transformers 伺服器（配方 `transformers`）上執行，任何 CPU 都行，也能共用 GPU。
+
+1. **模型 → 加入模型 → 推薦 → 文字分類**：`bge-m3-zeroshot-v2.0-c` 能讀多種語言，包含中文（1.1 GiB）；`roberta-base-zeroshot-v2.0-c` **只讀英文**，速度大約快四倍。兩者都是 MIT 授權，訓練資料都可以商用。模型頁面會顯示 *零樣本：每個請求自帶標籤* 和它的語言，模型只讀英文時還會提醒：這種模型回答中文文字時很有把握，卻大多是錯的（我們的測試 12 段只對 1 到 2 段）。
+2. **部署**。在 CPU 上大約需要模型大小兩倍的 RAM（權重在 CPU 上以 float32 保存，估算已經算進去）；*Zero-shot pairs per request*（`max_pairs`，256）限制一次請求的文字數 × 標籤數。
+3. 在 **試用區** 輸入標籤（按 Enter 或逗號加入一個）、文字一行一段，按 **分類**：每段文字的長條依你給的標籤順序排列，最可能的會標出來。*可以同時符合多個標籤* 會讓每個標籤各自評分，0 到 1。頁面會依部署的上限計算文字數 × 標籤數。
+
+**假設句範本** 請用文字本身的語言寫：12 段繁體中文新聞、10 個中文主題，用 `這段文字是關於{}。` 全部答對，用英文預設 `This text is about {}.` 對 11 段（試用區可以一鍵改用中文範本）。
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "bge-m3-zeroshot-v2.0-c", "input": ["我的發票金額開錯了", "新筆電的電池可以用一整天"],
+       "labels": ["帳務", "科技", "運動"], "hypothesis_template": "這段文字是關於{}。"}'
+```
+
+```json
+{"id": "classify-…", "object": "list", "created": 1795000000, "model": "bge-m3-zeroshot-v2.0-c",
+ "labels": ["帳務", "科技", "運動"], "multi_label": false,
+ "data": [{"index": 0, "label": "帳務", "probs": [0.93, 0.05, 0.02], "num_classes": 3},
+          {"index": 1, "label": "科技", "probs": [0.03, 0.95, 0.02], "num_classes": 3}],
+ "usage": {"prompt_tokens": 96, "total_tokens": 96, "completion_tokens": 0}}
+```
+
+`probs` 依你的 `labels` 排列；`"multi_label": true` 會讓每個標籤各自評分。模型對每段文字配每個標籤各跑一次，所以時間會隨兩者增加（bge-m3 用四個 CPU 執行緒：每組文字和標籤大約 50 毫秒，12 段文字 × 10 個標籤 6 秒）：標籤清單盡量短、多給一些執行緒，或量大時改用 GPU 上的 CUDA 版本。該用哪一種：
+
+| 你需要 | 用 |
+|---|---|
+| 每天同樣幾個標籤、量大（情緒、語言、有害內容） | 固定標籤的分類模型 |
+| 標籤會變、不想訓練、文字不長 | 零樣本分類模型 |
+| 細微或很長的文字要最好的答案、標籤需要說明 | 對話模型搭配 `structured_outputs.choice`（上一節） |
+
+## 用文字搜尋圖片（圖片嵌入）
+
+圖片嵌入模型（1.5.4）把圖片轉成向量，CLIP 類模型連文字也一起，放在同一個空間裡：一段文字的向量會靠近它描述的圖片的向量，所以你可以打字搜尋照片、掃描檔或螢幕截圖。DINOv2 只收圖片，用來找重複或相似的圖。它們在 Forgeyard 的 transformers 伺服器（配方 `transformers`）上執行，任何 CPU 都行，也能共用 GPU。
+
+1. **模型 → 加入模型 → 推薦 → 圖片嵌入**：`siglip2-base-embed`（多種語言的文字，768 維）、`clip-vit-b-32-laion-embed`（英文文字，512 維，小又快）和 `dinov2-small-embed`（只收圖片，384 維）。CLIP 類的儲存庫能做兩件事，各自是一個目錄項目：以 **嵌入** 加入用來搜尋，再用另一個名稱以 **圖片分類** 加入一次，用你選的字詞替圖片分類。
+2. **部署**。模型頁面和 **服務中** 會顯示它收什麼（收圖片的模型有圖片圖示）和向量維度；*Images per request*（`max_images`，32）限制一次請求。
+3. 在 **試用區** 輸入文字（一行一段）並加入圖片（選擇、拖進來、貼上螢幕截圖，或給一個由伺服器抓取的網址），按 **產生嵌入**：表格會列出每段文字和每張圖片的餘弦相似度，每一列最相似的會標出來。請在同一列裡比較：CLIP 類模型給相符的文字和圖片大約 0.25 到 0.4，不相干的大約 0.1。
+
+在 Python 裡，OpenAI SDK 用 `extra_body` 送有型別的項目（它的 `input` 只收字串）；純文字清單和任何嵌入模型一樣能用：
+
+```python
+import base64
+import os
+import ssl
+
+from openai import DefaultHttpxClient, OpenAI
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+client = OpenAI(base_url="https://192.168.1.20:7860/v1", api_key=os.environ["FORGEYARD_API_KEY"],
+                http_client=DefaultHttpxClient(verify=ca))
+photo = "data:image/jpeg;base64," + base64.b64encode(open("cats.jpg", "rb").read()).decode()
+r = client.embeddings.create(model="siglip2-base-embed", input=[],
+                             extra_body={"input": ["two cats on a sofa", {"image": photo},
+                                                   {"image": "https://example.com/street.jpg"}]})
+text, cats, street = (d.embedding for d in r.data)
+print(sum(a * b for a, b in zip(text, cats)), sum(a * b for a, b in zip(text, street)))
+```
+
+向量已經正規化，所以內積就是餘弦相似度。圖片網址由 Forgeyard 伺服器依媒體規則抓取（除非設定 `MEDIA_ALLOW_PRIVATE_HOSTS`，只能是公開位址），推論引擎從不自己抓。請記得：
+
+- **一個索引只用一個模型。** 兩個模型的向量對不上：換掉某個名稱背後的模型時要重建索引。也因為這樣，帶圖片的請求絕不送往雲端供應商。
+- **文字要短。** CLIP 類模型只讀 64 到 77 個 token，其餘會截掉（`usage.truncated_inputs` 會計算）：它適合圖說和查詢。文件請用文字嵌入模型。
+- **文字的語言。** CLIP LAION-2B 讀英文；中文查詢請用 SigLIP 2。
 
 ## 使用受限（gated）的 Hugging Face 模型
 

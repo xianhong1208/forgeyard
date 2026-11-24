@@ -505,7 +505,7 @@ local_dirs = ["/data/models"]
 | `use_activation` | 選用，`true` 或 `false`：`false` 傳回原始分數（logits）而不是機率（只限固定標籤的模型） |
 | `labels` | 只限零樣本模型（1.5.4）：要從中挑選的標籤，1 到 32 個名稱，每個 1 到 64 個字元的純文字，不能重複（不分大小寫）：機率依它們的順序排列 |
 | `multi_label` | 零樣本，選用：`true` 讓每個標籤各自評分（entailment 對 contradiction），所以可以同時符合好幾個；`false`（預設）讓標籤之間分配機率 |
-| `hypothesis_template` | 零樣本，選用：把每個標籤放進去的句子，一行、最多 200 個字元、剛好一個 `{}`（預設 `"This text is about {}."`）。標籤是中文時，用中文句子比較好，例如 `"這段文字和{}有關。"` |
+| `hypothesis_template` | 零樣本，選用：把每個標籤放進去的句子，一行、最多 200 個字元、剛好一個 `{}`（預設 `"This text is about {}."`）。標籤是中文時，用中文句子比較好，例如 `"這段文字是關於{}。"` |
 
 閘道只送出這些欄位（其他欄位會被丟掉）；`messages`（vLLM 的對話格式）回 400。零樣本模型（NLI 模型，目錄項目上標著 `classify.zero_shot`）對每段文字和每個標籤各跑一次：文字數 x 標籤數最多是部署的 *Zero-shot pairs per request*（`max_pairs`，256）。送給固定標籤模型的 `labels` 回 400 `labels_not_supported`；零樣本模型沒收到它則回 400 `labels_required`；沒有 `labels` 卻送了 `multi_label` 或 `hypothesis_template` 回 400 `invalid_request`。只懂英文的零樣本模型處理中文表現很差：目錄會列出每個模型的語言。其他種類的模型回 400 `wrong_endpoint`，並說出它的端點（對話模型還會說明怎麼用結構化輸出分類）。
 
