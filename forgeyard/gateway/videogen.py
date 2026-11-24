@@ -13,9 +13,10 @@ before anything is sent, what the engine is asked, and what a job looks like to 
   in JSON `{"image_url": …}`, a base64 data: URL or an http(s) URL that **the gateway fetches** under the media rules
   (forgeyard/gateway/media.py), only once the key may use the model; a `file_id` is refused. It gets the checks of an
   edit's input images (forgeyard/gateway/imageedit.py): at most MEDIA_FETCH_MAX_MB, a PNG, JPEG or WebP by its first
-  bytes, its size read from its header (never decoded) and within the deployment's `max_input_side`. A model that
-  needs one (`meta.video.image_input` required) refuses a request without it (`input_reference_required`); one that
-  takes none refuses a request with it (`input_reference_not_supported`). vLLM-Omni's `image_reference`,
+  bytes, its size read from its header (never decoded) and within the deployment's `max_input_side`. What the model
+  does comes first, once the key may use it and before the image is checked or its URL fetched: a model that needs
+  one (`meta.video.image_input` required) refuses a request without it (`input_reference_required`); one that takes
+  none refuses a request with it (`input_reference_not_supported`), fetching nothing. vLLM-Omni's `image_reference`,
   `video_reference`, `audio_reference` and `input_references` stay refused: the engine would fetch those URLs itself
   (following redirects) or read videos and sound.
 - **Per deployment** (each with a working default, from its parameters): the longest video
@@ -263,6 +264,18 @@ def check(obj: dict) -> Ask:
     seed = _whole(obj, "seed", -(2**63), 2**63 - 1)
     return Ask(prompt=prompt, seconds=seconds, size=wh, steps=steps, guidance=_number(obj, "guidance_scale", 0, 20),
                seed=seed, negative=neg if neg else None, image=image)
+
+
+def offered(name: str, ask: Ask, all_f: list[Films]) -> None:
+    """What the model does with a start image comes first (1.5.5), before the image is checked or its URL fetched: a
+    start image to a model none of whose deployments takes one is 400 `input_reference_not_supported`, and a request
+    without one to a model all of whose deployments need one is 400 `input_reference_required`. Called once the key's
+    access is checked; a route that mixes them is sorted out per deployment (`takes`)."""
+    kinds = {f.image_input for f in all_f}
+    if ask.image is not None and kinds == {"none"}:
+        raise refusal(name, "input_reference_not_supported", ask, all_f)
+    if ask.image is None and kinds == {"required"}:
+        raise refusal(name, "input_reference_required", ask, all_f)
 
 
 def takes(f: Optional[Films], ask: Ask) -> Optional[str]:

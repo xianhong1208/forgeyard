@@ -332,14 +332,16 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
         deployment_id = route.deployment_id
         idle.used(route_deployments(route))   # 1.5.0: a video asked for is use (its job then holds it awake)
         ask = videogen.check(obj)
-        if ask.image is not None:
-            # 1.5.5 (#143): a start image's URL fetched by the gateway (only now that the key may use the model), its
-            # bytes, type and header size checked as an edit's input images are.
-            await imageedit.fetch_all(ask.inputs, videogen.START)
-            imageedit.check(ask.inputs, videogen.START)
         groups = [g for tier in route.tiers for g in tier.locals if g.films is not None]
         if not groups:
             raise GatewayError(503, "no_target", f"{model!r} has no video deployment that can take this request.")
+        # 1.5.5 (#143): what the model does with a start image first; only then is its URL fetched by the gateway (the
+        # key may use the model, and the model takes one), and its bytes, type and header size checked as an edit's
+        # input images are.
+        videogen.offered(route.served_name, ask, [g.films for g in groups])
+        if ask.image is not None:
+            await imageedit.fetch_all(ask.inputs, videogen.START)
+            imageedit.check(ask.inputs, videogen.START)
         why = {g.deployment_id: videogen.takes(g.films, ask) for g in groups}
         fits = [g for g in groups if why[g.deployment_id] is None]
         if not fits:

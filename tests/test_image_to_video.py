@@ -255,8 +255,8 @@ def test_fy_i2v_005_the_start_image_checks(iv, monkeypatch):
 
 def test_fy_i2v_006_models_that_need_take_or_refuse_a_start_image(iv):
     """FY-I2V-006: an image-to-video model refuses a request without a start image (400 input_reference_required) and
-    takes one with it; a text-to-video model refuses a start image (400 input_reference_not_supported), checked first
-    so its bytes are known to be an image; neither reaches the engine when refused. Each error names input_reference."""
+    takes one with it; a text-to-video model refuses a start image (400 input_reference_not_supported); neither reaches
+    the engine when refused. Each error names input_reference."""
     r = iv.api.post("/v1/videos", json={"model": "i2v", "prompt": "The cat walks."})
     assert r.status_code == 400 and err(r)["code"] == "input_reference_required" and err(r)["param"] == "input_reference"
     assert "'i2v'" in err(r)["message"] and posts(iv, "i2v") == []
@@ -378,3 +378,24 @@ def test_fy_i2v_012_the_openai_sdk_sends_a_start_image(iv):
         with pytest.raises(openai.BadRequestError) as e:
             c.videos.create(model="i2v", prompt="The cat walks.")
     assert e.value.code == "input_reference_required"
+
+
+def test_fy_i2v_013_what_the_model_does_comes_before_the_image(iv):
+    """FY-I2V-013: once the key may use the model, what the model does with a start image is decided before the image
+    is checked or its URL fetched: a text-to-video model answers input_reference_not_supported to a start image URL
+    without fetching it, and to a HEIC file without reading it as an image; an image-to-video model answers
+    input_reference_required to a request without one. A model that takes start images fetches the URL. No refused
+    request reaches an engine."""
+    url = f"{iv.media.url}/img.png"
+    heic = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 64
+    for r, code in [(iv.api.post("/v1/videos", json={"model": "t2v", "prompt": "x", "input_reference": {"image_url": url}}),
+                     "input_reference_not_supported"),
+                    (start(iv.api, "t2v", heic, "image/heic"), "input_reference_not_supported"),
+                    (start(iv.api, "t2v", claims(60000, 60000)), "input_reference_not_supported"),
+                    (iv.api.post("/v1/videos", json={"model": "i2v", "prompt": "x"}), "input_reference_required"),
+                    (iv.api.post("/v1/videos", data={"model": "i2v", "prompt": "x"}), "input_reference_required")]:
+        assert r.status_code == 400 and err(r)["code"] == code and err(r)["param"] == "input_reference", r.text
+    assert iv.media.hits == [] and posts(iv, "t2v") == [] and posts(iv, "i2v") == []
+    r = iv.api.post("/v1/videos", json={"model": "i2v", "prompt": "x", "input_reference": {"image_url": url}})
+    assert r.status_code == 200, r.text
+    assert iv.media.hits == ["/img.png"] and [d for _, _, d in posts(iv, "i2v")[-1]["files"]] == [PNG]

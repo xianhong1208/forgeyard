@@ -12,13 +12,17 @@ same caps, queue, timeout, answer and usage.
 - **No masks** (`mask` as a file or a JSON field: 400 `mask_not_supported`): edits follow the prompt. OpenAI's masks
   mark the area to change with transparent pixels, the engines with white ones, and the recommended models edit from
   the instruction alone.
-- **Input checks** before any deployment is chosen: at least one image (`missing_image`), at most MAX_INPUTS
+- **What the model does comes first**: once the key may use the model, a model none of whose deployments edits is
+  400 `edits_not_supported`, whatever the request carries (no image is needed to learn that, and no URL is fetched
+  for it). Refusals about the request's shape alone (a mask, a `file_id`, a URL of another scheme, a data: URL that is
+  not base64, a file under another name) come while it is read, before the model is looked up.
+- **Input checks** then, before any deployment is chosen: at least one image (`missing_image`), at most MAX_INPUTS
   (`too_many_input_images`), each at most MEDIA_FETCH_MAX_MB (413 `media_too_large`), a PNG, JPEG or WebP by its
   first bytes (`unsupported_image_format`: HEIC, GIF and the rest; neither engine reads HEIC) whose header gives its
   size (`invalid_image`). The size is read from the header only: no image is decoded here, so a small file that
   claims a huge size costs nothing and is refused by the deployment's cap.
 - **Per deployment**: only deployments whose model edits (catalog `meta.image.edit`) and whose recipe serves edits
-  take the request (`edits_not_supported` otherwise, pointing to /v1/images/generations); at most its `Input images`
+  take the request; at most its `Input images`
   (`too_many_input_images`), each no wider or taller than its `Largest input` (`input_image_too_large`); then the
   caps of a generation (images per request, size, steps, prompt) and the formats it makes for edits.
 - **Always an explicit size**: both engines would make the first input's size when none is sent, so a 12-megapixel
@@ -142,7 +146,7 @@ def read_json(obj: dict) -> Inputs:
         raise _mask()
     images = obj.get("images")
     if images is None:
-        raise _missing()
+        return Inputs()     # none: refused once the model is known (`count`), as an edit to a model that edits none is
     if not isinstance(images, list):
         raise _bad("images is a list of objects with an image_url.", "images")
     inputs = Inputs()
@@ -181,8 +185,17 @@ def read_item(item, param: str) -> Input:
     raise _bad("image_url is a base64 data: URL or an http(s) URL; other kinds are refused.", param, "media_url_refused")
 
 
+def offered(route) -> None:
+    """400 `edits_not_supported` unless some deployment of the route edits: what the model does comes first, before
+    anything about the images (whether there are any, fetching URLs). Called once the key's access is checked."""
+    if not any(g.draws is not None and g.draws.edit > 0 for tier in route.tiers for g in tier.locals):
+        raise _bad(f"{route.served_name!r} makes images from text and edits none: send the prompt alone to "
+                   "/v1/images/generations, or edit with a model that edits images (FLUX.2 [klein], Qwen-Image-Edit).",
+                   "model", "edits_not_supported")
+
+
 def count(inputs: Inputs) -> None:
-    """At least one input, at most MAX_INPUTS (before anything is fetched)."""
+    """At least one input, at most MAX_INPUTS (after `offered`, before anything is fetched)."""
     if not inputs.items:
         raise _missing()
     if len(inputs.items) > MAX_INPUTS:
@@ -231,11 +244,9 @@ def _known(data: bytes) -> bool:
 
 # ------------------------------------------------------------------ which deployments take it
 def takes(d: Optional[imagegen.Draws], ask: imagegen.Ask, inputs: Inputs) -> Optional[str]:
-    """Why this deployment cannot take the edit (an error code), or None. One that edits nothing (`edit` 0) takes fewer
-    inputs than any edit has."""
-    if d is None:
-        return "edits_not_supported"
-    if len(inputs.items) > d.edit:
+    """Why this deployment cannot take the edit (an error code), or None. One that edits nothing (`edit` 0, or its
+    recipe is gone) takes fewer inputs than any edit has."""
+    if d is None or len(inputs.items) > d.edit:
         return "too_many_input_images"
     if any(max(i.width, i.height) > d.max_input_side for i in inputs.items):
         return "input_image_too_large"
@@ -243,16 +254,13 @@ def takes(d: Optional[imagegen.Draws], ask: imagegen.Ask, inputs: Inputs) -> Opt
 
 
 ORDER = ("prompt_too_long", "too_many_images", "too_many_input_images", "input_image_too_large", "image_too_large",
-         "invalid_size", "unsupported_output_format", "too_many_steps", "edits_not_supported")
+         "invalid_size", "unsupported_output_format", "too_many_steps")
 
 
 def refusal(name: str, code: str, ask: imagegen.Ask, inputs: Inputs, all_d: list[imagegen.Draws]) -> GatewayError:
-    """The error for an edit no deployment of the route can take, saying what would work."""
+    """The error for an edit no deployment of the route can take, saying what would work. Some deployment edits
+    (`offered` came first), so the most telling code is one of an editing deployment's caps."""
     editing = [d for d in all_d if d.edit > 0]
-    if code == "edits_not_supported" or not editing:
-        return _bad(f"{name!r} makes images from text and edits none: send the prompt alone to /v1/images/generations, "
-                    "or edit with a model that edits images (FLUX.2 [klein], Qwen-Image-Edit).", "model",
-                    "edits_not_supported")
     if code == "too_many_input_images":
         most = max(d.edit for d in editing)
         return _bad(f"{name!r} takes at most {most} input image{'s' if most > 1 else ''} per edit; this one has "

@@ -118,8 +118,7 @@ def parse_edit(body: bytes, content_type: str) -> Parsed:
     else:
         parsed = parse_body(body, content_type, "json")
         inputs = imageedit.read_json(parsed.obj)
-    imageedit.count(inputs)
-    parsed.edit = inputs
+    parsed.edit = inputs    # counted once the model is known to edit (forgeyard/gateway/imageedit.py `offered`)
     parsed.stream = False   # a stream is refused by the checks; the flag never makes it one
     return parsed
 
