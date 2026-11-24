@@ -427,6 +427,21 @@ A server run from source installs with `uv sync --extra server` (signature verif
 Migrations 0016–0018 run on start, all additive; going back to 1.5.1 means restoring the backup made before the
 upgrade. The agents need no update: the only agent change is a log line.
 
+## Shipped: 1.5.3 (2026-11-24), apps removed
+
+1. ✅ **Apps removed** (#260, for #89): apps, their API, the templates and the gateway's `/x/`, deprecated in 1.4,
+   are gone; Forgeyard runs and manages models, and the workload engine they ran on stays for model deployments
+   and engine trials. Migration `0019_remove_apps` writes each app that is left, and each API key that had `/x/`
+   access, in the audit log, then deletes the apps; the agents stop them through their work list. For the rest of
+   1.5.x the removed addresses answer 410 Gone with a link to the release notes, and Setup health says what was
+   removed for 30 days.
+2. ✅ **`forgeyard check-apps`** (#260, for #89): before upgrading, lists what the upgrade will remove (exit code 1
+   when there is anything); on an upgraded database, what it removed.
+
+A breaking change in a patch release, announced in 1.4: check and back up before upgrading; going back to 1.5.2
+means restoring that backup ([release notes](CHANGELOG.md#153--2026-11-24)). The agents need no update: no agent
+code changed.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -456,7 +471,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.5.3: apps removed** | The apps API, the templates and `/x/`, deprecated in 1.4, are removed, with a migration for the apps that are left (#89). |
 | **1.5.4: more kinds of models, part 2** | Image embeddings (#141), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
 | **1.5.5: image-to-image and image-to-video** | Edit an image or make variations of it from a prompt, and turn an image into a short video (#143). |
 | **1.6.0: single sign-on** *(enterprise edition)* | Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication (#39). |
