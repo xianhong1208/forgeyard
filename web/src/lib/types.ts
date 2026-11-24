@@ -798,6 +798,9 @@ export type AgentUpdate = {
   alternative: { title: string; steps: UpdateStep[] } | null;
   notes: string[];
   guide: string;
+  // 1.5.4: how an NVIDIA agent's device nodes are passed: "host" = the shell lists the host's when the command runs
+  // (explained under the command), "listed" = by name (an agent limited to some GPUs). Absent from older servers.
+  nvidia_devices?: "host" | "listed" | null;
 };
 
 // 1.4.3 (#140): a catalog model's page and an engine's page.

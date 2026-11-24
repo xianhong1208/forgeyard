@@ -1543,11 +1543,7 @@ that machine's agent to the server's version, made from what the agent reported 
      --restart always \
      --network host \
      --gpus all \
-     --device /dev/nvidiactl \
-     --device /dev/nvidia-uvm \
-     --device /dev/nvidia-uvm-tools \
-     --device /dev/nvidia0 \
-     --device /dev/nvidia1 \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1558,9 +1554,16 @@ that machine's agent to the server's version, made from what the agent reported 
      docker.io/tonyhuang1101/forgeyard-agent:1.5.3
    ```
 
-   On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
-   the ones the agent reports; for an older agent the host's, listed by a short shell loop), so the agent keeps its
-   GPUs when the host runs `systemctl daemon-reload`.
+   On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus all`, so the
+   agent keeps its GPUs when the host runs `systemctl daemon-reload`. Since 1.5.4 they are found on the host when you
+   run the command, by the same `$(for d in …)` line as the Docker command of [Add a machine](#run-the-agent-in-docker): every
+   `/dev/nvidia*` node the host has then, so a GPU installed after the agent started is included, and one command
+   fits machines with 1 GPU or 8. The shell turns the line into plain `--device /dev/nvidiaN` options before Docker
+   starts, so Docker records each device as if it had been typed, which is what keeps it after a `daemon-reload`.
+   Passing every device does not widen what Forgeyard uses: which GPUs it may assign is still the machine's
+   [GPU access](#restrict-gpus-on-a-shared-machine) setting. An agent started with only some GPUs
+   (`--gpus "device=0,2"`) keeps exactly the nodes it reported, by name; so does a node the agent reported that the
+   line would not find (another `/dev/nvidia…` name).
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried
    instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there

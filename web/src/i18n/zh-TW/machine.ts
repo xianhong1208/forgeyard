@@ -121,6 +121,8 @@ export default {
   "machine.update.matches": "agent {version} 和伺服器版本一致{server}。",
   "machine.update.again": "需要的話，下面的指令會用伺服器的版本重新啟動它。",
   "machine.update.adminSees": "管理員會在這裡看到更新它的指令。",
+  "machine.update.nvidiaHost":
+    "$(for d in …) 那一行會在你執行指令時找出主機上的每個 NVIDIA 裝置（/dev/nvidia*），並用 --device 傳入：agent 啟動後才裝上的 GPU 也包含在內，同一個指令在 1 張或 8 張 GPU 的機器上都能用。shell 會在 Docker 啟動前把它展開成一般的 --device 選項，所以 Docker 會記錄每個裝置，主機執行 systemctl daemon-reload 時，agent 仍保有它的 GPU。Forgeyard 可以使用哪些 GPU，仍然由這台機器的 GPU 存取設定決定。",
   "machine.help.update": "更新 agent",
   "machine.title": "機器",
   "machine.lastHeartbeat": "最後心跳 {ago}",

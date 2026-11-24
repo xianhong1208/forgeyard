@@ -111,6 +111,9 @@ export function AgentUpdateSection({ m, canManage }: { m: Machine; canManage: bo
         <>
           <p className="small">{methodLine(data)}</p>
           {data.steps.length > 0 && <Steps steps={data.steps} />}
+          {data.steps.length > 0 && data.nvidia_devices === "host" && (
+            <p className="muted small update-nvidia">{t("machine.update.nvidiaHost")}</p>
+          )}
           {data.alternative && (
             <details className="update-alt">
               <summary>{data.alternative.title}</summary>

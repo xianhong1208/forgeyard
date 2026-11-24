@@ -128,6 +128,8 @@ export default {
   "machine.update.matches": "Agent {version} matches the server{server}.",
   "machine.update.again": " The command below starts it again on the server's version, should you need to.",
   "machine.update.adminSees": "An admin sees the command that updates it here.",
+  "machine.update.nvidiaHost":
+    "The $(for d in …) line passes every NVIDIA device of the host (/dev/nvidia*) with --device, as found when you run the command: a GPU installed since the agent started is included, and the same command fits a machine with 1 GPU or 8. The shell turns it into plain --device options before Docker starts, so Docker records each device and the agent keeps its GPUs when the host runs systemctl daemon-reload. Which GPUs Forgeyard may use is still this machine's GPU access setting.",
   "machine.help.update": "Update an agent",
   "machine.title": "Machine",
   "machine.lastHeartbeat": "last heartbeat {ago}",
