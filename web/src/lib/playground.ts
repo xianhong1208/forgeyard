@@ -4,6 +4,7 @@
 import { labels, t, translate } from "../i18n/core";
 import { getLang } from "../i18n/lang";
 import { serverMessage } from "../i18n/server";
+import { notifyUnauthorized } from "./api";
 import { API_KIND, MAX_IMAGE_BYTES } from "./gateway";
 import { MODEL_KIND_ORDER, modelKind, type ModelKind } from "./fleet";
 import { sleepState, type SleepState } from "./sleep";
@@ -101,4 +102,35 @@ export function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return s < 60 ? t("playground.elapsed.s", { s: String(s) })
     : t("playground.elapsed.m", { m: String(Math.floor(s / 60)), s: String(s % 60).padStart(2, "0") });
+}
+
+// 1.5.0: a request from the Playground was sent (an asleep model starts waking: the page looks again soon).
+export const SENT_EVENT = "forgeyard:playground-sent";
+
+// The playground talks to /api/playground/<endpoint>: the gateway's routing, as the signed-in
+// user (the session cookie and the CSRF header), counted as "console" in usage. No API key.
+export async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?: FormData, localOnly = false): Promise<Response> {
+  window.dispatchEvent(new Event(SENT_EVENT));
+  const headers: Record<string, string> = { "X-Forgeyard": "1" };
+  if (localOnly) headers["X-Forgeyard-Local-Only"] = "1";
+  if (!form) headers["Content-Type"] = "application/json";
+  const res = await fetch(`/api/playground/${endpoint}`, {
+    method: "POST", credentials: "same-origin", headers, signal, body: form ?? JSON.stringify(body),
+  });
+  if (res.status === 401) {
+    const data = await res.json().catch(() => null);
+    notifyUnauthorized((data as { detail?: { reason?: string } } | null)?.detail?.reason);
+  }
+  return res;
+}
+
+// A failed answer's text (playError).
+export async function failure(res: Response): Promise<string> {
+  const data = await res.json().catch(() => null);
+  return playError(res.status, data);
+}
+
+// The time a request took is measured in its event handler (a clock read outside render).
+export function now(): number {
+  return performance.now();
 }

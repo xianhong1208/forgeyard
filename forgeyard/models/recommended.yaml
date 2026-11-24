@@ -32,7 +32,8 @@
 #                 inspector reads the real answer from the model when it is added)
 #   mmproj        GGUF vision models: the projector file of the repository to use with it (and for
 #                 text-to-speech GGUFs, the audio decoder)
-#   languages     tts: the languages it speaks (shown on the list)
+#   languages     tts: the languages it speaks; embed and classify (1.5.4): the languages of its texts, from its
+#                 card, or given here when the card names none (kept with the catalog entry; shown on the list)
 #   components    image models for stable-diffusion.cpp: the files beside `file` (vae, llm, t5xxl, clip_l,
 #                 clip_g); without it they are found by their names
 #   engine_args   optional: extra engine arguments per recipe, stored with the catalog entry
@@ -71,7 +72,10 @@ groups:
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
   - id: text-classification
     title: Text classification
-    description: Small models that give a text one of a fixed set of labels (sentiment, language, toxicity) at /v1/classify, on vLLM on an NVIDIA GPU. Much faster than asking a chat model. MIT and Apache-2.0 only.
+    description: Small models for /v1/classify, much faster than a chat model. Fixed labels (sentiment, language, toxicity) on vLLM on an NVIDIA GPU; zero-shot models that choose among the labels you send on Forgeyard's transformers server, on any CPU. MIT and Apache-2.0 only.
+  - id: image-embeddings
+    title: Image embeddings
+    description: Vectors for images at /v1/embeddings, on Forgeyard's transformers server (any CPU, or an NVIDIA GPU). CLIP and SigLIP 2 put texts and images in one space, so a text finds images; DINOv2 compares images with images (duplicates, look-alikes). Apache-2.0 and MIT only.
 
 models:
   # ---------------------------------------------------------------- Qwen3
@@ -507,6 +511,36 @@ models:
     download_gib: 0.4
     memory_gib: 1.8
     note: Toxic, severe toxic, obscene, threat, insult and identity hate, each scored on its own. English, 512 tokens.
+  # Zero-shot text classification (1.5.4, #144): NLI models told the labels in each request, on the transformers server.
+  # MoritzLaurer's "-c" models: MIT weights trained only on commercially friendly data.
+  - name: bge-m3-zeroshot-v2.0-c
+    title: Zero-shot text classification, multilingual (labels you send)
+    source: hf://MoritzLaurer/bge-m3-zeroshot-v2.0-c
+    revision: 705510dfe0f35d223a4bf6f5d2695ec5fd162341
+    license: mit
+    group: text-classification
+    task: classify
+    format: safetensors
+    recipe: transformers
+    device: cpu
+    languages: [multilingual]
+    download_gib: 1.08
+    memory_gib: 3.37
+    note: Chooses among the labels each request sends, in many languages (Traditional Chinese too). One pass per text and label.
+  - name: roberta-base-zeroshot-v2.0-c
+    title: Zero-shot text classification, English (labels you send)
+    source: hf://MoritzLaurer/roberta-base-zeroshot-v2.0-c
+    revision: d825e740e0c59881cf0b0b1481ccf726b6d65341
+    license: mit
+    group: text-classification
+    task: classify
+    format: safetensors
+    recipe: transformers
+    device: cpu
+    languages: [en]
+    download_gib: 0.24
+    memory_gib: 1.71
+    note: The quick zero-shot model, for English text only (it does badly on Chinese). One pass per text and label.
 
   # ---------------------------------------------------------------- Text to speech
   - name: qwen3-tts-0.6b
@@ -840,3 +874,46 @@ models:
     download_gib: 0.09
     memory_gib: 1.34
     note: Meta's DINOv2 features with a linear ImageNet head; the 1,000 ImageNet classes.
+  # ---------------------------------------------------------------- image embeddings (1.5.4, #141)
+  # The same repositories as two image classifiers above: one job per catalog entry (Q5), so each is added twice.
+  - name: siglip2-base-embed
+    title: SigLIP 2 base embeddings (texts and images)
+    source: hf://google/siglip2-base-patch16-224
+    revision: 75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2
+    license: apache-2.0
+    group: image-embeddings
+    task: embed
+    format: safetensors
+    recipe: transformers
+    device: cpu
+    languages: [multilingual]
+    download_gib: 1.43
+    memory_gib: 2.68
+    note: 768-d vectors for texts and images in one space, so a text finds images; texts in many languages, 64 tokens.
+  - name: clip-vit-b-32-laion-embed
+    title: CLIP ViT-B/32 LAION-2B embeddings (texts and images)
+    source: hf://laion/CLIP-ViT-B-32-laion2B-s34B-b79K
+    revision: 1a25a446712ba5ee05982a381eed697ef9b435cf
+    license: mit
+    group: image-embeddings
+    task: embed
+    format: safetensors
+    recipe: transformers
+    device: cpu
+    languages: [en]
+    download_gib: 0.57
+    memory_gib: 1.82
+    note: 512-d vectors, small and quick; English texts of up to 77 tokens.
+  - name: dinov2-small-embed
+    title: DINOv2 small embeddings (images only)
+    source: hf://facebook/dinov2-small
+    revision: ed25f3a31f01632728cabb09d1542f84ab7b0056
+    license: apache-2.0
+    group: image-embeddings
+    task: embed
+    format: safetensors
+    recipe: transformers
+    device: cpu
+    download_gib: 0.08
+    memory_gib: 1.33
+    note: 384-d vectors for images only, to find duplicates and look-alikes; takes no text.

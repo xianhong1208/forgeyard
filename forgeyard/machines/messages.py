@@ -337,7 +337,43 @@ def _runtime_info(value: Any) -> dict:
     gpu = parse_gpu_check(value.get("gpu_check"))
     if gpu is not None:
         out["gpu_check"] = gpu
+    census = parse_gpu_census(value.get("gpu_census"))
+    if census is not None:
+        out["gpu_census"] = census
     return out
+
+
+_BUS_ID = re.compile(r"^[0-9a-f]{4,8}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+CENSUS_VENDORS = ("nvidia", "amd")
+
+
+def parse_gpu_census(value: Any) -> Optional[dict]:
+    """(1.5.4) {"host_gpus", "visible_gpus", "missing": [bus ids], "vendors": {vendor: {"host", "visible",
+    "missing"}}}: the host's GPUs from sysfs next to the ones the agent sees (agent/gpu_census.py). Anything else: None.
+    The totals are recomputed from the vendors, so they always agree."""
+    if not isinstance(value, dict) or not isinstance(value.get("vendors"), dict):
+        return None
+    vendors: dict[str, dict] = {}
+    for name in CENSUS_VENDORS:
+        v = value["vendors"].get(name)
+        if v is None:
+            continue
+        if not isinstance(v, dict):
+            return None
+        host, visible = v.get("host"), v.get("visible")
+        if type(host) is not int or type(visible) is not int or not (0 <= host <= 256 and 0 <= visible <= 256):
+            return None
+        missing = v.get("missing") if isinstance(v.get("missing"), list) else []
+        vendors[name] = {"host": host, "visible": visible,
+                         "missing": [m for m in missing[:64] if isinstance(m, str) and _BUS_ID.match(m)]}
+        limited = v.get("limited_by")
+        if isinstance(limited, str) and limited.strip() and len(limited) <= 128 and not _CONTROL.search(limited):
+            vendors[name]["limited_by"] = limited.strip()
+    return {"host_gpus": sum(v["host"] for v in vendors.values()),
+            "visible_gpus": sum(v["visible"] for v in vendors.values()),
+            "missing": [m for v in vendors.values() for m in v["missing"]],
+            "vendors": vendors}
 
 
 # 1.4.5 (#202): what the agent's GPU access check found (agent/gpu_check.py). Only these fields, cut to size.

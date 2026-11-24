@@ -12,7 +12,7 @@ import { deploymentRuns } from "../lib/engines";
 import { MODEL_KIND, modelKind } from "../lib/fleet";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
-import { FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
+import { FALLBACK_ANCHOR, OLD_FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
 import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
 import { engineHref, modelHref } from "../lib/pages";
@@ -246,7 +246,7 @@ function Gateway({ d }: { d: Deployment }) {
                   <span key={i}>{i === 0 ? t("deployment.gw.then") : t("deployment.gw.thenNext")}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
                 ))}</span>
               ) : <span className="muted small">{t("deployment.gw.none")}</span>}{" "}
-              <a className="small" href={`#${FALLBACK_ANCHOR}`}>{d.routing.kind === "local" ? t("deployment.gw.addOne") : t("deployment.change")}</a>
+              <a className="small" href={`#${FALLBACK_ANCHOR}`}>{tiers(d.routing).length > 1 ? t("deployment.change") : t("deployment.gw.addOne")}</a>
             </dd>
           </>
         )}
@@ -292,18 +292,18 @@ function Gateway({ d }: { d: Deployment }) {
   );
 }
 
-// The deployment's own route, as its cloud fallback (1.4, #81: it was on the Serving tab of Models). Admins
+// The deployment's own route, as its routing and fallback (1.4, #81: it was on the Serving tab of Models). Admins
 // change it here; everyone else sees it.
 function Fallback({ routing, reload }: { routing: RouteInfo; reload: () => void }) {
   const { user } = useAuth();
   const admin = user?.role === "admin";
   const opts = useApi<RouteOptions>(admin ? "/route-options" : null);
   const { hash } = useLocation();
-  // A link to #cloud-fallback (the Deployments list's mark, the advisor) opens the page at it, once
-  // the section is there.
+  // A link to #routing (the Deployments list's mark, the advisor; #cloud-fallback before 1.5.4) opens the
+  // page at it, once the section is there.
   const scrolled = useRef(false);
   useEffect(() => {
-    if (hash !== `#${FALLBACK_ANCHOR}` || scrolled.current) return;
+    if ((hash !== `#${FALLBACK_ANCHOR}` && hash !== `#${OLD_FALLBACK_ANCHOR}`) || scrolled.current) return;
     scrolled.current = true;
     document.getElementById(FALLBACK_ANCHOR)?.scrollIntoView?.({ block: "start" });
   }, [hash]);
@@ -358,15 +358,23 @@ function Memory({ d }: { d: Deployment }) {
 function TryIt({ d }: { d: Deployment }) {
   const t = useT();
   const [input, setInput] = useState("");
+  const [labels, setLabels] = useState("");
   const [out, setOut] = useState<TryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ready = d.endpoints.some((e) => e.ready);
   const api_ = d.route?.api;
+  // 1.5.4: a zero-shot text classifier is told the labels; an embedding model that takes images gets the test image.
+  const zeroShot = api_ === "classify" && !!d.model.classify?.zero_shot;
+  const embedsImages = api_ === "openai-embeddings" && !!d.model.embed?.modalities.includes("image");
+  const imageOnly = embedsImages && !d.model.embed?.modalities.includes("text");
   const go = async () => {
     setBusy(true); setError(null); setOut(null);
+    const body: { input?: string; labels?: string[] } = input.trim() ? { input: input.trim() } : {};
+    const named = labels.split(",").map((l) => l.trim()).filter(Boolean);
+    if (zeroShot && named.length) body.labels = named;
     try {
-      setOut(await api<TryResponse>(`/deployments/${d.id}/try`, { method: "POST", body: input.trim() ? { input: input.trim() } : {} }));
+      setOut(await api<TryResponse>(`/deployments/${d.id}/try`, { method: "POST", body }));
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const placeholder = api_ === "openai-chat" ? t("deployment.try.phChat") : api_ === "openai-embeddings"
@@ -379,10 +387,16 @@ function TryIt({ d }: { d: Deployment }) {
         : api_ === "openai-speech" ? t("deployment.try.speech")
         : api_ === "openai-images" ? t("deployment.try.images")
         : api_ === "openai-videos" ? t("deployment.try.videos")
-        : api_?.startsWith("vision-") ? t("deployment.try.vision", { box: api_ === "vision-segment" ? t("deployment.try.visionBox") : "" }) : "" })}</p>
-      {api_ !== "openai-audio" && api_ !== "openai-videos" && !api_?.startsWith("vision-") && (
+        : api_?.startsWith("vision-") ? t("deployment.try.vision", { box: api_ === "vision-segment" ? t("deployment.try.visionBox") : "" })
+        : imageOnly ? t("deployment.try.embedImage") : embedsImages ? t("deployment.try.embedBoth")
+        : zeroShot ? t("deployment.try.zeroShot") : "" })}</p>
+      {api_ !== "openai-audio" && api_ !== "openai-videos" && !api_?.startsWith("vision-") && !imageOnly && (
         <div className="field"><label htmlFor="try-input">{api_ === "rerank" ? t("deployment.try.query") : t("deployment.try.input")}</label>
           <input id="try-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder} maxLength={500} /></div>
+      )}
+      {zeroShot && (
+        <div className="field"><label htmlFor="try-labels">{t("deployment.try.labels")}</label>
+          <input id="try-labels" value={labels} onChange={(e) => setLabels(e.target.value)} placeholder={t("deployment.try.phLabels")} maxLength={500} /></div>
       )}
       <div className="row-gap" style={{ marginTop: 10 }}>
         <button type="button" className="btn" disabled={!ready || busy} onClick={() => void go()}><IconSend size={15} aria-hidden="true" /> {busy ? t("deployment.try.waiting") : t("deployment.try.send")}</button>

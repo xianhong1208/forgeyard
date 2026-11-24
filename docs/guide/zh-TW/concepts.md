@@ -59,7 +59,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 模型、推論引擎與估算
 
-模型放在兩個頁面。**服務中** 是現在正在執行的：依種類（chat、多模態 chat、嵌入、重排序、文字分類、語音轉文字、文字轉語音、圖片、影片、視覺）把部署分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**部署模型** 也在這裡，每個部署的頁面在 `/serving/<id>`。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。
+模型放在兩個頁面。**服務中** 是現在正在執行的：依種類（chat、多模態 chat、嵌入、重排序、文字分類、語音轉文字、文字轉語音、圖片、影片、視覺）把部署分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**部署模型** 也在這裡，每個部署的頁面在 `/serving/<id>`。[分流與備援](#routing-tiers-and-cloud-providers)後面的層有雲端模型的部署，會標出它的供應商，例如 *→ Gemini*；各層本身在部署的頁面上。
 
 **模型**是模型庫，也就是可以部署的東西，分成三個分頁：**目錄**（預設）、**推論引擎**，以及管理員才有的**來源**。雲端模型和供應商在 **雲端** 頁面（管理員）。1.3 的連結（`/models/deployments/<id>`、`/models/deploy`、`/models?tab=routes`、`/models/routes/<id>`、`/providers`）會打開新的位置。
 
@@ -202,11 +202,31 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 文字分類模型（1.4.4）替一段文字從固定的一組標籤裡挑一個：情緒、語言、有害內容、主題。它是附有分類頭的小型編碼器（1 億到 6 億參數），所以在 GPU 上每秒能處理上千段文字，標籤和分數穩定，成本只有對話模型的一小部分。
 
-- **一個推論引擎：**`vllm-pooling`（vLLM 的 pooling runner，和嵌入、重排序模型用同一個映像檔），在 NVIDIA GPU 上執行，以記憶體共用一張卡（同一個配方的 ROCm 版本應該也能在 AMD GPU 上執行，尚未測試）。目前還沒有 CPU 推論引擎：給 CPU 用的 transformers 推論引擎在 1.5（#144）。
-- **哪些模型：**目錄會讀 `config.json`。vLLM 能當分類模型執行的架構（BERT、RoBERTa、XLM-RoBERTa、ModernBERT、GTE、GPT-2、Jamba：`…ForSequenceClassification`），而且有兩個以上標籤。標籤會存在目錄項目裡，顯示在模型的頁面上。不接受：只有一個輸出的模型（那是 reranker）、迴歸（regression）頭、零樣本（NLI）模型（標籤是 entailment 和 contradiction：請求裡要帶標籤，1.5 才支援），以及 DeBERTa、DistilBERT 或 BART 分類模型（vLLM 不支援；同樣在 1.5）。
-- **它自己的 API：**`/v1/classify`，格式和 vLLM 一樣：`input` 是一段文字或一串文字；每段都會傳回最可能的 `label`，以及每個標籤的機率（`probs`，順序和 `config.json` 相同）。訓練成同時給多個標籤的模型（`multi_label_classification`，例如 toxic-bert）會各自評分每個標籤，所以機率加起來不一定是 1。
-- **現在就想用自己的標籤：**對話模型已經能用結構化輸出分到你指定的任何標籤：在 `/v1/chat/completions` 把標籤放進 `structured_outputs.choice`（vLLM），或用 JSON schema 的 `enum`（vLLM、llama.cpp、雲端供應商）。比分類模型慢、成本也高，但不用另外部署。見[操作指南](how-to.md#classify-text)。
-- 用量計它的 **prompt token**，和嵌入一樣。文字只留在你自己的部署上：絕不送往雲端供應商。
+- **兩個推論引擎**（見 [transformers 推論引擎](#the-transformers-engine)）：`vllm-pooling`（vLLM 的 pooling runner）在 NVIDIA GPU 上執行 vLLM 支援的架構（BERT、RoBERTa、XLM-RoBERTa、ModernBERT、GTE…）；從 1.5.4 起，Forgeyard 自己的 `transformers` 伺服器在任何 CPU 或共用的 GPU 上執行所有序列分類模型，包含 DeBERTa、DistilBERT 和 BART。兩者都能執行的模型預設用 vLLM。
+- **哪些模型：**目錄會讀 `config.json`：有兩個以上標籤的 `…ForSequenceClassification`。標籤會存在目錄項目裡，顯示在模型的頁面上，旁邊還有模型說明卡列出的語言。不接受：只有一個輸出的模型（那是 reranker）或迴歸（regression）頭。
+- **零樣本（1.5.4）：**NLI 模型（標籤是 entailment 和 contradiction）在**每個請求裡接受你的標籤**：它把文字和一句像「這段文字是關於{標籤}。」的句子一起讀，替每個標籤評分，所以每段文字配每個標籤各跑一次。目錄會把它標成 *零樣本*；它只在 transformers 伺服器上執行。見[操作指南](how-to.md#classify-text-without-training-zero-shot)。
+- **它自己的 API：**`/v1/classify`，格式和 vLLM 一樣：`input` 是一段文字或一串文字；每段都會傳回最可能的 `label`，以及每個標籤的機率（`probs`，順序和 `config.json` 相同，零樣本模型則依請求的 `labels`）。訓練成同時給多個標籤的模型（`multi_label_classification`，例如 toxic-bert）會各自評分每個標籤，所以機率加起來不一定是 1；零樣本請求帶 `"multi_label": true` 也是一樣。
+- **對話模型**也能用結構化輸出分到你指定的任何標籤：在 `/v1/chat/completions` 把標籤放進 `structured_outputs.choice`（vLLM），或用 JSON schema 的 `enum`（vLLM、llama.cpp、雲端供應商）。比分類模型慢、成本也高，最適合細微的文字。見[操作指南](how-to.md#classify-text)。
+- 用量計它的 **prompt token**，和嵌入一樣（零樣本：每組文字和標籤的 token），在 transformers 伺服器上還計忙碌時間。文字只留在你自己的部署上：絕不送往雲端供應商。
+
+## transformers 推論引擎
+
+Forgeyard 自己的模型伺服器（1.5.4），也就是 `transformers` 配方：視覺映像檔（`forgeyard-vision`，和 `vision` 配方同一個，有 x86-64 與 Arm 的 CPU 版和 NVIDIA 版），以 Hugging Face transformers 啟動來產生嵌入或做文字分類。它很小，在 CPU 上就跑得很好：沒有 GPU 的機器也能提供這些模型，在 GPU 上則預設和其他部署共用顯示卡。
+
+| 模型 | 推論引擎 |
+|---|---|
+| 文字嵌入模型（Qwen3-Embedding、BGE-M3…）、reranker | `vllm-pooling`（GPU） |
+| CLIP 類模型（CLIP、SigLIP、SigLIP 2）和 DINOv2 當嵌入模型 | `transformers` |
+| vLLM 支援的文字分類模型（BERT、RoBERTa、XLM-R、ModernBERT） | `vllm-pooling` 優先，`transformers` 也可以（CPU） |
+| DeBERTa、DistilBERT、BART 分類模型；零樣本（NLI）模型 | `transformers` |
+| 多模態嵌入模型（Qwen3-VL-Embedding、GME） | 還沒有：加入時會被拒絕（之後的 1.5 修補版） |
+
+- **圖片嵌入：**CLIP 類模型把文字和圖片放在同一個空間（文字能找到圖片）；DINOv2 只收圖片（找重複圖、相似圖）。兩者都在 `/v1/embeddings` 回應，它在一般字串之外也接受有型別的項目 `{"image": …}`；只有文字的請求仍是 OpenAI 的請求。帶圖片的請求絕不溢出到雲端供應商：另一個模型的向量對不上。見[操作指南](how-to.md#search-images-by-text-image-embeddings)。
+- **一個目錄項目做一件事：**CLIP 類的儲存庫既是圖片分類模型（`/v1/vision/classify`，配方 `vision`），也是嵌入模型（`transformers`）：用兩個名稱各加入一次，各自部署。
+- **在 CPU 上**權重以 float32 保存（半精度在 CPU 上慢好幾倍），所以 16 位元的模型大約需要檔案大小兩倍的 RAM；估算已經算進去。*CPU threads*（`threads`，4）設定 torch 用幾個。一個副本一次處理一個請求；要更大的吞吐量就多開副本或改用 CUDA 版本。
+- **每個請求的上限：**嵌入用 *Images per request*（`max_images`，32），零樣本用 *Zero-shot pairs per request*（`max_pairs`，256：文字數 × 標籤數）。
+- **模型儲存庫裡的程式碼絕不執行**（`auto_map` 會被拒絕），映像檔只從模型快取讀模型（`HF_HUB_OFFLINE`）。
+- **它的映像檔跟著版本走：**內建配方的映像檔以 digest 釘選，在發布新視覺映像檔的版本推出後立刻換過去。自訂配方（推論引擎的複本）如果指定的映像檔比任務需要的舊，部署時會得到 422 `vision_image_too_old`。
 
 ## API 金鑰、限制與用量
 
@@ -219,10 +239,10 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - 圖表下方的表格依排序的欄位列出前 15 列（預設是請求數；**費用** 分頁是費用；依日期分組時最新的日子在前）。其餘的加總成最後一列 *其他 N 個*，所以表格的加總仍和總數一致；**顯示全部 N 個** 會列出每一列。點欄位標題就依該欄排序，再點一次則反過來排。在手機上每列只佔一行：名稱和排序所依的數字；點一下就展開其他欄位，順序用 **排序依據** 選。太長的名稱會被截斷：把游標移上去，或展開該列，就能看到完整名稱。
 - 兩個分頁上的 **隨時間變化** 會把其中一項數字畫成折線圖：按日（最近 30 天）、按週（13 週，從週一算起）或按月（12 個月），可以只看總數，或依金鑰、模型、供應商或個人（管理員選 **所有人** 時）各畫一條線。最大的五條各自成線，其餘加總為 *其他*。把游標移到點上或用方向鍵可以讀出該期間的數值；**顯示數字** 會以表格列出。日期以 UTC 計，最新的一期還在進行中（虛線）。
 
-## 雲端供應商與分層
+## 分流、分層與雲端供應商
 
 - **供應商**是 Forgeyard 以外的模型 API（OpenAI、Anthropic、Gemini、Azure OpenAI、OpenRouter，或你自己相容 OpenAI 的伺服器）。管理員連同金鑰一起新增；金鑰加密儲存，之後不會再顯示。
-- `/v1` 上的每個模型名稱（在 API 裡）都是一條**路由**。路由有分成好幾**層**的**目標**：本機部署和供應商的模型。部署自己的路由一開始只有一層，就是這個部署。管理員可以在後面加上雲端模型，也就是部署的**雲端備援**，在它的頁面上設定。管理員也可以建立**雲端模型**：替供應商的模型取一個自己的名稱，在 **Cloud → Cloud models**。
+- `/v1` 上的每個模型名稱（在 API 裡）都是一條**路由**。路由有分成好幾**層**的**目標**：本機部署和供應商的模型。部署自己的路由一開始只有一層，就是這個部署。管理員在部署頁面的 **分流與備援** 修改它：**同一層**的目標一起分攤請求（本機部署依負載，雲端模型依權重）；**後面的層**只在前面的層無法處理時才使用。後面的層可以放另一個本機部署（[讓兩個本機部署分攤請求](how-to.md#share-requests-between-two-local-deployments)），也可以放雲端模型。管理員也可以建立**雲端模型**：替供應商的模型取一個自己的名稱，在 **Cloud → Cloud models**。
 - **本機優先。**只有在回答開始之前，而且本機這層無法使用、**忙碌**（每個副本都達到部署的 *Concurrent requests*）或回應 429 或 503 時，請求才會移到下一層。對本機 context 來說太長的提示，只有路由有設定時才會溢出。
 - 每把 API 金鑰的**雲端**設定決定它的請求能不能離開你的網路：**永不**（預設值，1.2 以前的金鑰也都是）、**僅溢出時**，或 **允許**（也包括只有雲端的模型）。勾選 **僅本機** 的路由，以及帶著 `X-Forgeyard-Local-Only: 1` 的請求，也都不會離開。
 - **雲端政策**（管理員在 **API 金鑰** 的選擇）是把兩個值合成一個：新金鑰拿到什麼，以及大家最多能給自己的金鑰什麼。*不使用雲端*、*個人可自行選擇溢出*、*預設溢出* 和 *允許雲端* 是常用的組合；*自訂* 會顯示兩個值。

@@ -40,10 +40,10 @@ DEPTH_REV = "5426e4f0f36572d16453bbda7a8389317b1bef99"
 A100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
 # The vision recipe's pinned images (1.4.1, #113): moved by scripts/pin_images.py --write after a release that
 # changed images/vision.
-VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1"
-              "@sha256:f4e5940bdbfe1c88a6712aaf708432149651e25a9a6d7318e9f382ab697c579b")
-VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda"
-               "@sha256:9e4ef32b302cf3d82a07d69a1a55e42b28c17e9e34f8e3399bfe8918d1362376")
+VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1"
+              "@sha256:da2ddf69235cfc9ebe6ec448dc4cbb1410415bf11ba259503a7303430b37d242")
+VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda"
+               "@sha256:179143ede7f840e990eaa3cbd5cbec4c8b66c5b4ab8ea8c5f1c9f24450c88150")
 # The image the built-in recipe pinned before 1.4.4: kept for the refusals of models it cannot run.
 OLD_VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0"
                   "@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6")
@@ -219,8 +219,8 @@ def test_fy_vis_019_the_vision_image_is_pinned_recorded_and_relayable(monkeypatc
     from forgeyard.workloads import images as image_ids
 
     lock = image_ids.load_lock()
-    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1@sha256:")
-    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda@sha256:")
+    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1@sha256:")
+    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda@sha256:")
     for image, platforms in [(VISION_CPU, {"linux/amd64", "linux/arm64"}), (VISION_CUDA, {"linux/amd64"})]:
         entry = lock[image]
         assert entry["index"] == image.partition("@")[2] and set(entry["platforms"]) == platforms

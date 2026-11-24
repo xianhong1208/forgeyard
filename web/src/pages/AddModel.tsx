@@ -7,9 +7,10 @@ import { labels, t as tNow } from "../i18n/core";
 import { useT } from "../i18n/react";
 import { ApiError, api, errorText } from "../lib/api";
 import {
-  compact, deployLink, emptyPick, fitsLine, nameFor, pickFromList, pickFromSearch, searchLicenceProblem, visionProblem,
+  compact, deployLink, emptyPick, fitsLine, nameFor, pickFromList, pickFromSearch, searchLicenceProblem, twoJobs, visionProblem,
   type InspectMeta, type InspectResponse, type Pick, type RecommendedModel, type RecommendedResponse, type SearchResponse, type Suggestion,
 } from "../lib/addmodel";
+import { embedSummary, languagesLine } from "../lib/encoders";
 import { when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { TASK_LABEL, billions, gib, mediaText, sentText } from "../lib/models";
@@ -40,7 +41,8 @@ export function videoFacts(v: NonNullable<InspectMeta["video"]>, d?: InspectMeta
 }
 
 const LANGUAGE: Record<string, string> = labels({ zh: "addmodel.lang.zh", en: "addmodel.lang.en", ja: "addmodel.lang.ja", ko: "addmodel.lang.ko",
-  de: "addmodel.lang.de", fr: "addmodel.lang.fr", ru: "addmodel.lang.ru", pt: "addmodel.lang.pt", es: "addmodel.lang.es", it: "addmodel.lang.it" });
+  de: "addmodel.lang.de", fr: "addmodel.lang.fr", ru: "addmodel.lang.ru", pt: "addmodel.lang.pt", es: "addmodel.lang.es", it: "addmodel.lang.it",
+  multilingual: "addmodel.lang.multilingual" });
 
 // "Chinese, English +8" (中文、英文 +8) for a speech model's languages.
 export function languagesText(langs: string[]): string {
@@ -425,6 +427,9 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
           {meta.license !== undefined && <div className="fact"><dt>{t("addmodel.fact.licence")}</dt><dd className="mono small">{meta.license ?? t("addmodel.fact.notStated")}{meta.gated ? t("addmodel.fact.gated") : ""}</dd></div>}
           {meta.video && <div className="fact"><dt>{t("addmodel.fact.pipeline")}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{videoFacts(meta.video, meta.diffusers)}</dd></div>}
           {meta.image && <div className="fact"><dt>{meta.diffusers ? t("addmodel.fact.pipeline") : t("addmodel.fact.imageModel")}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{imageFacts(meta.image, meta.diffusers)}</dd></div>}
+          {meta.embed && (f.task || meta.task_hint) === "embed" && <div className="fact"><dt>{t("addmodel.fact.embeds")}</dt><dd>{embedSummary(meta.embed)}</dd></div>}
+          {meta.classify?.zero_shot && <div className="fact"><dt>{t("addmodel.fact.labels")}</dt><dd>{t("addmodel.fact.zeroShotText")}</dd></div>}
+          {meta.languages && meta.languages.length > 0 && <div className="fact"><dt>{t("addmodel.fact.languages")}</dt><dd title={languagesLine(meta.languages).full}>{languagesLine(meta.languages).text}</dd></div>}
           {meta.config && !meta.vision && <div className="fact"><dt>{t("addmodel.fact.shape")}</dt><dd>{t("addmodel.fact.shapeValue", { layers: String(meta.config.layers), kv: String(meta.config.kv_heads), context: t.num(meta.config.max_context), dtype: meta.config.dtype })}</dd></div>}
         </dl>
       )}
@@ -473,6 +478,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
               {t.rich("addmodel.engineArgs", { names: Object.keys(f.engine_args).join(", "), args: <code>{Object.values(f.engine_args)[0].slice(0, 2).join(" ")}…</code> })}
             </p>
           )}
+          {meta && twoJobs(meta) && <p className="small muted two-jobs" role="note">{t.rich("addmodel.twoJobs", { strong: (x) => <strong>{x}</strong> })}</p>}
           {meta && visionProblem(meta, f.task as Task) && <Notice tone="error">{visionProblem(meta, f.task as Task)}</Notice>}
           <div className="form-foot">
             <span className="muted small">{t("addmodel.foot")}</span>

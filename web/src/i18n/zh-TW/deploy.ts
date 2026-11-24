@@ -50,6 +50,8 @@ export default {
   "deploy.est.perGpu": "每張 GPU{gpus}",
   "deploy.est.gpus": "（{count} 張 GPU）",
   "deploy.est.ofRam": "系統記憶體",
+  "deploy.anyCpu": "Forgeyard 的 transformers 伺服器：任何 CPU（x86-64 或 Arm）都能執行，不需要 GPU；在 GPU 上會和其他部署共用顯示卡。",
+  "deploy.est.float32": "在 CPU 上權重會以 float32 保存（半精度在 CPU 上慢好幾倍），所以 16 位元的模型大約需要檔案大小兩倍的 RAM。",
   "deploy.shareHintLabel": "GPU 共用提示",
   "deploy.useShare": "改用共用 VRAM",
   "deploy.ctx.use": "使用{label}：{n} 個 token",

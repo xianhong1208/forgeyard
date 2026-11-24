@@ -215,6 +215,7 @@ local_dirs = ["/data/models"]
 | `DOCKER_HOST`、`DOCKER_CONFIG`、`CONTAINER_HOST`、`XDG_RUNTIME_DIR` | 傳給 `docker` 或 `podman` 指令，讓非預設的容器引擎 socket 或設定可以運作。agent 環境裡的其他東西都不會傳給推論引擎 |
 | `ROCM_PATH`、`ROCM_HOME` | ROCm 不在 `/opt/rocm` 時的安裝位置（AMD 卡） |
 | `FORGEYARD_AGENT_SIMULATION` | 設為 `1` 才允許 `--simulate-inventory FIXTURE`：agent 回報錄好的硬體資料，而不是自己的硬體。僅供開發和測試；伺服器會把這種機器標示為模擬 |
+| `FORGEYARD_AGENT_SYSFS` | 只在 `FORGEYARD_AGENT_SIMULATION=1` 時有效：一個和 `/sys/bus/pci/devices` 結構相同的目錄，模擬的 agent 會在裡面清點主機的 GPU（1.5.4）。沒有設定時，模擬的 agent 不會清點 |
 
 ## 閘道（/v1）
 
@@ -228,7 +229,7 @@ local_dirs = ["/data/models"]
 | `GET /v1/models/{model}` | 單一模型，格式相同。模型不存在、對這把金鑰隱藏或已停止時回 404 `model_not_found`；不在金鑰模型清單內時回 403 `model_not_allowed` | — |
 | `POST /v1/chat/completions` | 對話模型（vLLM、llama.cpp、供應商的對話模型）。`stream: true` 會以 server-sent events 串流 | 是 |
 | `POST /v1/completions` | 同樣的模型，使用單純的 `prompt` | 是 |
-| `POST /v1/embeddings` | 嵌入模型 | 是 |
+| `POST /v1/embeddings` | 嵌入模型；1.5.4 起也接受圖片，以帶型別的項目送給 CLIP 類模型和 DINOv2。見[嵌入](#embeddings) | 是（只有文字） |
 | `POST /v1/rerank` | 重排序模型（vLLM 的 rerank API） | 否 |
 | `POST /v1/score` | 重排序模型（vLLM 的 score API） | 否 |
 | `POST /v1/audio/transcriptions` | 語音轉文字（faster-whisper），以 `multipart/form-data` 送出，含 `model` 欄位 | 否 |
@@ -248,7 +249,7 @@ local_dirs = ["/data/models"]
 | `POST /v1/vision/segment` | 用 SAM 2 分割（1.4）：送一張圖片和一個點或一個方框，傳回 PNG 遮罩 | 否 |
 | `POST /v1/vision/classify` | 圖片分類（1.4.4）：送一張圖片，傳回最符合的類別和分數；零樣本分類器（CLIP、SigLIP）由 `labels` 給它可選的標籤 | 否 |
 | `POST /v1/vision/depth` | 深度估計（1.4）：送一張圖片，傳回 16 位元深度圖 | 否 |
-| `POST /v1/classify` | 文字分類（1.4.4）：送文字，傳回每段的標籤和機率。見[文字分類](#text-classification) | 否 |
+| `POST /v1/classify` | 文字分類（1.4.4）：送文字，傳回每段的標籤和機率；1.5.4 起零樣本模型由請求告訴它 `labels`。見[文字分類](#text-classification) | 否 |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
 
@@ -449,7 +450,7 @@ local_dirs = ["/data/models"]
 
 每個回應另有 `model`、`width`、`height`（圖片的）和 `ms`（模型花的時間）。視覺伺服器的錯誤（`{"error": {"message", "code"}}`）照原狀態碼傳回：400 `invalid_image`、`invalid_option`、`missing_prompt`（分割時沒給點或方框）、`labels_required`（零樣本偵測模型沒給 `labels`）、`labels_not_supported`（固定類別的偵測模型或分類器收到 `labels`；兩者都是 1.4.4）、413 `image_too_large`。
 
-**零樣本偵測模型（1.4.4，#142）**（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OWL-ViT、OWLv2）找的是每個請求說的東西，而不是固定的類別清單：目錄標示 *找出你指定的東西*（`vision.zero_shot`）。送簡單的名稱，`labels: ["cat", "remote control"]`（或表單欄位 `labels=cat, remote control`）；重複和空的名稱會被去掉。視覺伺服器依各家族的方式詢問（Grounding DINO 是一句小寫提示「cat. remote control.」，每個方框取分數最高的那個名稱；OWL 是每個名稱一個查詢），所以名稱會照送出的樣子傳回。它們的分數比固定類別的偵測模型低：從 0.3（Grounding DINO）或 0.1 到 0.2（OWLv2）開始。它們需要 1.4.4 起的視覺映像檔，內建配方已經使用（固定在 `forgeyard-vision` 1.4.4rc1）；自訂配方指定較舊的映像檔時，部署會回 422 `vision_image_too_old`（本機建置照原樣接受）。
+**零樣本偵測模型（1.4.4，#142）**（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OWL-ViT、OWLv2）找的是每個請求說的東西，而不是固定的類別清單：目錄標示 *找出你指定的東西*（`vision.zero_shot`）。送簡單的名稱，`labels: ["cat", "remote control"]`（或表單欄位 `labels=cat, remote control`）；重複和空的名稱會被去掉。視覺伺服器依各家族的方式詢問（Grounding DINO 是一句小寫提示「cat. remote control.」，每個方框取分數最高的那個名稱；OWL 是每個名稱一個查詢），所以名稱會照送出的樣子傳回。它們的分數比固定類別的偵測模型低：從 0.3（Grounding DINO）或 0.1 到 0.2（OWLv2）開始。它們需要 1.4.4 起的視覺映像檔，內建配方已經使用（固定在 `forgeyard-vision` 1.5.4rc1）；自訂配方指定較舊的映像檔時，部署會回 422 `vision_image_too_old`（本機建置照原樣接受）。
 
 每個有回應的請求會計入（`GET /api/usage` 和 **用量** 頁）：
 
@@ -462,24 +463,58 @@ local_dirs = ["/data/models"]
 
 一個副本一次處理一張圖片，其餘依序等待；要更高吞吐量就多開副本。哪些模型算視覺模型、授權規則，見[內建配方](#built-in-recipes)。
 
+### 嵌入
+
+`POST /v1/embeddings` 接受 OpenAI 的請求：`input` 是一段文字、文字清單或 token id，每個 OpenAI 用戶端都照常可用。1.5.4 起（#141），`input` 也可以放**帶型別的項目**（Jina 的格式），和一般字串混在同一個清單裡：
+
+```json
+{"model": "photos", "input": ["a red bicycle", {"text": "a cat on a sofa"},
+                              {"image": "data:image/png;base64,iVBOR…"}, {"image": "https://example.com/cat.jpg"}]}
+```
+
+| 項目 | 說明 |
+|---|---|
+| 字串，或 `{"text": "…"}` | 一段文字。`{"text"}` 項目會改成一般字串送出，所以只有文字的請求不論送到哪裡都是 OpenAI 的請求 |
+| `{"image": "…"}` | 一張圖片：`data:image/…;base64,` URI、單純的 base64，或由**閘道取得**的 `http(s)` URL（推論引擎從不連網），規則和[對話中的媒體](#images-audio-and-video-in-chat)一樣：除非開了 `MEDIA_ALLOW_PRIVATE_HOSTS`，只接受公開位址；最多 `MEDIA_FETCH_MAX_MB`；每次轉址都重新檢查；回應必須是圖片。其他 scheme 一律拒絕 |
+
+最多 2,048 個項目；每個物件剛好一個鍵。用 OpenAI 的 Python SDK 時，帶型別的項目要用 `extra_body={"input": [...]}`（或 `client.post`）送，因為它的 `input` 只接受字串。`encoding_format`（`float`、`base64`）和 `dimensions`（只能是模型自己的大小）會照樣送出。
+
+誰接受什麼，看部署的目錄項目：
+
+- **圖片**需要會嵌入圖片的模型：Forgeyard transformers 伺服器（配方 `transformers`）上的 CLIP 類模型（CLIP、SigLIP、SigLIP 2…）或 DINOv2。最多部署的 *Images per request*（`max_images`，32）張，每張最多 20 MiB、4,000 萬像素。
+- **文字**需要會嵌入文字的模型：只吃圖片的模型（DINOv2）拒絕文字，一般字串也一樣。CLIP 類模型會把文字截到它的長度（CLIP 77 個 token、SigLIP 64 個），截了幾段寫在 `usage.truncated_inputs`：要嵌入文件，請用文字嵌入模型。
+- **帶圖片的請求絕不送往雲端供應商**：沒有供應商接受帶型別的項目，而且別的模型的向量也對不上用這個模型建的索引。路由有雲端層時，只有文字的請求仍可照舊溢出。
+
+回應是 OpenAI 的格式：`data[]` 依 `input` 的順序，每個向量都做 L2 正規化（cosine 相似度 = 內積）；CLIP 類模型把文字和圖片放在同一個空間，所以可以用文字找圖片。
+
+| 單位 | 怎麼算 |
+|---|---|
+| tokens | 推論引擎回應裡的 `prompt_tokens`（文字的部分）。金鑰的每分鐘 token 數照常適用 |
+| `images`、`kilopixels` | 帶圖片的請求：嵌入了幾張圖片，以及它們的寬 x 高 / 1,000，取自推論引擎的回應 |
+| `busy_ms` | transformers 伺服器的副本處理這個請求花的時間 |
+
 ### 文字分類
 
-`POST /v1/classify`（1.4.4）把文字送給文字分類模型，以 vLLM 的格式回應。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）。推論引擎是 vLLM 的 pooling runner（配方 `vllm-pooling`）；閘道把請求送到副本的 `/classify`。只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/classify`（1.4.4）把文字送給文字分類模型，以 vLLM 的格式回應。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）。推論引擎是 vLLM 的 pooling runner（配方 `vllm-pooling`），1.5.4 起也可以是 Forgeyard 的 transformers 伺服器（配方 `transformers`：DeBERTa、DistilBERT 和 NLI 零樣本模型）；閘道把請求送到副本的 `/classify`。只由本機部署提供，絕不送往雲端供應商。
 
 | 欄位 | 說明 |
 |---|---|
 | `model` | 模型名稱 |
 | `input` | 一段文字，或 1 到 2,048 段文字；每段都不能是空的。不接受 token id |
 | `truncate_prompt_tokens` | 選用：把每段文字截到這麼多 token（至少 1），或 -1 代表模型的最大值。沒有它時，比部署的 context 長的文字會被推論引擎拒絕 |
-| `use_activation` | 選用，`true` 或 `false`：`false` 傳回原始分數（logits）而不是機率 |
+| `use_activation` | 選用，`true` 或 `false`：`false` 傳回原始分數（logits）而不是機率（只限固定標籤的模型） |
+| `labels` | 只限零樣本模型（1.5.4）：要從中挑選的標籤，1 到 32 個名稱，每個 1 到 64 個字元的純文字，不能重複（不分大小寫）：機率依它們的順序排列 |
+| `multi_label` | 零樣本，選用：`true` 讓每個標籤各自評分（entailment 對 contradiction），所以可以同時符合好幾個；`false`（預設）讓標籤之間分配機率 |
+| `hypothesis_template` | 零樣本，選用：把每個標籤放進去的句子，一行、最多 200 個字元、剛好一個 `{}`（預設 `"This text is about {}."`）。標籤是中文時，用中文句子比較好，例如 `"這段文字是關於{}。"` |
 
-閘道只送出這些欄位（其他欄位會被丟掉）；`messages`（vLLM 的對話格式）回 400。其他種類的模型回 400 `wrong_endpoint`，並說出它的端點（對話模型還會說明怎麼用結構化輸出分類）。
+閘道只送出這些欄位（其他欄位會被丟掉）；`messages`（vLLM 的對話格式）回 400。零樣本模型（NLI 模型，目錄項目上標著 `classify.zero_shot`）對每段文字和每個標籤各跑一次：文字數 x 標籤數最多是部署的 *Zero-shot pairs per request*（`max_pairs`，256）。送給固定標籤模型的 `labels` 回 400 `labels_not_supported`；零樣本模型沒收到它則回 400 `labels_required`；沒有 `labels` 卻送了 `multi_label` 或 `hypothesis_template` 回 400 `invalid_request`。只懂英文的零樣本模型處理中文表現很差：目錄會列出每個模型的語言。其他種類的模型回 400 `wrong_endpoint`，並說出它的端點（對話模型還會說明怎麼用結構化輸出分類）。
 
-回應：`data` 依序每段文字一項：`index`、`label`（最可能的）、`probs`（每個標籤的機率，順序和模型的 `config.json` 相同；`multi_label_classification` 模型各自評分每個標籤，所以加起來不一定是 1）和 `num_classes`；`usage` 裡有 `prompt_tokens`。標籤名稱在目錄項目上（`GET /api/models/<name>` 的 `classify.label_names`）。
+回應：`data` 依序每段文字一項：`index`、`label`（最可能的）、`probs`（每個標籤的機率，順序和模型的 `config.json` 相同；`multi_label_classification` 模型各自評分每個標籤，所以加起來不一定是 1）和 `num_classes`；`usage` 裡有 `prompt_tokens`。標籤名稱在目錄項目上（`GET /api/models/<name>` 的 `classify.label_names`）。零樣本回應的 `probs` 依請求的 `labels` 排列，回應也會把 `labels` 和 `multi_label` 列回來。
 
 | 單位 | 怎麼算 |
 |---|---|
-| tokens | 推論引擎回應裡的 `prompt_tokens`，和嵌入一樣。金鑰的每分鐘 token 數照常適用 |
+| tokens | 推論引擎回應裡的 `prompt_tokens`，和嵌入一樣（零樣本：每組文字和標籤的 token）。金鑰的每分鐘 token 數照常適用 |
+| `busy_ms` | transformers 伺服器的副本處理這個請求花的時間（1.5.4） |
 
 ### 標頭
 
@@ -512,7 +547,7 @@ local_dirs = ["/data/models"]
 | 400 | `wrong_endpoint` | 這個模型在另一個端點提供；訊息會寫出是哪一個 | 改用那個端點 |
 | 400 | `context_length_exceeded` | 只出現在開啟 **提示詞太長時溢出** 的路由：提示放不進本機的上下文，而且沒有其他目標能接手 | 縮短提示或降低 `max_tokens` |
 | 400 | `invalid_content_part` | 內容區塊不是帶 `type` 的物件、閘道不接受的類型（`*_embeds`、未知類型），或媒體區塊沒有網址 | 使用[對話中的圖片、音訊與影片](#images-audio-and-video-in-chat)列出的區塊 |
-| 400 | `invalid_media_data` | `data:` URI 不是 base64，或類型與區塊不符（圖片區塊帶 `data:text/plain`），或 `file` 區塊沒有 `data:` URI | 送出 `data:<type>;base64,…` |
+| 400 | `invalid_media_data` | `data:` URI 不是 base64，或類型與區塊不符（圖片區塊帶 `data:text/plain`），或 `file` 區塊沒有 `data:` URI；嵌入的圖片項目既不是 base64、`data:` URI 也不是 URL（1.5.4） | 送出 `data:<type>;base64,…` |
 | 400 | `media_url_refused` | 媒體網址的 scheme 不是 http(s) 或 `data:`（例如 `file://`）、帶有帳密，或主機解析到私有、loopback、link-local 或 metadata 位址（轉址後也一樣）；`input_audio.data` 裡放網址 | 送公開網址或 `data:` URI |
 | 400 | `media_fetch_failed` | 閘道無法下載媒體網址：沒有回應、狀態碼不是 200、超過 3 次轉址、超過 20 秒，或類型與區塊不符 | 檢查網址，或改以 `data:` URI 送出檔案 |
 | 400 | `media_not_supported` | 模型不接受這種媒體（把圖片送給純文字模型、*Videos per request* 為 0 時送影片）；訊息會說它接受什麼 | 改用能處理的模型，或在部署上開啟影片 |
@@ -527,9 +562,12 @@ local_dirs = ["/data/models"]
 | 400 | `response_format_not_supported` | 圖片：`response_format: url`。圖片只以 base64 傳回 | 拿掉它，或要求 `b64_json` |
 | 400 | `streaming_not_supported` | 圖片與視覺：`stream: true` | 拿掉它 |
 | 400 | `missing_image` | 視覺：沒有檔案欄位 `image`，或 JSON 沒有 `image` | 附上圖片 |
-| 400 | `labels_required` | 視覺（1.4.4）：沒告訴零樣本偵測模型要找什麼，或沒給零樣本分類器它的標籤 | 送 `labels` |
-| 400 | `labels_not_supported` | 視覺（1.4.4）：固定類別的偵測模型或分類器收到 `labels` | 拿掉 `labels`，或改用零樣本模型 |
-| 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request* | 少要幾張，或調高 `max_images` |
+| 400 | `labels_required` | 視覺（1.4.4）：沒告訴零樣本偵測模型要找什麼，或沒給零樣本分類器它的標籤；文字分類（1.5.4）：零樣本模型沒收到 `labels` | 送 `labels` |
+| 400 | `labels_not_supported` | 視覺（1.4.4）：固定類別的偵測模型或分類器收到 `labels`；文字分類（1.5.4）：固定標籤的模型收到 `labels` | 拿掉 `labels`，或改用零樣本模型 |
+| 400 | `too_many_pairs` | 文字分類（1.5.4）：文字數 x `labels` 超過零樣本部署的 *Zero-shot pairs per request* | 少送幾段文字或幾個標籤，或調高 `max_pairs` |
+| 400 | `images_not_supported` | 嵌入（1.5.4）：`{"image"}` 項目送給只嵌入文字的模型，或只由供應商提供的模型 | 改用 transformers 伺服器上的 CLIP 類模型或 DINOv2 |
+| 400 | `text_not_supported` | 嵌入（1.5.4）：文字送給只吃圖片的模型（DINOv2） | 送圖片，或改用 CLIP 類模型 |
+| 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request*。嵌入（1.5.4）：`{"image"}` 項目比部署的 *Images per request* 多 | 少要幾張，或調高 `max_images` |
 | 400 | `image_too_large` | 圖片：某一邊超過部署的 *Largest side* | 要小一點的尺寸，或調高 `max_side` |
 | 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明）。影片：同上，每邊 64 到 2,048，16 或 32 的倍數 | 使用類似訊息建議的尺寸 |
 | 400 | `unsupported_output_format` | 圖片：`output_format` 不是 png、jpeg 或 webp，或是推論引擎不產生的格式 | 改要 png |
@@ -1048,6 +1086,30 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 稽核事件 `node.image_removed`（映像檔、它的 tag、指定它的 recipe、`ok`、釋出的位元組，或 agent 的 `code` 和原因），每次要求 agent 刪除都會記錄；在那之前就被拒絕的不會記錄。
 
+## 加裝、拆下或看不到的 GPU
+
+從 1.5.4 起提供（不需要遷移：以下內容都存在機器的 `runtime_info` 裡，agent 的 hello 本來就會填寫它，另外也記錄在稽核紀錄裡）。該怎麼處理：[在機器上加裝或拆下 GPU](how-to.md#add-or-remove-a-gpu-on-a-machine)。
+
+**agent 清點什麼。** 每次連線時，agent 會列出 `/sys/bus/pci/devices` 裡主機的 PCI function（容器也看得到完整的匯流排），並清點其中的 GPU：NVIDIA（vendor `0x10de`）class 為 `0x0300`（VGA）或 `0x0302`（3D 控制器）；AMD（vendor `0x1002`）class 為 `0x0300`、`0x0302`、`0x0380`（Instinct MI100–MI250）或 `0x1200`（MI300）。卡上的音訊、USB-C 之類的 function、NVSwitch，以及 SR-IOV 的虛擬 function 都不算；APU 的顯示晶片和獨立顯示卡一樣算一張 GPU。agent 會送出 `runtime_info.gpu_census`，`GET /api/machines/{id}` 會顯示它：
+
+```json
+{"host_gpus": 9, "visible_gpus": 8, "missing": ["0000:c1:00.0"],
+ "vendors": {"nvidia": {"host": 9, "visible": 8, "missing": ["0000:c1:00.0"]}}}
+```
+
+`visible` 是 agent 的 NVML 或 amd-smi 列出的 GPU 數量；`missing` 是主機上沒有任何一張對應得到的 PCI 位址。出現 `limited_by` 時，表示有東西刻意把 agent 限制在這個廠商的部分 GPU：它的環境變數（不是 `all` 的 `NVIDIA_VISIBLE_DEVICES`、`CUDA_VISIBLE_DEVICES`、`ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES`、`GPU_DEVICE_ORDINAL`），或是伺服器根據 agent 的安裝回報補上的容器 `--gpus "device=…"` 或 `--gpus N`。只有在 agent 看得到某個廠商的部分 GPU、但不是全部，而且沒有任何限制時，設定健康檢查才會警告。一張都看不到的 agent，會被視為刻意不使用這些 GPU（例如 GPU 主機上只用 CPU 的 agent）；刻意限制的 agent 也不會收到警告；這兩種情況機器頁面都會低調地說明。1.5.4 之前的伺服器會捨棄這個欄位，1.5.4 之前的 agent 則不會送出（這時不會有提醒）。
+
+**伺服器記錄什麼。** 伺服器會保留每台機器上次回報的 GPU，用 key 辨識（UUID；AMD 的卡用 PCI 位址）；某次回報多了或少了卡時，就會在 `runtime_info.gpu_changes` 加上一筆（保留最近 20 筆）：
+
+```json
+{"at": "2026-11-24T09:12:03+00:00", "gpus": 9,
+ "added": [{"key": "nvidia:GPU-…", "vendor": "nvidia", "index": 8, "model": "NVIDIA A100 80GB PCIe",
+            "vram_total": 85899345920, "pci_bus_id": "00000000:C1:00.0"}],
+ "removed": []}
+```
+
+拆下的卡原本放了哪些部署（`deployments`），只會寫在稽核紀錄和設定健康檢查裡，不會出現在 `GET /api/machines`。以下不算變更：機器的第一次回報（或升級到 1.5.4 後的第一次回報）、以新的 key 回報並註明舊 key 的卡，以及該次回報中收集器失敗的廠商的卡。每次變更都會記錄稽核事件 `node.gpus_changed`（執行者為 `agent`）：`added`、`removed`，以及變更後這台機器的 GPU 數量 `gpus`。對應的設定健康檢查項目是 `machine-gpus-hidden`、`machine-gpu-not-allowed`、`machine-gpu-added` 和 `machine-gpu-removed`（[表格](#setup-health-checks)）。
+
 ## 設定健康檢查的項目
 
 管理員會在 **開始使用 → 設定健康檢查** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。
@@ -1081,6 +1143,10 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
 | `machine-loopback-address` | 警告 | 不是伺服器主機的機器把副本公開在 loopback 位址上（透過 tunnel 或 proxy），而且它的連接埠範圍沒有轉送到伺服器的主機（[做法](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)） |
 | `machine-gpu-access-lost` | 錯誤 | 線上機器的新行程打不開它的 GPU（agent 每 5 分鐘以workload 帳號檢查一次；只用 `--gpus` 啟動的 agent 容器，在主機執行 `systemctl daemon-reload` 後會失去這份存取權）。這段期間不會把行程類 workload放到那些 GPU 上；修正連結會開啟機器的更新指令（[做法](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)） |
+| `machine-gpus-hidden` | 警告 | 線上機器的主機 PCI 匯流排上某個廠商的 GPU 比它的 agent 看到的多（1.5.4 起的 agent 會清點），agent 看得到其中幾張，而且沒有任何設定把它限制在這幾張，並列出每張看不到的卡的 PCI 位址：通常是 agent 容器建立之後才裝上的 GPU。一張都看不到的 agent（例如 GPU 主機上只用 CPU 的 agent），或刻意只給部分 GPU 的 agent，不會收到警告；機器頁面會說明這種情況。修正連結會開啟機器的更新指令（[做法](how-to.md#add-or-remove-a-gpu-on-a-machine)） |
+| `machine-gpu-not-allowed` | 警告 | 最近 7 天內，有 GPU 存取清單的機器上出現了一張不在清單裡的 GPU：管理員允許之前，Forgeyard 不會使用它 |
+| `machine-gpu-added` | 說明 | 最近 7 天內，沒有 GPU 存取清單的機器上出現了一張 GPU：放置時已經會使用它 |
+| `machine-gpu-removed` | 警告 | 最近 7 天內，機器不再回報某張 GPU，並列出原本放在它上面的部署（重新啟動之前，它們會留在原來的位置） |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
@@ -1185,14 +1251,15 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
 | | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
-| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda`（torch +cu130） |
-| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.4rc1`（linux/amd64 與 arm64） |
+| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda`（torch +cu130） |
+| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.5.4rc1`（linux/amd64 與 arm64） |
+| `transformers`（1.5.4） | `cuda`、`cpu` | 同 `vision` | 和 `vision` 同一個映像檔（固定在同樣的 digest） |
 
 `vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`：vLLM 的編譯快取會在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，所以重新啟動或被喚醒時會載入第一次啟動編譯好的結果（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts)）。自訂配方可以用 `enabled: false` 關閉它，或用 `enabled: true` 為其他推論引擎開啟它（只限容器 variant）。
 
 `vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型（任務 `classify`，1.4.4）：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤。語言模型型的 reranker（Qwen3-Reranker）不受影響。
 
-當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 推論引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
+當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）和迴歸頭。1.5.4 起，零樣本（NLI）模型（標籤像 entailment、contradiction）和其他架構（DeBERTa、DistilBERT、BART）可以加入，只由 `transformers` 配方提供（不會提供 `vllm-pooling` 給它們，部署到它上面回 422 `incompatible`）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
 
 部署沒有指定 context 時，如果模型本身的最大長度比配方的預設短，就從模型的最大值開始（1.4.4）：512 個 token 的 BERT 分類模型會得到 `--max-model-len 512`，而不是 8192。RoBERTa 和 XLM-RoBERTa 模型的位置從 padding index 之後開始算，所以 514 個位置嵌入只放得下 512 個 token（BGE-M3：8192）。
 
@@ -1217,6 +1284,15 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的推論引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
 `vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他推論引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。零樣本（開放詞彙）偵測模型，也就是用 `model_type` 或架構認出的 transformers 零樣本偵測模型（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OmDet-Turbo、OWL-ViT、OWLv2），是標上 `zero_shot` 的 detect 模型（1.4.4，#142；1.4.3 會拒絕它們，1.4.3 之前加入的靠目錄存下的 config 認出，不需要遷移）。OmDet-Turbo 和用 timm backbone 的 DETR 一樣被拒絕：它的 transformers 版本經由 timm 載入 backbone（加入時，或部署 1.4.3 之前加入的時候，回 422 `not_a_vision_model`）。圖片分類器（1.4.4，#141，任務 `image-classify`）是 `config.json` 寫的是 `…ForImageClassification` 架構（固定類別：ViT、ConvNeXt V2、DINOv2…；timm 權重 `timm_wrapper` 會被拒絕）或 CLIP 類架構（標上 `zero_shot`：CLIP、SigLIP、SigLIP 2、ALIGN、AltCLIP、Chinese-CLIP、MetaCLIP 2）的模型，以 `vision-classify` 提供。零樣本偵測模型和圖片分類器需要 1.4.4 起的視覺映像檔：配方的 `forgeyard-vision` 映像檔比較舊時，部署或估算會回 422 `vision_image_too_old`，寫出兩個版本（`1.4.4rc1` 這類預先發布版算作它之後的正式版，也就是 1.4.4）；其他名稱的映像檔（本機建置）照原樣接受。CLIP 儲存庫裡 transformers 權重旁邊的 OpenCLIP 權重（`open_clip_*`）不會被讀取，也不會下載。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）；Grounding DINO 和 MM-Grounding-DINO 再加 512 MiB（文字編碼器和 800 像素的特徵：0.64 GiB 的檔案在 CPU 上峰值 2.24 GiB，1.4.4）。
+
+`transformers` 配方（1.5.4，#141 與 #144）執行和 `vision` 同一個 Forgeyard 映像檔，用 `--task embed` 或 `--task classify`：在 `/v1/embeddings` 提供圖片嵌入，在 `/v1/classify` 提供文字分類。它提供給 CLIP 類的 `embed` 模型（CLIP、SigLIP、SigLIP 2、ALIGN、AltCLIP、Chinese-CLIP、MetaCLIP 2：文字和圖片在同一個空間）或 DINOv2（`Dinov2Model`，只有圖片），以及每個 `classify` 模型（固定標籤：DistilBERT、DeBERTa、BERT、RoBERTa、XLM-R…；或用 NLI 模型做零樣本分類，標籤隨每個請求送來），並列在其他能提供該模型的配方之後：文字嵌入模型仍只有 `vllm-pooling`，把它部署到 `transformers` 會回 422 `incompatible`。
+
+1.5.4 起，模型能用哪些推論引擎、也就是它的預設（它的第一個配方：部署表單、加入時的預覽）：`vllm-pooling` 保留它以前提供的每個模型（文字嵌入模型、BERT、RoBERTa、XLM-R 和 vLLM 清單上其他的分類器），而且排第一；圖片嵌入模型（CLIP 類、DINOv2）、NLI 模型和其他架構的分類器不會提供它，只由 transformers 伺服器提供。vLLM 要用對話格式 messages 才能提供的多模態嵌入模型（Qwen3-VL-Embedding、GME：以 `embed` 加入、帶視覺塔的模型）加入時會被拒絕（422 `no_engine`）：預計在之後的 1.5 修補版加入。1.5.4 之前加入、`vllm-pooling` 不能執行的目錄項目，部署到它上面時會被拒絕（422 `incompatible`）。目錄會記下嵌入模型吃什麼（`embed`：它的系列、`modalities` 是文字和圖片、只有圖片或只有文字、向量大小和文字長度），以及模型卡寫的語言（`languages`；模型卡沒寫時由推薦清單提供）。推薦清單新增兩個零樣本分類器（`bge-m3-zeroshot-v2.0-c`，多語言；`roberta-base-zeroshot-v2.0-c`，只有英文；MIT 授權的權重，只用可商用的資料訓練），以及 SigLIP 2 base、CLIP ViT-B/32 LAION-2B 和 DINOv2 small 這三個嵌入模型（Apache-2.0 和 MIT；同一個儲存庫每種任務可以列一次，所以 SigLIP 2 和 CLIP 也以圖片分類器列在清單上）。不執行模型儲存庫裡的程式碼：`config.json` 有 `auto_map` 時，replica 在啟動時就停下。參數（進階）：`threads`（4，CPU 上 torch 的執行緒數）、`max_images`（32，每個嵌入請求的圖片數，每張最多 20 MiB、4,000 萬像素）和 `max_pairs`（256：零樣本模型對每段文字和每個標籤各跑一次，所以每個請求的文字數 x 標籤數最多這麼多）。伺服器本身：
+
+- `POST /v1/embeddings`：`input` 是一段文字，或文字、`{"text": …}` 和 `{"image": "<base64 或 data: URI>"}` 項目組成的清單（Jina 的格式；圖片 URL 由閘道取得，引擎從不連網）；以 OpenAI 的格式回應，每個向量都做 L2 正規化，順序和送出的一樣；`encoding_format` 是 `float` 或 `base64`；`dimensions` 只能是模型自己的。文字會截到模型的長度（CLIP 77 個 token、SigLIP 64 個），計在 `usage.truncated_inputs`；`usage` 也計 `images` 和 `kilopixels`。只吃圖片的模型（DINOv2）拒絕文字（400 `text_not_supported`）。
+- `POST /classify`（和 `/v1/classify`）：vLLM 的請求和回應（`input`、`truncate_prompt_tokens`、`use_activation`；`data[index, label, probs, num_classes]`、`usage`）。零樣本模型另外接受 `labels`（必填，最多 32 個不重複的名稱）、`multi_label`（false）和 `hypothesis_template`（`"This text is about {}."`），結果和 transformers 的零樣本 pipeline 一樣：`probs` 依請求裡標籤的順序，回應會把它們列回來（`labels`、`multi_label`）；單一標籤模式下的機率加起來是 1。固定標籤的模型收到 `labels` 回 400 `labels_not_supported`，零樣本模型沒收到則回 `labels_required`；配對太多回 `too_many_pairs`。
+
+在 CPU 上權重以 float32 保存（半精度在 CPU 上慢好幾倍：bge-m3 的一次 NLI 計算在 float16 要 1.4 秒，float32 只要 0.2 秒，四個執行緒），所以估算把 16 位元權重的參數以每個 4 位元組計算（配方估算欄位 `cpu_float32`），再加 1.25 GiB；GPU 上則和 `vision` 一樣是檔案大小加 1 GiB。這些任務需要 1.5.4 起的視覺映像檔，內建配方釘選的就是它（`forgeyard-vision` 1.5.4rc1）；自訂配方如果指定較舊的映像檔，部署或估算會回 422 `vision_image_too_old`。閘道這一側：見[嵌入](#embeddings)和[文字分類](#text-classification)。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：推論引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 
@@ -1333,7 +1409,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.5.3`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.5.4`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**加入機器** 會說明怎麼建置。

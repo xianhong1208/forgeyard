@@ -96,11 +96,17 @@ def test_fy_tcls_001_the_rules_on_real_configs():
     assert "Add it as a rerank model" in textcls.refusal(textcls.summary(config("bge-reranker-v2-m3")))
     regress = textcls.summary({**many, "problem_type": "regression"})
     assert textcls.refusal(regress).startswith("This model predicts numbers")
+    # 1.5.4: NLI and the architectures vLLM does not run are refused for vllm-pooling only (vllm_refusal); the
+    # transformers server runs them, so they are no longer refused when added.
     for name in ("bge-m3-zeroshot-v2.0", "nli-deberta-v3-base"):
-        why = textcls.refusal(textcls.summary(config(name)))
-        assert why.startswith("This is a zero-shot (NLI) model") and "1.5 (#144)" in why and "structured outputs" in why
-    why = textcls.refusal(textcls.summary(config("distilbert-sst-2")))
-    assert why.startswith("vLLM 0.32.0 cannot run DistilBertForSequenceClassification") and "1.5 (#144)" in why
+        s = textcls.summary(config(name))
+        assert textcls.refusal(s) is None and s["zero_shot"] is True and s["entailment"] == "entailment"
+        why = textcls.vllm_refusal(s)
+        assert why.startswith("This is a zero-shot (NLI) model") and "transformers server" in why
+    why = textcls.vllm_refusal(textcls.summary(config("distilbert-sst-2")))
+    assert textcls.refusal(textcls.summary(config("distilbert-sst-2"))) is None
+    assert why.startswith("vLLM 0.32.0 cannot run DistilBertForSequenceClassification") and "transformers server" in why
+    assert textcls.vllm_refusal(s := textcls.summary(config("bert-multilingual-sentiment"))) is None and "zero_shot" not in s
     qwen = json.loads((FIX / "qwen3-reranker-0.6b.config.json").read_text())
     assert textcls.summary(qwen) is None and textcls.refusal(None).startswith("This is not a text classifier")
     assert textcls.summary("not a dict") is None  # type: ignore[arg-type]
@@ -131,7 +137,8 @@ def test_fy_tcls_003_roberta_positions_hold_two_fewer_tokens():
 def test_fy_tcls_004_inspecting_reads_the_kind_from_the_labels(hf):
     """FY-TCLS-004: tagged text-classification (or zero-shot-classification), a model with two labels or more is read
     as a text classifier, its labels kept; with one output it stays a reranker. Asked for as a text classifier, a
-    reranker, a causal-LM reranker, an NLI model and a DistilBERT model are refused with their reasons."""
+    reranker and a causal-LM reranker are refused with their reasons (an NLI model and a DistilBERT model are read
+    since 1.5.4: the transformers server runs them)."""
     out = inspect(hf, SENTIMENT)
     assert out["task_hint"] == "classify" and out["classify"]["labels"] == 5 and out["config"]["max_context"] == 512
     assert inspect(hf, LANGUAGE, "classify")["classify"]["label_names"][-1] == "vi"
@@ -140,10 +147,9 @@ def test_fy_tcls_004_inspecting_reads_the_kind_from_the_labels(hf):
         inspect(hf, RERANKER, "classify")
     with pytest.raises(inspector.InspectError, match="text classifier with 5 labels"):
         inspect(hf, SENTIMENT, "rerank")
-    with pytest.raises(inspector.InspectError, match=r"zero-shot \(NLI\) model"):
-        inspect(hf, ZERO_SHOT)
-    with pytest.raises(inspector.InspectError, match="cannot run DistilBert"):
-        inspect(hf, SST2, "classify")
+    # 1.5.4: an NLI model and a DistilBERT classifier are read (the transformers server runs them).
+    assert inspect(hf, ZERO_SHOT)["classify"]["zero_shot"] is True
+    assert inspect(hf, SST2, "classify")["classify"]["architecture"] == "DistilBertForSequenceClassification"
     # Tagged text-classification but no classification head to read (a causal LM): no kind is guessed.
     assert inspect(hf, "acme/causal-cls")["task_hint"] is None
     assert inspect(hf, SENTIMENT, "embed")["task_hint"] == "classify"   # another task: no classify block, no refusal
@@ -158,7 +164,8 @@ def test_fy_tcls_005_adding_and_retasking_through_the_api(owner, hf):
     r = owner.post("/api/models", json={"name": "sentiment", "source": f"hf://{SENTIMENT}"})
     assert r.status_code == 201, r.text
     m = r.json()["model"]
-    assert m["task"] == "classify" and m["task_label"] == "Text classification" and m["recipes"] == ["vllm-pooling"]
+    assert m["task"] == "classify" and m["task_label"] == "Text classification" and \
+        m["recipes"] == ["vllm-pooling", "transformers"]     # 1.5.4: the transformers server too, listed after vLLM
     assert m["classify"] == {"architecture": "BertForSequenceClassification", "labels": 5,
                              "label_names": ["1 star", "2 stars", "3 stars", "4 stars", "5 stars"]}
     assert m["modalities"] == [] and m["summary"]["max_context"] == 512
@@ -176,7 +183,7 @@ def test_fy_tcls_005_adding_and_retasking_through_the_api(owner, hf):
     assert r.status_code == 422 and "Forgeyard read no labels" in r.json()["detail"]["message"]
     assert owner.patch(f"/api/models/{m['id']}", json={"task": "classify", "title": "Stars"}).status_code == 200
     page = owner.get("/api/models/sentiment").json()
-    assert page["model"]["classify"]["labels"] == 5 and [x["name"] for x in page["recipes"]] == ["vllm-pooling"]
+    assert page["model"]["classify"]["labels"] == 5 and [x["name"] for x in page["recipes"]] == ["vllm-pooling", "transformers"]
     # An ONNX export tagged text-classification: no safetensors config is read, so no labels: refused.
     r = owner.post("/api/models", json={"name": "onnx-cls", "source": "hf://acme/sentiment-onnx"})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "not_a_text_classifier"
@@ -201,7 +208,8 @@ def test_fy_tcls_006_a_classifier_deploys_on_the_pooling_runner_with_its_own_con
     assert not {"--convert", "--task", "--pooler-config"} & set(args)
     assert recipes.builtin_recipes()["vllm-pooling"][0].api_for("classify") == "classify"
     preview = owner.post("/api/models/inspect", json={"source": f"hf://{SENTIMENT}"}).json()
-    assert preview["recipes"] == ["vllm-pooling"] and preview["suggestion"]["params"]["context"] == 512
+    assert preview["recipes"] == ["vllm-pooling", "transformers"] and preview["suggestion"]["recipe"] == "vllm-pooling"
+    assert preview["suggestion"]["params"]["context"] == 512
     assert "error" not in preview["suggestion"]
     # The model's page says whether a copy fits each machine with the engine's defaults: the same context.
     page = owner.get("/api/models/lang").json()
@@ -351,8 +359,9 @@ def test_fy_tcls_011_playground_try_it_and_the_deployment_page(gw):
 
 # ------------------------------------------------------------------ search and the recommended list
 def test_fy_tcls_012_searching_for_text_classifiers(owner, monkeypatch):
-    """FY-TCLS-012: a text classification search asks for text-classification, shows its results as text
-    classifiers and puts rerankers (filed there too) last; a rerank search still shows them as rerankers first."""
+    """FY-TCLS-012: a text classification search asks for text-classification (and, 1.5.4, zero-shot-classification),
+    shows its results as text classifiers and puts rerankers (filed there too) last; a rerank search still shows them
+    as rerankers first."""
     from tests.test_hub_search import RERANK, SENTIMENT as SENT, FakeHub
     from forgeyard.config import get_settings
 
@@ -364,9 +373,9 @@ def test_fy_tcls_012_searching_for_text_classifiers(owner, monkeypatch):
         # The reranker is the most downloaded: a text classification search still puts it last.
         fake.by_tag["text-classification"] = [{**RERANK, "downloads": 10**9}, SENT]
         body = owner.get("/api/models/search", params={"q": "x", "task": "classify"}).json()
-        assert [q["pipeline_tag"] for q in fake.queries] == [["text-classification"]]
+        assert sorted(q["pipeline_tag"][0] for q in fake.queries) == ["text-classification", "zero-shot-classification"]
         assert [(x["id"], x["task"]) for x in body["results"]] == [(SENT["id"], "classify"), (RERANK["id"], "classify")]
-        assert body["results"][0]["recipes"] == ["vllm-pooling"]
+        assert body["results"][0]["recipes"] == ["vllm-pooling", "transformers"]   # 1.5.4: vLLM first
         body = owner.get("/api/models/search", params={"q": "x", "task": "rerank"}).json()
         assert [(x["id"], x["task"]) for x in body["results"]][0] == (RERANK["id"], "rerank")
         assert owner.get("/api/models/search", params={"task": "nope"}).json()["detail"]["message"].endswith("or classify")
@@ -380,7 +389,7 @@ def test_fy_tcls_013_recommended_text_classifiers():
     under a permissive licence, served by vllm-pooling on a GPU, of an architecture vLLM runs; an unpinned one or one
     under another licence is refused."""
     data = rec.recommended()
-    cls = [e for e in data.models if e.task == "classify"]
+    cls = [e for e in data.models if e.task == "classify" and e.recipe == "vllm-pooling"]   # 1.5.4: + transformers'
     assert {e.source for e in cls} == {f"hf://{SENTIMENT}", f"hf://{LANGUAGE}", f"hf://{TOXIC}"}
     assert all(sources.REVISION_RE.match(e.revision or "") and e.license in ("apache-2.0", "mit")
                and e.recipe == "vllm-pooling" and e.device == "gpu" and e.group == "text-classification" for e in cls)

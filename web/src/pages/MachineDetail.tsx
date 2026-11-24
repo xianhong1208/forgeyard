@@ -18,6 +18,7 @@ import {
   MACHINE_KIND, workloadTitle, cardLine, cardMemory, cards, machineKind, machineMemory, memoryRows, uniqueHolders, whereOnMachine, type Placement,
 } from "../lib/fleet";
 import { exact } from "../lib/format";
+import { censusLines, changeText, recentChanges } from "../lib/gpuChanges";
 import { ageSeconds, ago, archLabel, bytes, replicaAddressNote } from "../lib/machines";
 import { tlsLine } from "../lib/replicaTls";
 import { useDocumentTitle } from "../lib/title";
@@ -279,6 +280,8 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
   const [busy, setBusy] = useState(false);
   const runtimes = m.runtime_info ?? {};
   const workloads = canRunWorkloads(m);
+  const changes = recentChanges(m);
+  const census = censusLines(m.runtime_info?.gpu_census);
 
   const open = () => {
     setPicked(m.gpu_allowlist ?? cards.map((a) => a.key));
@@ -307,7 +310,7 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
   };
 
   return (
-    <section className="panel mk-section gpu-access" aria-labelledby="mk-access">
+    <section className="panel mk-section gpu-access" id="gpu-access" aria-labelledby="mk-access">
       <h2 id="mk-access">{t("machine.gpu.title")}</h2>
       <p className="gpu-access-line">
         {cards.length > 0 && (
@@ -324,6 +327,19 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
           <button type="button" className="btn btn-quiet btn-small" onClick={open}>{t("machine.gpu.change")}</button>
         )}
       </p>
+      {census.map((c, i) => c.tone === "warn"
+        ? <Notice key={i} tone="warn">{c.text}</Notice>
+        : <p key={i} className="muted small gpu-census">{c.text}</p>)}
+      {changes.length > 0 && (
+        <div className="gpu-changes">
+          <h3 className="small">{t("machine.gpuChanges.title")}</h3>
+          <ul>
+            {changes.map((c, i) => (
+              <li key={`${c.at}-${i}`}><span className="muted">{exact(c.at)}</span> · {changeText(c)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {editing && (
         <fieldset className="allowlist">
           <legend>{t("machine.gpu.legend", { name: m.name })}</legend>

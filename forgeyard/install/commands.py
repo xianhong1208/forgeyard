@@ -22,13 +22,28 @@ from forgeyard.install import images, requirements, wheel
 
 TEMPLATE = Path(__file__).with_name("install.sh")
 MODEL_CACHE = "/srv/forgeyard-models"
-# What install.sh may be told about the server: a plain https URL, nothing a shell would expand.
 # 1.4.5 (#202): `--device` for each NVIDIA device node of the host, listed by the shell where the command runs (a node
 # the host does not have is skipped: Docker refuses a --device that does not exist). Next to --gpus all: the NVIDIA
 # runtime hook behind --gpus sets up the device access behind Docker's and systemd's back, and the host's next
-# `systemctl daemon-reload` takes it from new processes in the container; a --device Docker records, so it stays.
-NVIDIA_DEVICES_SHELL = ("$(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset "
-                        "/dev/nvidia[0-9]*; do [ -e \"$d\" ] && printf -- '--device %s ' \"$d\"; done)")
+# `systemctl daemon-reload` takes it from new processes in the container; a --device Docker records, so it stays. The
+# loop expands to plain `--device /dev/nvidiaN` words before `docker run` starts, so what Docker records is the same
+# as if each were typed. 1.5.4: the machine page's update command uses it too, so a GPU added since the agent started
+# is passed, and one command fits every NVIDIA machine whatever its GPU count. The console's Add-a-machine form has the
+# same text (web/src/lib/dockerAgent.ts NVIDIA_DEVICES; FY-GACC-014 checks they are equal).
+NVIDIA_DEVICE_NODES = ("/dev/nvidiactl", "/dev/nvidia-uvm", "/dev/nvidia-uvm-tools", "/dev/nvidia-modeset")
+NVIDIA_DEVICE_GLOB = "/dev/nvidia[0-9]*"
+NVIDIA_DEVICES_SHELL = (f"$(for d in {' '.join(NVIDIA_DEVICE_NODES)} {NVIDIA_DEVICE_GLOB}; "
+                        "do [ -e \"$d\" ] && printf -- '--device %s ' \"$d\"; done)")
+_NVIDIA_GLOB_RE = re.compile(r"^/dev/nvidia[0-9][^/]*$")
+
+
+def nvidia_loop_finds(path: str) -> bool:
+    """Whether NVIDIA_DEVICES_SHELL passes this host path when it exists: one of its named nodes, or a name its glob
+    matches (the shell's `*` stops at a slash)."""
+    return path in NVIDIA_DEVICE_NODES or bool(_NVIDIA_GLOB_RE.match(path))
+
+
+# What install.sh may be told about the server: a plain https URL, nothing a shell would expand.
 _SAFE_URL = re.compile(r"^https://([A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?(/[A-Za-z0-9._~\-/]*)?$")
 
 

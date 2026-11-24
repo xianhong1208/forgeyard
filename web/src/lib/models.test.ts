@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { downloadFraction, downloadText } from "./models";
-import type { Replica } from "./types";
+import { compatibleRecipes, downloadFraction, downloadText } from "./models";
+import type { CatalogModel, Recipe, Replica } from "./types";
 
 const GIB = 1024 ** 3;
 const rep = (download: Replica["download"]) => ({ download }) as Replica;
@@ -28,5 +28,21 @@ describe("download and pull progress", () => {
       .toBe("Pulling the image: unpacking, 5 of 7 layers");
     expect(downloadText(rep({ phase: "image", done: 0, total: 0 }))).toBe("Pulling the image");
     expect(downloadText(rep(null))).toBeNull();
+  });
+});
+
+describe("the recipes a model is offered", () => {
+  const recipe = (name: string, tasks: string[]) => ({ name, tasks, formats: ["safetensors"] }) as unknown as Recipe;
+  const all = [recipe("transformers", ["embed", "classify"]), recipe("vision", ["detect"]), recipe("vllm-pooling", ["embed", "rerank", "classify"])];
+  const model = (recipes?: string[]) => ({ name: "m", format: "safetensors", task: "embed", recipes }) as unknown as CatalogModel;
+
+  it("FY-WEB-899: the server's list and order win (1.5.4: the transformers server last, only for the models it runs)", () => {
+    expect(compatibleRecipes(model(["vllm-pooling", "transformers"]), all).map((r) => r.name)).toEqual(["vllm-pooling", "transformers"]);
+    expect(compatibleRecipes(model(["vllm-pooling"]), all).map((r) => r.name)).toEqual(["vllm-pooling"]);
+    // A name the catalog no longer has, or one that does not serve the model's task, is dropped.
+    expect(compatibleRecipes(model(["gone", "vision", "vllm-pooling"]), all).map((r) => r.name)).toEqual(["vllm-pooling"]);
+    // Without the server's list (an older answer), every recipe serving the format and task.
+    expect(compatibleRecipes(model(undefined), all).map((r) => r.name)).toEqual(["transformers", "vllm-pooling"]);
+    expect(compatibleRecipes(undefined, all)).toEqual([]);
   });
 });

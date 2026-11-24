@@ -98,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 `$(for d in …)` 那一行會再用 `--device` 傳入主機上每個 NVIDIA 裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm`、`/dev/nvidia-uvm-tools`、`/dev/nvidia-modeset` 和每個 `/dev/nvidiaN`），主機沒有的會跳過。Docker 可以同時接受它們和 `--gpus all`，而且這很重要：`--gpus` 給的裝置是在 Docker 和 systemd 不知道的情況下設定的，主機下一次執行 `systemctl daemon-reload` 時，容器裡的新行程就會失去它們；用 `--device` 給的則會留著（[機器上的新行程打不開它的 GPU](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)）。如果還沒有 `/dev/nvidia-uvm`（主機開機後還沒跑過 CUDA 程式），先執行 `sudo nvidia-modprobe -u -c=0`。設定好 CDI（`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）的話，可以改用 `--device nvidia.com/gpu=all` 取代這兩者：CDI 會宣告這些裝置，所以它們也會留著。
@@ -132,7 +132,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -143,7 +143,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4 inventory
 ```
 
 ### 純 CPU
@@ -157,7 +157,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 ### 為什麼要用這些選項
@@ -175,8 +175,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **進階／離線** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.4 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -190,16 +190,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.3 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.4 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.3`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.4`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它在容器裡的模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -210,7 +210,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.4
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -279,8 +279,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 伺服器升級後，機器的頁面會在 **更新 agent** 顯示完整的指令（[更新 agent](#update-an-agent)）。設成 **一律經由伺服器** 的機器，指令會改為搬運 agent 映像檔，而不是拉取。在連得到 Docker Hub 的機器上執行第一步（把 `USER` 換掉；如果你用別的名稱連到那台機器，主機名稱也要換）：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.4 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 再到 `amd-01` 上執行第二步：`docker rm -f`，然後用載入的映像檔執行同樣的 `docker run`。沒有 `ssh` 連得到那台機器？把映像檔存成檔案帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。1.4.2 之前的 agent 不會回報它的執行方式：請先用這種方式手動更新一次，之後它的頁面就會顯示指令。
@@ -554,9 +554,9 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 文字分類
 
-文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。它在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡。
+文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡；從 1.5.4 起，DeBERTa、DistilBERT 或 BART 分類模型，以及在沒有 GPU 的機器上的任何分類模型，都由 Forgeyard 的 transformers 伺服器（配方 `transformers`，任何 CPU 都行）執行。想在每個請求裡自己指定標籤，見[不用訓練就能分類文字（零樣本）](#classify-text-without-training-zero-shot)。
 
-1. **模型 → 加入模型 → 推薦**：*文字分類* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **文字分類** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
+1. **模型 → 加入模型 → 推薦**：*文字分類* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **文字分類** 搜尋 Hugging Face：有兩個以上標籤的分類模型都能加入，目錄會列出能執行它的推論引擎（能用 vLLM 時 vLLM 排第一）。目錄會顯示它的標籤，以及模型說明卡列出的語言；reranker（只有一個輸出）或迴歸（regression）頭會被拒絕，並說明原因。
 2. **部署**。模型本身的最大長度比推論引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
 3. 它會出現在 **服務中 → 文字分類**。部署頁面的 **試試看** 會送一句話；**試用區** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
 
@@ -608,7 +608,74 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
        "structured_outputs": {"choice": ["billing", "shipping", "technical", "other"]}}'
 ```
 
-回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型（請求裡帶你的標籤的 NLI 模型，也能在 CPU 上執行）會在 1.5 和 transformers 推論引擎一起推出（#144）。
+回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型同樣在每個請求裡接受你的標籤，成本卻只有一小部分：見下一節。
+
+## 不用訓練就能分類文字（零樣本）
+
+零樣本分類模型（1.5.4）從**你在每個請求裡指定的標籤**中挑選：今天是 `["billing", "technical problem", "praise"]`，明天可以換一組，不用訓練。它是 NLI 模型：對每個標籤，它讀文字和一句像「這段文字是關於帳務。」的句子，評估文字有多支持這句話。它在 Forgeyard 的 transformers 伺服器（配方 `transformers`）上執行，任何 CPU 都行，也能共用 GPU。
+
+1. **模型 → 加入模型 → 推薦 → 文字分類**：`bge-m3-zeroshot-v2.0-c` 能讀多種語言，包含中文（1.1 GiB）；`roberta-base-zeroshot-v2.0-c` **只讀英文**，速度大約快四倍。兩者都是 MIT 授權，訓練資料都可以商用。模型頁面會顯示 *零樣本：每個請求自帶標籤* 和它的語言，模型只讀英文時還會提醒：這種模型回答中文文字時很有把握，卻大多是錯的（我們的測試 12 段只對 1 到 2 段）。
+2. **部署**。在 CPU 上大約需要模型大小兩倍的 RAM（權重在 CPU 上以 float32 保存，估算已經算進去）；*Zero-shot pairs per request*（`max_pairs`，256）限制一次請求的文字數 × 標籤數。
+3. 在 **試用區** 輸入標籤（按 Enter 或逗號加入一個）、文字一行一段，按 **分類**：每段文字的長條依你給的標籤順序排列，最可能的會標出來。*可以同時符合多個標籤* 會讓每個標籤各自評分，0 到 1。頁面會依部署的上限計算文字數 × 標籤數。
+
+**假設句範本** 請用文字本身的語言寫：12 段繁體中文新聞、10 個中文主題，用 `這段文字是關於{}。` 全部答對，用英文預設 `This text is about {}.` 對 11 段（試用區可以一鍵改用中文範本）。
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "bge-m3-zeroshot-v2.0-c", "input": ["我的發票金額開錯了", "新筆電的電池可以用一整天"],
+       "labels": ["帳務", "科技", "運動"], "hypothesis_template": "這段文字是關於{}。"}'
+```
+
+```json
+{"id": "classify-…", "object": "list", "created": 1795000000, "model": "bge-m3-zeroshot-v2.0-c",
+ "labels": ["帳務", "科技", "運動"], "multi_label": false,
+ "data": [{"index": 0, "label": "帳務", "probs": [0.93, 0.05, 0.02], "num_classes": 3},
+          {"index": 1, "label": "科技", "probs": [0.03, 0.95, 0.02], "num_classes": 3}],
+ "usage": {"prompt_tokens": 96, "total_tokens": 96, "completion_tokens": 0}}
+```
+
+`probs` 依你的 `labels` 排列；`"multi_label": true` 會讓每個標籤各自評分。模型對每段文字配每個標籤各跑一次，所以時間會隨兩者增加（bge-m3 用四個 CPU 執行緒：每組文字和標籤大約 50 毫秒，12 段文字 × 10 個標籤 6 秒）：標籤清單盡量短、多給一些執行緒，或量大時改用 GPU 上的 CUDA 版本。該用哪一種：
+
+| 你需要 | 用 |
+|---|---|
+| 每天同樣幾個標籤、量大（情緒、語言、有害內容） | 固定標籤的分類模型 |
+| 標籤會變、不想訓練、文字不長 | 零樣本分類模型 |
+| 細微或很長的文字要最好的答案、標籤需要說明 | 對話模型搭配 `structured_outputs.choice`（上一節） |
+
+## 用文字搜尋圖片（圖片嵌入）
+
+圖片嵌入模型（1.5.4）把圖片轉成向量，CLIP 類模型連文字也一起，放在同一個空間裡：一段文字的向量會靠近它描述的圖片的向量，所以你可以打字搜尋照片、掃描檔或螢幕截圖。DINOv2 只收圖片，用來找重複或相似的圖。它們在 Forgeyard 的 transformers 伺服器（配方 `transformers`）上執行，任何 CPU 都行，也能共用 GPU。
+
+1. **模型 → 加入模型 → 推薦 → 圖片嵌入**：`siglip2-base-embed`（多種語言的文字，768 維）、`clip-vit-b-32-laion-embed`（英文文字，512 維，小又快）和 `dinov2-small-embed`（只收圖片，384 維）。CLIP 類的儲存庫能做兩件事，各自是一個目錄項目：以 **嵌入** 加入用來搜尋，再用另一個名稱以 **圖片分類** 加入一次，用你選的字詞替圖片分類。
+2. **部署**。模型頁面和 **服務中** 會顯示它收什麼（收圖片的模型有圖片圖示）和向量維度；*Images per request*（`max_images`，32）限制一次請求。
+3. 在 **試用區** 輸入文字（一行一段）並加入圖片（選擇、拖進來、貼上螢幕截圖，或給一個由伺服器抓取的網址），按 **產生嵌入**：表格會列出每段文字和每張圖片的餘弦相似度，每一列最相似的會標出來。請在同一列裡比較：CLIP 類模型給相符的文字和圖片大約 0.25 到 0.4，不相干的大約 0.1。
+
+在 Python 裡，OpenAI SDK 用 `extra_body` 送有型別的項目（它的 `input` 只收字串）；純文字清單和任何嵌入模型一樣能用：
+
+```python
+import base64
+import os
+import ssl
+
+from openai import DefaultHttpxClient, OpenAI
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+client = OpenAI(base_url="https://192.168.1.20:7860/v1", api_key=os.environ["FORGEYARD_API_KEY"],
+                http_client=DefaultHttpxClient(verify=ca))
+photo = "data:image/jpeg;base64," + base64.b64encode(open("cats.jpg", "rb").read()).decode()
+r = client.embeddings.create(model="siglip2-base-embed", input=[],
+                             extra_body={"input": ["two cats on a sofa", {"image": photo},
+                                                   {"image": "https://example.com/street.jpg"}]})
+text, cats, street = (d.embedding for d in r.data)
+print(sum(a * b for a, b in zip(text, cats)), sum(a * b for a, b in zip(text, street)))
+```
+
+向量已經正規化，所以內積就是餘弦相似度。圖片網址由 Forgeyard 伺服器依媒體規則抓取（除非設定 `MEDIA_ALLOW_PRIVATE_HOSTS`，只能是公開位址），推論引擎從不自己抓。請記得：
+
+- **一個索引只用一個模型。** 兩個模型的向量對不上：換掉某個名稱背後的模型時要重建索引。也因為這樣，帶圖片的請求絕不送往雲端供應商。
+- **文字要短。** CLIP 類模型只讀 64 到 77 個 token，其餘會截掉（`usage.truncated_inputs` 會計算）：它適合圖說和查詢。文件請用文字嵌入模型。
+- **文字的語言。** CLIP LAION-2B 讀英文；中文查詢請用 SigLIP 2。
 
 ## 使用受限（gated）的 Hugging Face 模型
 
@@ -622,9 +689,21 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 權杖只會送到 Hugging Face（`HF_ENDPOINT`），絕不會送到 `https://` 的 GGUF 主機。受限模型的部署沒有可用的權杖時，設定健康檢查會提醒（`gated-model-no-token`）。
 
+## 讓兩個本機部署分攤請求
+
+部署頁面上的 **分流與備援** 區塊，除了雲端模型，也可以放其他本機部署。用它可以把同一個模型的兩份放在同一個模型名稱後面：同一個模型的 4-bit 和 8-bit 版本，或兩台機器上的同一個模型。管理員：
+
+1. 照平常的方式部署第二份，取一個自己的模型名稱（例如在 `qwen3-8b` 旁邊的 `qwen3-8b-q8`）。它必須回應同一種請求：對話配對話，嵌入配嵌入。
+2. 從 **服務中** 打開第一個部署。在 **分流與備援** 加入第二個部署：
+   - **放進第一層**，和這個部署本身放在一起，兩者就會**分攤**請求：兩邊就緒的副本輪流接，手上請求最少的先接。（權重只用來在雲端模型之間分配請求。）
+   - **放進後面的層**（**新增一層**），就**只在第一層無法處理時**才使用：沒有就緒的副本、每個副本都在忙，或推論引擎回傳 429 或 503。請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
+3. 按 **儲存分流與備援**，從下一個請求開始套用。
+
+用戶端照樣送第一個部署的模型名稱；回應上的 `X-Forgeyard-Target` 會標明是哪個部署回答的。第二個部署也仍然用它自己的名稱回應。本機的層不需要金鑰的雲端設定：每把金鑰都可以使用。如果想改用一個新名稱讓兩個部署分攤，請在 **雲端 → 雲端模型** 建立一個，把兩者都放進它的第一層。
+
 ## 加入雲端供應商
 
-管理員：打開 **雲端 → 供應商**，選 **新增供應商**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **測試連線**。加入你要的模型，然後使用其中一個：打開一個部署，在 **雲端備援** 新增雲端層並放入雲端模型，再儲存；或用 **雲端 → 雲端模型 → 新增雲端模型** 以自己的名稱提供它。在 **API 金鑰** 把可以使用它的金鑰的雲端設定改成 **永不** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+管理員：打開 **雲端 → 供應商**，選 **新增供應商**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **測試連線**。加入你要的模型，然後使用其中一個：打開一個部署，在 **分流與備援** 按 **新增一層**，放入雲端模型，再按 **儲存分流與備援**；或用 **雲端 → 雲端模型 → 新增雲端模型** 以自己的名稱提供它。在 **API 金鑰** 把可以使用它的金鑰的雲端設定改成 **永不** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
 
 **Outside your network (cloud)** 會自動幫你勾好：OpenAI、Anthropic、Gemini、Azure 和 OpenRouter 一律勾選；*OpenAI-compatible server* 則在它的 base URL 是公開位址（或解析成公開位址的名稱）時勾選。私有位址（`10.x`、`172.16–31.x`、`192.168.x`、`100.64–127.x`、loopback、link-local、IPv6 `fc00::/7`），或像 `gpu-box`、`*.local`、`*.lan`、`*.internal` 這樣的名稱則不勾選。表單會說明原因；判斷錯了就自己改。名稱在伺服器上解析不出來時，維持不勾選，並說明無法判斷。
 
@@ -721,7 +800,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 超過 30 秒（`AGENT_OFFLINE_SECONDS`）沒有收到機器的任何訊息，它就是 *offline*。從這時起：
 
-1. **立刻：**閘道不再把請求送到它的副本。在其他機器上也有副本的部署，繼續由那些副本回應；沒有其他就緒副本的部署回應 503 `no_ready_replica`，並說明 *the machine is offline*（或轉到它的雲端備援）。只有在伺服器自己剛啟動時，每台機器在 agent 重新連線（幾秒內）之前都顯示離線，還沒連回來的機器會在那 30 秒內保留它的副本：它們的推論引擎在這段時間仍然會回應。
+1. **立刻：**閘道不再把請求送到它的副本。在其他機器上也有副本的部署，繼續由那些副本回應；沒有其他就緒副本的部署回應 503 `no_ready_replica`，並說明 *the machine is offline*（或移到它分流與備援的下一層）。只有在伺服器自己剛啟動時，每台機器在 agent 重新連線（幾秒內）之前都顯示離線，還沒連回來的機器會在那 30 秒內保留它的副本：它們的推論引擎在這段時間仍然會回應。
 2. **10 分鐘之後**（`AGENT_OFFLINE_MOVE_SECONDS`，從最後一次心跳起算）：沒有固定在這台機器上的部署，它的每個副本會依部署自己的規則（分散到不同機器、記憶體足夠、依目前的估算）重新放到放得下的機器上。部署頁面會顯示 *Replica 0: moved: gpu-01 offline for 10 minutes; placing it on another machine (gpu-02 fits)*，接著是它被放到哪裡。這是同一個副本，絕不會多出一份：部署的副本數量不變。
    - **固定（pinned）**在這台機器上的部署，副本留在原地等它回來（*waiting for gpu-01 to come online (the deployment is pinned to it)*）。
    - **沒有其他機器放得下**時，副本也留下來等；之後某次檢查有機器放得下了，才會搬過去。
@@ -761,6 +840,21 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 正在使用中的卡不能從清單中移除：請先停止在它上面執行的東西。每次變更都會記錄在稽核紀錄裡，包含變更前後的內容。
 
 如果要讓模型和其他程式共用同一張卡，部署時選擇 **GPU 共用** → **共用 VRAM**：這樣它只會保留估算的記憶體量，vLLM 也會被設定成只使用這麼多（請看 [vLLM 在共用的卡上無法啟動](troubleshooting.md#vllm-does-not-start-on-a-shared-card)）。
+
+## 在機器上加裝或拆下 GPU
+
+在機器上裝好 GPU（或拆下一張），而且主機的驅動程式列得出它（`nvidia-smi` 或 `amd-smi`）之後：
+
+1. **重新建立 agent**：使用機器頁面上 **更新 agent** 的指令（[做法](#update-an-agent)）。agent 容器只有它建立時拿到的 GPU 裝置，所以之後才裝上的 GPU，要等容器重新建立才看得到；這個指令會傳入你執行它當下主機上的 GPU 裝置。用 install.sh 安裝或從原始碼執行的 agent，只要重新啟動就好。
+2. **如果這台機器有 GPU 存取清單，就允許它**（[限制 GPU](#restrict-gpus-on-a-shared-machine)）：選 **變更 GPU 存取**，勾選新的卡。有清單的機器永遠不會自己使用新卡；沒有清單的機器則會馬上使用。
+
+Forgeyard 會這樣告訴你（管理員可以在 **設定健康檢查** 看到，**機器** 和機器的頁面上也會顯示橫幅）：
+
+- *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8*（`machine-gpus-hidden`）：從 1.5.4 起，agent 會清點主機 PCI 匯流排上的 GPU（容器也看得到完整的匯流排），再和它能使用的 GPU 比較，並列出每張看不到的卡的 PCI 位址。請照第 1 步重新建立 agent。不是給 Forgeyard 用的 GPU（例如桌上型 CPU 的內建顯示晶片），把這項暫停提醒即可。一張 GPU 都看不到的 agent（例如 GPU 主機上只用 CPU 的 agent），或刻意只給部分 GPU 的 agent（`--gpus "device=0,2"`、`NVIDIA_VISIBLE_DEVICES=0,1`），不會收到警告：機器的 **GPU 存取** 區塊會寫 *這個 agent 一張都沒有使用*，或 *只能使用 8 張中的 2 張*。
+- *New GPU on gpu-01: allow GPU #8?*（`machine-gpu-not-allowed`）；沒有 GPU 存取清單時則是 *New GPU on gpu-01 is in use*（`machine-gpu-added`，備註）。
+- *gpu-01 no longer reports GPU #3*（`machine-gpu-removed`），並列出原本放在那張卡上的部署。Forgeyard 不會因為 GPU 不見了就搬動副本：副本會留在原來的位置。請重新啟動那些部署（先停止再啟動，或修改它們），放置時就會選這台機器現有的 GPU，或改放到另一台機器。
+
+這些提醒會在變更後保留 7 天。卡是用它的 UUID 辨識的（AMD 的卡用 PCI 位址），不是用編號：換掉一張卡會算成拆下一張、加裝一張，編號改變則不算變更。agent 完全讀不到它的 GPU 時（驅動程式出錯，或容器失去裝置存取權），不會把任何卡算成已拆下。每次變更都會記錄在稽核紀錄裡，動作是 `node.gpus_changed`，包含每張卡的型號和記憶體；機器頁面的 **GPU 存取** 底下也會列出最近的變更。
 
 ## 加入其他人
 
@@ -866,7 +960,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.3
+  docker.io/tonyhuang1101/forgeyard:1.5.4
 sudo docker logs forgeyard
 ```
 
@@ -884,7 +978,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.4 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -892,7 +986,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.4 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -914,12 +1008,12 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.3
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.4
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**機器** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.3 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.4 .`
 
 ## 把伺服器當成服務執行
 
@@ -991,18 +1085,14 @@ sudo systemctl enable --now forgeyard
 - **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
      --restart always \
      --network host \
      --gpus all \
-     --device /dev/nvidiactl \
-     --device /dev/nvidia-uvm \
-     --device /dev/nvidia-uvm-tools \
-     --device /dev/nvidia0 \
-     --device /dev/nvidia1 \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1010,10 +1100,10 @@ sudo systemctl enable --now forgeyard
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.4
    ```
 
-   在 NVIDIA 機器上，指令還會在 `--gpus` 旁邊用 `--device` 傳入 GPU 的裝置節點（1.4.5 起是 agent 回報的那些；較舊的 agent 則用一小段 shell 迴圈列出主機上的），所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。
+   在 NVIDIA 機器上，指令還會在 `--gpus all` 旁邊用 `--device` 傳入 GPU 的裝置節點，所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。從 1.5.4 起，這些節點是在你執行指令時才從主機上找出來的，用的是和[新增機器](#run-the-agent-in-docker)的 Docker 指令同一行 `$(for d in …)`：當下主機上有的每個 `/dev/nvidia*` 節點都會傳入，所以 agent 啟動後才裝上的 GPU 也包含在內，同一個指令在 1 張或 8 張 GPU 的機器上都能用。shell 會在 Docker 啟動前把這一行展開成一般的 `--device /dev/nvidiaN` 選項，所以 Docker 記錄每個裝置的方式和手動輸入時一樣，這正是 `daemon-reload` 之後裝置還在的原因。傳入每個裝置並不會擴大 Forgeyard 使用的範圍：它可以分配哪些 GPU，仍然由這台機器的 [GPU 存取](#restrict-gpus-on-a-shared-machine)設定決定。只用部分 GPU 啟動的 agent（`--gpus "device=0,2"`）會保留它回報的那些節點，逐一列出名稱；agent 回報、但這一行找不到的節點（其他 `/dev/nvidia…` 名稱）也一樣。
 
    經由伺服器取得檔案的機器（**一律經由伺服器**）則改為搬運映像檔：在能連到 Docker Hub 的機器上 `docker save`，透過 `ssh` 直接送進那台機器的 `docker load`（把 `USER` 換掉），再執行同樣的 `docker rm -f` 與 `docker run`。其他機器也會在 *cannot reach the registry?* 底下列出這個做法。
 - **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。

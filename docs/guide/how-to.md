@@ -165,7 +165,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -207,7 +207,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -222,7 +222,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4 inventory
 ```
 
 ### CPU only
@@ -236,7 +236,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
 ```
 
 ### Why these options
@@ -269,8 +269,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.4 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -289,18 +289,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.3 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.4 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.5.3`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.5.4`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models in containers keep running.
@@ -314,7 +314,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.4
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -441,8 +441,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.4 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -845,15 +845,18 @@ Raise *Longest job* under **Advanced** for long or large videos.
 
 ## Classify text
 
-Text classification (1.4.4) labels texts with a small, fast model: sentiment, the language, toxicity. It
-runs on vLLM's pooling runner (recipe `vllm-pooling`) on a GPU, one card shared by memory.
+Text classification (1.4.4) labels texts with a small, fast model: sentiment, the language, toxicity. A BERT,
+RoBERTa, XLM-RoBERTa or ModernBERT classifier runs on vLLM's pooling runner (recipe `vllm-pooling`) on a GPU, one
+card shared by memory; since 1.5.4 a DeBERTa, DistilBERT or BART classifier, and any of them on a machine without a
+GPU, run on Forgeyard's transformers server (recipe `transformers`, any CPU). For labels you choose in each request,
+see [Classify text without training (zero-shot)](#classify-text-without-training-zero-shot).
 
 1. **Models → Add a model → Recommended**: *Text classification* lists a multilingual sentiment model (1 to
    5 stars), a language detector (20 languages, Chinese among them) and a toxicity model (6 labels, each
    scored on its own), MIT or Apache-2.0. Or search Hugging Face with the task **Text classification**: a
-   BERT, RoBERTa, XLM-RoBERTa or ModernBERT classifier with two labels or more can be added. The catalog
-   shows its labels; a reranker (one output), a zero-shot (NLI) model and DeBERTa or DistilBERT classifiers
-   are refused with the reason.
+   classifier with two labels or more can be added, and the catalog offers the engines that run it (vLLM
+   first where it can). The catalog shows its labels and the languages its card names; a reranker (one
+   output) or a regression head is refused with the reason.
 2. **Deploy** it. The context starts at the model's own maximum when that is shorter than the engine's
    default (512 tokens for these BERT-sized models). About 2 GiB on a shared card.
 3. It shows up under **Serving → Text classification**. **Try it** on its page sends one sentence; the
@@ -909,8 +912,104 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 The answer's `content` is one of the four. A JSON schema with an `enum` does the same on vLLM, llama.cpp
 and cloud providers (`response_format: {"type": "json_schema", …}`). It is slower and costlier than a
-classifier, but needs no new model, and labels can change per request. Zero-shot classifiers (NLI models
-with your labels in the request, on the CPU too) come with the transformers engine in 1.5 (#144).
+classifier, but needs no new model, and labels can change per request. A zero-shot classifier also takes your
+labels in each request, at a fraction of the cost: see the next section.
+
+## Classify text without training (zero-shot)
+
+A zero-shot classifier (1.5.4) chooses among labels **you name in each request**: `["billing", "technical
+problem", "praise"]` today, other ones tomorrow, no training. It is an NLI model: for each label it reads the text
+and a sentence such as "This text is about billing." and scores how much the text supports it. It runs on
+Forgeyard's transformers server (recipe `transformers`) on any CPU, or shares a GPU.
+
+1. **Models → Add a model → Recommended → Text classification**: `bge-m3-zeroshot-v2.0-c` reads many languages,
+   Chinese among them (1.1 GiB); `roberta-base-zeroshot-v2.0-c` reads **English only** and is about four times
+   faster. Both are MIT and trained only on data that may be used commercially. The model's page shows
+   *Zero-shot: labels in each request* and its languages, and warns when a model reads English only: such a
+   model answers Chinese text with confidence and mostly wrong (1 or 2 of 12 in our test).
+2. **Deploy** it. On a CPU it needs about the model's size twice in RAM (the weights are held in float32 there,
+   which the estimate counts); *Zero-shot pairs per request* (`max_pairs`, 256) caps texts x labels in one request.
+3. In the **Playground**, type the labels (Enter or a comma adds one), your texts one per line, and **Classify**:
+   each text's bars follow the order of your labels, the most likely marked. *Several labels may apply* scores each
+   label on its own, 0 to 1. The page counts texts x labels against the deployment's cap.
+
+Write the **hypothesis template** in the texts' language: for 12 Traditional Chinese news lines and 10 Chinese
+topics, `這段文字是關於{}。` got all 12 right, the English default `This text is about {}.` 11 (the Playground has a
+one-click Chinese template).
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "bge-m3-zeroshot-v2.0-c", "input": ["我的發票金額開錯了", "新筆電的電池可以用一整天"],
+       "labels": ["帳務", "科技", "運動"], "hypothesis_template": "這段文字是關於{}。"}'
+```
+
+```json
+{"id": "classify-…", "object": "list", "created": 1795000000, "model": "bge-m3-zeroshot-v2.0-c",
+ "labels": ["帳務", "科技", "運動"], "multi_label": false,
+ "data": [{"index": 0, "label": "帳務", "probs": [0.93, 0.05, 0.02], "num_classes": 3},
+          {"index": 1, "label": "科技", "probs": [0.03, 0.95, 0.02], "num_classes": 3}],
+ "usage": {"prompt_tokens": 96, "total_tokens": 96, "completion_tokens": 0}}
+```
+
+`probs` follow your `labels`; `"multi_label": true` scores each on its own. A model runs once per text and label,
+so the time grows with both (bge-m3 on four CPU threads: about 50 ms per text and label, 12 texts x 10 labels in 6 s): keep the label list short,
+give it more threads, or use the CUDA variant on a GPU for volume. Which one to use:
+
+| You need | Use |
+|---|---|
+| The same few labels every day, at volume (sentiment, language, toxicity) | A classifier with fixed labels |
+| Labels that change, no training, texts that stay short | A zero-shot classifier |
+| The best answer for subtle or long texts, labels with explanations | A chat model with `structured_outputs.choice` (above) |
+
+## Search images by text (image embeddings)
+
+An image embedding model (1.5.4) turns images, and for a CLIP-like model texts too, into vectors in one space:
+a text's vector lies near the vectors of the pictures it describes, so you search photos, scans or screenshots by
+typing words. DINOv2 embeds images only, to find duplicates and look-alikes. They run on Forgeyard's
+transformers server (recipe `transformers`) on any CPU, or share a GPU.
+
+1. **Models → Add a model → Recommended → Image embeddings**: `siglip2-base-embed` (texts in many languages,
+   768 dimensions), `clip-vit-b-32-laion-embed` (English texts, 512, small and quick) and `dinov2-small-embed`
+   (images only, 384). A CLIP-like repository does two jobs, one catalog entry each: add it as **Embeddings** for
+   search, and again under another name as **Image classification** to label pictures with words you choose.
+2. **Deploy** it. The model's page and **Serving** show what it takes (a picture icon on an image model) and its
+   vector size; *Images per request* (`max_images`, 32) caps one request.
+3. In the **Playground**, type texts one per line and add pictures (choose, drop, paste a screenshot, or give an
+   address the server fetches), then **Embed**: a table gives the cosine similarity of each text with each
+   picture, each row's best marked. Compare within a row: a CLIP-like model scores a matching text and picture
+   about 0.25 to 0.4 and an unrelated one about 0.1.
+
+From Python, the OpenAI SDK sends typed items with `extra_body` (its `input` takes strings only); a plain list of
+strings works as with any embedding model:
+
+```python
+import base64
+import os
+import ssl
+
+from openai import DefaultHttpxClient, OpenAI
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+client = OpenAI(base_url="https://192.168.1.20:7860/v1", api_key=os.environ["FORGEYARD_API_KEY"],
+                http_client=DefaultHttpxClient(verify=ca))
+photo = "data:image/jpeg;base64," + base64.b64encode(open("cats.jpg", "rb").read()).decode()
+r = client.embeddings.create(model="siglip2-base-embed", input=[],
+                             extra_body={"input": ["two cats on a sofa", {"image": photo},
+                                                   {"image": "https://example.com/street.jpg"}]})
+text, cats, street = (d.embedding for d in r.data)
+print(sum(a * b for a, b in zip(text, cats)), sum(a * b for a, b in zip(text, street)))
+```
+
+The vectors are normalised, so the dot product is the cosine. An image address is fetched by the Forgeyard server
+under the media rules (public addresses only unless `MEDIA_ALLOW_PRIVATE_HOSTS`), never by the engine. Keep in
+mind:
+
+- **One model per index.** Vectors of two models do not match: re-index when you change the model behind a name.
+  For that reason a request with images never goes to a cloud provider.
+- **Short texts.** A CLIP-like model reads 64 to 77 tokens and cuts the rest (`usage.truncated_inputs` counts
+  them): it is for captions and queries. For documents, use a text embedding model.
+- **The language of the texts.** CLIP LAION-2B reads English; for Chinese queries use SigLIP 2.
 
 ## Use gated Hugging Face models
 
@@ -934,13 +1033,35 @@ same goes for the token field in **Add a model**, which is used for that one ins
 A token is only ever sent to Hugging Face (`HF_ENDPOINT`), never to an `https://` GGUF host. Setup
 health says when a deployment of a gated model has no token to use (`gated-model-no-token`).
 
+## Share requests between two local deployments
+
+A deployment's **Routing and fallback** section, on its page, takes other local deployments as well as
+cloud models. Use it to put two copies of a model behind one model name: a 4-bit and an 8-bit build of
+the same model, or the same model on two machines. Admins:
+
+1. Deploy the second copy as usual, under a model name of its own (say `qwen3-8b-q8` beside
+   `qwen3-8b`). It must answer the same kind of request: chat with chat, embeddings with embeddings.
+2. Open the first deployment from **Serving**. In **Routing and fallback**, add the second deployment:
+   - **to the first tier**, beside the deployment itself, to **share** the requests: the ready replicas
+     of both take them in turn, the one with the fewest requests in flight first. (Weights split
+     requests between cloud models only.)
+   - **to a later tier** (**Add a tier**), to use it **only when the first tier cannot serve**: no
+     replica is ready, every one is busy, or the engine answers 429 or 503. See
+     [when a request spills](cloud-providers.md#when-a-request-spills).
+3. Choose **Save routing**. It applies to the next request.
+
+Clients keep sending the first deployment's model name; `X-Forgeyard-Target` on the answer says which
+deployment served it. The second deployment still answers under its own name too. A local tier needs no
+cloud setting on the key: every key may use it. To share two deployments under a new name instead, make
+one on **Cloud → Cloud models** with both in its first tier.
+
 ## Add a cloud provider
 
 Admins: open **Cloud → Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google
 Gemini, Azure OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test
-connection**. Add the models you want, then use one: open a deployment, and under **Cloud fallback**
-add a cloud tier with the cloud model and save; or serve it under a name of its own with **Cloud →
-Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
+connection**. Add the models you want, then use one: open a deployment, and in **Routing and
+fallback** choose **Add a tier**, put the cloud model in it and **Save routing**; or serve it under a
+name of its own with **Cloud → Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
 **Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
 [Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
 one's endpoint cannot do.
@@ -1137,7 +1258,7 @@ A machine is *offline* once nothing has been heard from it for 30 seconds (`AGEN
 
 1. **At once:** the gateway no longer sends requests to its replicas. A deployment with replicas on other
    machines keeps answering from those; one with no other ready replica answers 503 `no_ready_replica`, saying
-   *the machine is offline* (or spills to its cloud fallback). Only right after the server itself starts, when
+   *the machine is offline* (or moves on to the next tier of its routing and fallback). Only right after the server itself starts, when
    every machine shows offline until its agent reconnects (seconds), a machine not heard from yet keeps its
    replicas for those 30 seconds: their engines still answer meanwhile.
 2. **After 10 minutes** (`AGENT_OFFLINE_MOVE_SECONDS`, counted from the last heartbeat): each replica of a
@@ -1205,6 +1326,38 @@ audit log, with before and after.
 To keep a model on one card next to other programs, deploy it with **GPU sharing** →
 **Share VRAM**: it then reserves only its estimate, and vLLM is told to use just that much (see
 [vLLM does not start on a shared card](troubleshooting.md#vllm-does-not-start-on-a-shared-card)).
+
+## Add or remove a GPU on a machine
+
+After you install a GPU in a machine (or take one out), and the host's driver lists it (`nvidia-smi` or `amd-smi`):
+
+1. **Re-create the agent** with the **Update the agent** command on the machine's page
+   ([how](#update-an-agent)). An agent container has only the GPU devices it was created with, so it does not see a
+   GPU installed later until it is created again; the command passes the host's GPU devices as they are when you run
+   it. An agent installed with install.sh or run from a checkout only needs a restart.
+2. **Allow it, if the machine has a GPU access list** ([Restrict GPUs](#restrict-gpus-on-a-shared-machine)):
+   **Change GPU access** and tick the new card. A machine with a list never uses a new card by itself; a machine
+   without one uses it at once.
+
+What Forgeyard tells you (admins, in **Setup health** and as a banner on **Machines** and the machine's page):
+
+- *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8* (`machine-gpus-hidden`): from 1.5.4 the agent counts the
+  host's GPUs on its PCI bus, which a container sees whole, and compares them with the GPUs it can use. It names the
+  PCI address of each one it does not see. Re-create the agent as in step 1. A GPU that is not for Forgeyard (a
+  desktop CPU's integrated graphics, say): snooze it. An agent that sees none of the host's GPUs (a CPU-only agent on
+  a GPU host) or was given only some on purpose (`--gpus "device=0,2"`, `NVIDIA_VISIBLE_DEVICES=0,1`) is not
+  warned: the machine's **GPU access** section says *this agent uses none of them* or *is limited to 2 of 8*.
+- *New GPU on gpu-01: allow GPU #8?* (`machine-gpu-not-allowed`), or, without a GPU access list, *New GPU on gpu-01 is
+  in use* (`machine-gpu-added`, a note).
+- *gpu-01 no longer reports GPU #3* (`machine-gpu-removed`), with the deployments that were placed on it. Forgeyard
+  does not move a replica because its GPU is gone: it keeps its place. Restart those deployments (stop and start, or
+  edit them) and placement picks GPUs the machine has now, or another machine.
+
+These stay for 7 days after the change. A card is told by its UUID (an AMD card by its PCI address), not by its
+number: a swapped card is one removed and one added, and renumbered cards are no change. When the agent cannot read
+its GPUs at all (the driver fails, or the container lost its device access) nothing is counted as removed. Every
+change is in the audit log as `node.gpus_changed`, with each card's model and memory, and the machine's page lists the
+recent ones under **GPU access**.
 
 ## Add people
 
@@ -1335,7 +1488,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.3
+  docker.io/tonyhuang1101/forgeyard:1.5.4
 sudo docker logs forgeyard
 ```
 
@@ -1369,7 +1522,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.4 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1378,7 +1531,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.4 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1403,7 +1556,7 @@ right after it ([how](#upgrade-the-server-and-the-agents)).
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.3
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.4
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1411,7 +1564,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.3 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.4 .`
 
 ## Run the server as a service
 
@@ -1504,18 +1657,14 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
      --restart always \
      --network host \
      --gpus all \
-     --device /dev/nvidiactl \
-     --device /dev/nvidia-uvm \
-     --device /dev/nvidia-uvm-tools \
-     --device /dev/nvidia0 \
-     --device /dev/nvidia1 \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1523,12 +1672,19 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.4
    ```
 
-   On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
-   the ones the agent reports; for an older agent the host's, listed by a short shell loop), so the agent keeps its
-   GPUs when the host runs `systemctl daemon-reload`.
+   On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus all`, so the
+   agent keeps its GPUs when the host runs `systemctl daemon-reload`. Since 1.5.4 they are found on the host when you
+   run the command, by the same `$(for d in …)` line as the Docker command of [Add a machine](#run-the-agent-in-docker): every
+   `/dev/nvidia*` node the host has then, so a GPU installed after the agent started is included, and one command
+   fits machines with 1 GPU or 8. The shell turns the line into plain `--device /dev/nvidiaN` options before Docker
+   starts, so Docker records each device as if it had been typed, which is what keeps it after a `daemon-reload`.
+   Passing every device does not widen what Forgeyard uses: which GPUs it may assign is still the machine's
+   [GPU access](#restrict-gpus-on-a-shared-machine) setting. An agent started with only some GPUs
+   (`--gpus "device=0,2"`) keeps exactly the nodes it reported, by name; so does a node the agent reported that the
+   line would not find (another `/dev/nvidia…` name).
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried
    instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there

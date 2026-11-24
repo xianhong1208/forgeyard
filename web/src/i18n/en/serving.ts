@@ -3,7 +3,7 @@ export default {
   "serving.index": "02 · Serving",
   "serving.title": "Serving",
   "serving.lead":
-    "The models running now, grouped by what they do; a deployment's page also holds its cloud fallback. Every ready deployment answers at /v1 with an API key, and in the Playground. What you can deploy is under Models.",
+    "The models running now, grouped by what they do; a deployment's page also holds its routing and fallback. Every ready deployment answers at /v1 with an API key, and in the Playground. What you can deploy is under Models.",
   "serving.deploy": "Deploy a model",
   "serving.help.first": "How do I deploy my first model?",
   "serving.help.gateway": "Deployments and the gateway",

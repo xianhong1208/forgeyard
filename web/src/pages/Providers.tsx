@@ -73,7 +73,7 @@ function EgressPanel({ egress }: { egress: Egress }) {
 
 // 1.4 (#81): Cloud, two tabs. Providers (the accounts at model APIs, and what leaves this server) and
 // Cloud models (names of their own that an admin made: a provider's model under Forgeyard's keys and
-// limits). A deployment's cloud fallback lives on the deployment's page. Before 1.4 this was the
+// limits). A deployment's routing and fallback lives on the deployment's page. Before 1.4 this was the
 // Providers page at /providers, which still opens it.
 export function CloudPage() {
   const t = useT();
@@ -131,7 +131,7 @@ export function CloudPage() {
         ) : (
           <>
             <HelpLink page="cloud-providers" anchor="serve-a-cloud-model-under-a-name-of-its-own">{t("cloud.help.ownName")}</HelpLink>
-            <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">{t("cloud.help.fallback")}</HelpLink>
+            <HelpLink page="cloud-providers" anchor="let-a-deployment-spill-to-a-cloud-model">{t("cloud.help.fallback")}</HelpLink>
             <HelpLink page="cloud-providers" anchor="who-may-use-the-cloud">{t("cloud.help.keys")}</HelpLink>
           </>
         )}

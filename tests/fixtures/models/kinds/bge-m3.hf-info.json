@@ -1,0 +1,30 @@
+{
+  "id": "BAAI/bge-m3",
+  "sha": "5617a9f61b028005a4858fdac845db406aefb181",
+  "pipeline_tag": "sentence-similarity",
+  "library_name": "sentence-transformers",
+  "tags": [
+    "sentence-transformers",
+    "pytorch",
+    "onnx",
+    "xlm-roberta",
+    "feature-extraction",
+    "sentence-similarity",
+    "arxiv:2402.03216",
+    "arxiv:2004.04906",
+    "arxiv:2106.14807",
+    "arxiv:2107.05720",
+    "arxiv:2004.12832",
+    "license:mit",
+    "eval-results",
+    "text-embeddings-inference",
+    "endpoints_compatible",
+    "deploy:sagemaker",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "pipeline_tag": "sentence-similarity",
+    "license": "mit"
+  }
+}

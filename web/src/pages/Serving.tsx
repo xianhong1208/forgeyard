@@ -1,4 +1,4 @@
-import { IconBrain, IconCloud, IconMicrophone, IconMovie, IconPhotoAi, IconPlus, IconScan, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconScan, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { Link, Navigate, useLocation, useParams } from "react-router";
 
 import { ServingTrials } from "../components/EngineTrials";
@@ -9,6 +9,7 @@ import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Notice, PageHeader } from "../components/ui";
 import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
 import { TASK_LABEL, VISION_TASKS, downloadFraction, downloadText, gib } from "../lib/models";
+import { embedSummary, embedsImages } from "../lib/encoders";
 import { engineHref, modelHref } from "../lib/pages";
 import { FALLBACK_ANCHOR, fallbackProviders } from "../lib/routing";
 import type { CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, RouteInfo, RoutesResponse } from "../lib/types";
@@ -180,7 +181,9 @@ export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines:
         <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && t.rich("serving.taskAt", {
           task: <span className="deprow-task">{TASK_LABEL[d.model.task]}</span>,
           path: <code>/v1/vision/{d.model.task === "image-classify" ? "classify" : d.model.task}</code>,
-        })}<Link to={modelHref(d.model.name)}>{d.model.name}</Link> · <Link to={engineHref(d.recipe)}>{d.recipe}</Link>{d.served_name !== d.name ? t("serving.as", { name: d.served_name }) : null}</div>
+        })}{d.model.task === "embed" && embedsImages(d.model.embed) && (
+          <span className="deprow-img" title={embedSummary(d.model.embed)} aria-label={embedSummary(d.model.embed)} role="img"><IconPhoto size={13} aria-hidden="true" /></span>
+        )}<Link to={modelHref(d.model.name)}>{d.model.name}</Link> · <Link to={engineHref(d.recipe)}>{d.recipe}</Link>{d.served_name !== d.name ? t("serving.as", { name: d.served_name }) : null}</div>
       </div>
       <div className="where">
         {sleeping === "asleep" ? <AsleepWhere d={d} /> : placed.length ? placed.map((r) => {

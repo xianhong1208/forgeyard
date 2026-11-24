@@ -1,0 +1,70 @@
+# Image embeddings and text classification (1.5.4, #141 and #144) with Forgeyard's own transformers server: the same
+# image as the `vision` recipe (images/vision, docker.io/tonyhuang1101/forgeyard-vision), started with --task embed or
+# --task classify. One image to pull, mirror and pin; CPU (linux/amd64 and arm64) and NVIDIA.
+#
+# - embed: a CLIP-like model (CLIP, SigLIP, SigLIP 2, …), whose texts and images share one space (text -> image
+#   search), or DINOv2 (images only: image -> image similarity, duplicates), answered at /v1/embeddings: plain strings
+#   as OpenAI's, and typed items {"text": …} / {"image": …} (the Jina shape). Text embedding models stay on vLLM
+#   (vllm-pooling).
+# - classify: any sequence classifier, at /v1/classify (vLLM's shape): fixed labels (DistilBERT, DeBERTa, BERT,
+#   RoBERTa, XLM-R, …, which vLLM does not all run), or zero-shot with an NLI model, told the labels in each request
+#   (bge-m3-zeroshot-v2.0-c, roberta-base-zeroshot-v2.0-c). NLI costs one forward pass per (text, label) pair:
+#   max_pairs caps a request.
+#
+# No code from a model's repository is ever run (auto_map is refused). The server needs a vision image from 1.5.4 on:
+# like `vision`, the pin moves to the new image right after the release that publishes it (docs/development.md,
+# Releasing); until then the models of this recipe are refused at deploy (vision_image_too_old).
+#
+# Memory, measured on a CPU with transformers 5.23, four threads (peak RSS after requests): CLIP ViT-B/32 0.94 GiB
+# (0.6 GiB of files), SigLIP 2 base 1.43 (1.5), DINOv2 small 0.54, DistilBERT multilingual 0.62, roberta-base NLI 1.08,
+# bge-m3 NLI 2.8 after requests (1.1 GiB of float16 files, held in float32: cpu_float32) — the weights plus at most
+# about 1 GiB, hence cpu_overhead. On a CPU the weights are held in float32 (half precision is several times slower
+# there); on a GPU in the checkpoint's own type.
+name: transformers
+title: Forgeyard transformers server
+description: >-
+  Image embeddings (CLIP, SigLIP, SigLIP 2, DINOv2) at /v1/embeddings, and text classification with fixed labels or
+  zero-shot with NLI models at /v1/classify. Small: runs well on a CPU, shares a GPU by default.
+engine: forgeyard-vision
+version: "1.5"
+tasks: [embed, classify]
+formats: [safetensors]
+api: {embed: openai-embeddings, classify: classify}
+upstream_model: served_name
+share: vram
+port: 8000
+health: {path: /health, start_period: 300, interval: 5, timeout: 5, failure_threshold: 3}
+estimate:
+  method: files
+  overhead: 1GiB
+  cpu_overhead: 1280MiB
+  cpu_float32: true
+params:
+  threads: {type: int, default: 4, min: 1, max: 256, label: CPU threads,
+            help: "Threads torch uses on a CPU (counted against the machine's threads). Ignored on a GPU.",
+            advanced: true}
+  max_images: {type: int, default: 32, min: 1, max: 1024, label: Images per request,
+               help: "The most images one /v1/embeddings request may carry (each at most 20 MiB and 40 megapixels).",
+               advanced: true}
+  max_pairs: {type: int, default: 256, min: 1, max: 100000, label: Zero-shot pairs per request,
+              help: "A zero-shot (NLI) model runs once per text and label: texts x labels may be at most this.",
+              advanced: true}
+args: [--task, "{task}", --model, "{model_path}", --served-name, "{served_name}", --host, "{host}", --port, "{port}"]
+env:
+  HF_HUB_OFFLINE: "1"
+  VISION_THREADS: "{threads}"
+  VISION_MAX_IMAGES: "{max_images}"
+  VISION_MAX_PAIRS: "{max_pairs}"
+  DO_NOT_TRACK: "1"
+# The replica's internal key: the server asks for it on every path but /health.
+api_key_env: VISION_API_KEY
+variants:
+  - name: cuda
+    # torch +cu130: CUDA 13 runs on Turing (7.5) and newer, with driver 580 or newer.
+    when: {vendor: nvidia, compute_capability: ">=7.5", driver: ">=580"}
+    runtime: container
+    image: docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda@sha256:179143ede7f840e990eaa3cbd5cbec4c8b66c5b4ab8ea8c5f1c9f24450c88150
+  - name: cpu
+    when: {vendor: cpu, arch: [x86_64, aarch64]}
+    runtime: container
+    image: docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1@sha256:da2ddf69235cfc9ebe6ec448dc4cbb1410415bf11ba259503a7303430b37d242

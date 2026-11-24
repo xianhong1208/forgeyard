@@ -229,6 +229,7 @@ class ReplicaSending:
             remaining.remove(pick)
             g = group_of[pick.uid]
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
+            self.busy_usage = g.busy_usage     # 1.5.4: the transformers server's busy time counts
             self.dropped = []
             if parsed.image is not None:
                 # Each image deployment gets its own body: its default size and steps, its request style.

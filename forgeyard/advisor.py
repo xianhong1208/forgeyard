@@ -608,6 +608,129 @@ def machine_gpu_access(ctx: Context) -> Iterator[Finding]:
                       f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
 
 
+# 1.5.4: how long Setup health speaks of a machine's GPUs being added or removed (machine_gpu_changes).
+GPU_CHANGE_RECENT = timedelta(days=7)
+
+
+@check
+def machine_gpus_hidden(ctx: Context) -> Iterator[Finding]:
+    """1.5.4: the host has GPUs its agent does not see (agent/gpu_census.py: sysfs next to NVML / amd-smi). Usually a
+    GPU installed after the agent container was created: a container only has the device nodes it was started with.
+    Only when the agent sees some of a vendor's GPUs and nothing limits it to them (gpu_changes.census_state): an agent
+    that sees none of them (a CPU-only agent on a GPU host) or was given some on purpose (`--gpus "device=…"`,
+    NVIDIA_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES…) is left alone; the machine's page says so quietly. Agents before
+    1.5.4 do not count, and nothing is said for them."""
+    from forgeyard.machines import gpu_access
+    from forgeyard.machines.gpu_changes import census_state
+
+    for n in ctx.nodes:
+        census = (n.runtime_info or {}).get("gpu_census")
+        if n.status != "online" or not isinstance(census, dict):
+            continue
+        short = [(gpu_access.VENDOR_LABEL.get(v, v), c) for v, c in sorted((census.get("vendors") or {}).items())
+                 if isinstance(c, dict) and census_state(c) == "hidden"]
+        if not short:
+            continue
+        counts = " and ".join(f"{c['host']} {label} GPUs" for label, c in short)
+        seen = " and ".join(str(c["visible"]) for _, c in short)
+        missing = [m for _, c in short for m in c.get("missing") or []]
+        at = f" Not seen: PCI {_names(missing, 4)}." if missing else ""
+        if gpu_access.in_container(n):
+            how = ("Its agent runs in a container, which has only the GPU devices it was created with. Re-create it "
+                   "with the Update the agent command on the machine's page: it passes the host's GPU devices as they "
+                   "are when you run it. Then, if the machine has a GPU access list, allow the new GPU there.")
+        else:
+            how = ("Restart the agent. If it still does not see them, check the driver on the host (nvidia-smi or "
+                   "amd-smi lists every GPU it can use).")
+        yield Finding("machine-gpus-hidden", "warning",
+                      f"{n.name}: the host has {counts} but the agent sees {seen}",
+                      f"The PCI bus of {n.name} lists {counts}; its agent sees {seen}, so Forgeyard cannot use the "
+                      f"others.{at} {how} If a GPU is not one for Forgeyard (a desktop CPU's integrated graphics, "
+                      "say), snooze this.",
+                      f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}",
+                      pages=("machines", f"machine:{n.id}"))
+
+
+def _recent_gpu_changes(n: Node, since: datetime) -> tuple[list[dict], list[dict]]:
+    """The GPUs added and removed on this machine since `since` that are still added (reported now) or still removed
+    (not reported now), oldest change first."""
+    from forgeyard.machines import gpu_changes
+
+    present = {a.key for a in n.accelerators}
+    added: dict[str, dict] = {}
+    removed: dict[str, dict] = {}
+    for c in gpu_changes.changes(n):
+        try:
+            at = as_utc(datetime.fromisoformat(str(c.get("at"))))
+        except ValueError:
+            continue
+        if at < since:
+            continue
+        # A GPU that comes back (or goes again) within the window cancels out: nothing to do about it.
+        for g in c.get("added") or []:
+            if isinstance(g, dict) and isinstance(g.get("key"), str):
+                if removed.pop(g["key"], None) is None:
+                    added[g["key"]] = dict(g, at=at)
+        for g in c.get("removed") or []:
+            if isinstance(g, dict) and isinstance(g.get("key"), str):
+                if added.pop(g["key"], None) is None:
+                    removed[g["key"]] = dict(g, at=at)
+    return ([g for k, g in added.items() if k in present], [g for k, g in removed.items() if k not in present])
+
+
+def _gpu_names(gpus: list[dict]) -> str:
+    from forgeyard.machines.gpu_changes import label
+
+    return ", ".join(label(g) for g in gpus)
+
+
+@check
+def machine_gpu_changes(ctx: Context) -> Iterator[Finding]:
+    """1.5.4: a machine's GPUs changed in the last GPU_CHANGE_RECENT (machines/gpu_changes.py). A new GPU on a machine
+    with a GPU access list is not used until an admin allows it (the list fails closed); without a list placement uses
+    it at once. A removed GPU: the deployments whose replicas were placed on it keep that place until restarted."""
+    from forgeyard.machines import gpu_changes
+
+    since = ctx.now - GPU_CHANGE_RECENT
+    for n in ctx.nodes:
+        added, removed = _recent_gpu_changes(n, since)
+        scope, pages = f"machine:{n.id}", ("machines", f"machine:{n.id}")
+        if added and n.gpu_allowlist is not None:
+            blocked = [g for g in added if g["key"] not in n.gpu_allowlist]
+            if blocked:
+                allow = ", ".join(f"GPU #{g.get('index')}" for g in blocked)
+                yield Finding("machine-gpu-not-allowed", "warning",
+                              f"New {'GPU' if len(blocked) == 1 else 'GPUs'} on {n.name}: allow {allow}?",
+                              f"{_gpu_names(blocked)} appeared on {n.name} on {blocked[0]['at']:%Y-%m-%d}. This "
+                              "machine has a GPU access list, so Forgeyard does not use a new GPU until it is allowed: "
+                              f"Change GPU access on the machine's page and tick {allow}. If it is for other "
+                              "programs, leave it out and snooze this.",
+                              f"/machines/{n.id}#gpu-access", "Choose GPUs", scope=scope, pages=pages)
+        elif added:
+            yield Finding("machine-gpu-added", "info",
+                          f"New {'GPU on ' + n.name + ' is' if len(added) == 1 else 'GPUs on ' + n.name + ' are'} in use",
+                          f"{_gpu_names(added)} appeared on {n.name} on {added[0]['at']:%Y-%m-%d}. This machine has "
+                          "no GPU access list, so placement already uses "
+                          + ("it" if len(added) == 1 else "them")
+                          + ". To keep Forgeyard off a GPU, choose which ones it may use.",
+                          f"/machines/{n.id}#gpu-access", "Choose GPUs", scope=scope, pages=pages)
+        if removed:
+            live = gpu_changes.placed_on(ctx.db, n, {g["key"] for g in removed})
+            held = sorted({d for g in removed for d in (g.get("deployments") or []) + live.get(g["key"], [])})
+            placed = (f" Placed on {'it' if len(removed) == 1 else 'them'}: {_names(held, 6)}. Forgeyard does not move "
+                      "a replica because its GPU is gone: it keeps its place there. Restart "
+                      + ("that deployment" if len(held) == 1 else "those deployments")
+                      + " (stop and start it, or edit it) and placement picks GPUs the machine has now, or another "
+                      "machine." if held else " No deployment was placed on "
+                      + ("it." if len(removed) == 1 else "them."))
+            yield Finding("machine-gpu-removed", "warning",
+                          f"{n.name} no longer reports " + ", ".join(f"GPU #{g.get('index')}" for g in removed),
+                          f"{_gpu_names(removed)} on {n.name} stopped being reported on "
+                          f"{removed[-1]['at']:%Y-%m-%d}: taken out, failed, or no longer visible to the agent "
+                          f"(check it on the host with nvidia-smi or amd-smi).{placed}",
+                          f"/machines/{n.id}", "Open the machine", scope=scope, pages=pages)
+
+
 # 1.4.5 (#171): a loopback replica address works for a machine elsewhere only when its port range is forwarded to
 # the server's host (the SSH tunnel of the guide); the advisor looks for that on ranges up to this size.
 FORWARD_PROBE_MAX = 64
@@ -1067,11 +1190,12 @@ def cloud_defaults(ctx: Context) -> Iterator[Finding]:
 
 
 def route_place(r: GatewayRoute) -> tuple[str, tuple[str, ...], str]:
-    """Where the console shows a route (1.4, #81): a deployment's own route is its cloud fallback, on
-    the deployment's page; a name an admin made is on Cloud -> Cloud models."""
+    """Where the console shows a route (1.4, #81): a deployment's own route is its routing and fallback
+    (named "cloud fallback" before 1.5.4), on the deployment's page; a name an admin made is on Cloud ->
+    Cloud models."""
     if r.deployment_id is not None:
-        return (f"/serving/{r.deployment_id}#cloud-fallback",
-                ("serving", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its cloud fallback")
+        return (f"/serving/{r.deployment_id}#routing",
+                ("serving", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its routing")
     return f"/cloud/models/{r.id}", ("cloud-models", f"route:{r.id}"), "Open the model name"
 
 

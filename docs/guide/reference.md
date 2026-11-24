@@ -257,6 +257,7 @@ These are not settings in `agent.toml`:
 | `DOCKER_HOST`, `DOCKER_CONFIG`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR` | Passed on to the `docker` or `podman` command, so a non-default engine socket or configuration works. Nothing else of the agent's environment reaches the engine |
 | `ROCM_PATH`, `ROCM_HOME` | Where ROCm is installed, when it is not `/opt/rocm` (AMD cards) |
 | `FORGEYARD_AGENT_SIMULATION` | `1` allows `--simulate-inventory FIXTURE`: the agent reports recorded hardware instead of its own. For development and tests only; the server marks such a machine as simulated |
+| `FORGEYARD_AGENT_SYSFS` | With `FORGEYARD_AGENT_SIMULATION=1` only: a directory laid out like `/sys/bus/pci/devices` that a simulated agent counts the host's GPUs in (1.5.4). Without it a simulated agent does not count them |
 
 ## The gateway (/v1)
 
@@ -272,7 +273,7 @@ page cannot use a signed-in browser against it.
 | `GET /v1/models/{model}` | One model, in the same shape. 404 `model_not_found` for a model that is missing, hidden from this key or stopped; 403 `model_not_allowed` outside the key's model list | — |
 | `POST /v1/chat/completions` | Chat models (vLLM, llama.cpp, provider chat models). `stream: true` streams server-sent events | yes |
 | `POST /v1/completions` | The same models, with a plain `prompt` | yes |
-| `POST /v1/embeddings` | Embedding models | yes |
+| `POST /v1/embeddings` | Embedding models; 1.5.4: images too, as typed items, for CLIP-like models and DINOv2. See [Embeddings](#embeddings) | yes (texts only) |
 | `POST /v1/rerank` | Rerankers (vLLM's rerank API) | no |
 | `POST /v1/score` | Rerankers (vLLM's score API) | no |
 | `POST /v1/audio/transcriptions` | Speech to text (faster-whisper), as `multipart/form-data` with a `model` field | no |
@@ -292,7 +293,7 @@ page cannot use a signed-in browser against it.
 | `POST /v1/vision/segment` | Segmentation with SAM 2 (1.4): one image and a point or a box, masks as PNGs back | no |
 | `POST /v1/vision/depth` | Depth estimation (1.4): one image, a 16-bit depth map back | no |
 | `POST /v1/vision/classify` | Image classification (1.4.4): one image, the best classes and their scores back; a zero-shot classifier (CLIP, SigLIP) is given the `labels` to choose from | no |
-| `POST /v1/classify` | Text classification (1.4.4): texts, each one's label and probabilities back. See [Text classification](#text-classification) | no |
+| `POST /v1/classify` | Text classification (1.4.4): texts, each one's label and probabilities back; 1.5.4: zero-shot models are told the `labels`. See [Text classification](#text-classification) | no |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -598,7 +599,7 @@ field `labels=cat, remote control`); repeats and empty names are dropped. The vi
 its own way (Grounding DINO one lower-case prompt, "cat. remote control.", and each box takes the name whose
 words score it highest; OWL one query per name), so a name comes back as it was sent. Their scores run lower
 than a fixed detector's: start at 0.3 (Grounding DINO) or 0.1 to 0.2 (OWLv2). They need a vision image from
-1.4.4 on, which the built-in recipe runs (it pins `forgeyard-vision` 1.4.4rc1); on a custom recipe that names an
+1.4.4 on, which the built-in recipe runs (it pins `forgeyard-vision` 1.5.4rc1); on a custom recipe that names an
 older one, deploying one answers 422 `vision_image_too_old` (a local build is taken as it is).
 
 What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
@@ -613,31 +614,83 @@ What is counted, per request that was answered (in `GET /api/usage` and on **Usa
 A replica works on one image at a time and keeps the others waiting in order; more throughput is more
 replicas. Which models are vision models, and the licence rule, are under [Built-in recipes](#built-in-recipes).
 
+### Embeddings
+
+`POST /v1/embeddings` takes OpenAI's request: `input` is a text, a list of texts, or token ids, and every OpenAI
+client works unchanged. Since 1.5.4 (#141) `input` may also hold **typed items** (Jina's shape), mixed with plain
+strings in one list:
+
+```json
+{"model": "photos", "input": ["a red bicycle", {"text": "a cat on a sofa"},
+                              {"image": "data:image/png;base64,iVBOR…"}, {"image": "https://example.com/cat.jpg"}]}
+```
+
+| Item | What |
+|---|---|
+| a string, or `{"text": "…"}` | A text. A `{"text"}` item is sent on as a plain string, so a request of texts only is an OpenAI request wherever it goes |
+| `{"image": "…"}` | An image: a `data:image/…;base64,` URI, bare base64, or an `http(s)` URL that **the gateway fetches** (the engine never does) under the rules of [media in chat](#images-audio-and-video-in-chat): public addresses only unless `MEDIA_ALLOW_PRIVATE_HOSTS`, at most `MEDIA_FETCH_MAX_MB`, every redirect checked, and the answer must be an image. Other schemes are refused |
+
+At most 2,048 items; each object has exactly one key. With the OpenAI Python SDK, send typed items with
+`extra_body={"input": [...]}` (or `client.post`), since its `input` takes strings only. `encoding_format` (`float`,
+`base64`) and `dimensions` (only the model's own size) are passed on.
+
+Who takes what, from the deployment's catalog entry:
+
+- **Images** need a model that embeds them: a CLIP-like model (CLIP, SigLIP, SigLIP 2, …) or DINOv2 on Forgeyard's
+  transformers server (recipe `transformers`). At most the deployment's *Images per request* (`max_images`, 32), each
+  at most 20 MiB and 40 megapixels.
+- **Texts** need a model that embeds texts: an image-only model (DINOv2) refuses them, plain strings included.
+  CLIP-like models cut texts to their length (CLIP 77 tokens, SigLIP 64) and say how many in
+  `usage.truncated_inputs`: for documents, use a text embedding model.
+- **A request with images never goes to a cloud provider**: no provider takes typed items, and another model's
+  vectors would not match an index made with this one. On a route with a cloud tier, a request of texts only may
+  still spill as before.
+
+The answer is OpenAI's: `data[]` in the order of `input`, every vector L2-normalised (cosine similarity = dot
+product); a CLIP-like model puts texts and images in one space, so a text finds images.
+
+| Unit | How |
+|---|---|
+| tokens | `prompt_tokens` from the engine's answer (the texts). A key's tokens per minute applies |
+| `images`, `kilopixels` | For a request with images: the images embedded and their width x height / 1,000, from the engine's answer |
+| `busy_ms` | The time a transformers-server replica worked on the request |
+
 ### Text classification
 
 `POST /v1/classify` (1.4.4) takes texts for a text classification model and answers in vLLM's shape. It is
-Forgeyard's own API (the OpenAI SDK has none). The engine is vLLM's pooling runner (recipe `vllm-pooling`);
-the gateway sends the request to the replica's `/classify`. Local deployments only, never a cloud provider.
+Forgeyard's own API (the OpenAI SDK has none). The engine is vLLM's pooling runner (recipe `vllm-pooling`), or since
+1.5.4 Forgeyard's transformers server (recipe `transformers`: DeBERTa, DistilBERT and NLI zero-shot models); the
+gateway sends the request to the replica's `/classify`. Local deployments only, never a cloud provider.
 
 | Field | What |
 |---|---|
 | `model` | The model's name |
 | `input` | A text, or a list of 1 to 2,048 texts; none of them empty. Token ids are refused |
 | `truncate_prompt_tokens` | Optional: cut each text to this many tokens (at least 1), or -1 for the model's maximum. Without it, a text longer than the deployment's context is refused by the engine |
-| `use_activation` | Optional, `true` or `false`: `false` gives the raw scores (logits) instead of probabilities |
+| `use_activation` | Optional, `true` or `false`: `false` gives the raw scores (logits) instead of probabilities (fixed-label models only) |
+| `labels` | Zero-shot models only (1.5.4): the labels to choose from, 1 to 32 names of 1 to 64 characters of plain text, each once (case does not matter): the probabilities follow their order |
+| `multi_label` | Zero-shot, optional: `true` scores each label on its own (entailment against contradiction), so several can fit; `false` (the default) shares the probability among the labels |
+| `hypothesis_template` | Zero-shot, optional: the sentence each label is put into, one line of at most 200 characters with one `{}` (default `"This text is about {}."`). For Chinese labels a Chinese template reads better, e.g. `"這段文字是關於{}。"` |
 
-The gateway sends only these fields (any other is dropped); `messages` (vLLM's chat form) answers 400. A
+The gateway sends only these fields (any other is dropped); `messages` (vLLM's chat form) answers 400.
+A zero-shot model (an NLI model, its catalog entry says `classify.zero_shot`) runs once per text and label: texts x
+labels may be at most the deployment's *Zero-shot pairs per request* (`max_pairs`, 256). Sent to a model with fixed
+labels, `labels` answers 400 `labels_not_supported`; a zero-shot model without them 400 `labels_required`;
+`multi_label` or `hypothesis_template` without `labels` 400 `invalid_request`. An English-only zero-shot model does
+badly on Chinese text: the catalog shows each model's languages. A
 model of another kind answers 400 `wrong_endpoint` naming its endpoint (for a chat model, also how it
 classifies with structured outputs).
 
 The answer: `data` holds one entry per text, in order: `index`, `label` (the most likely), `probs` (every
 label's probability, in the order of the model's `config.json`; a `multi_label_classification` model
 scores each on its own, so they do not add up to 1) and `num_classes`; and `usage` with `prompt_tokens`.
-The label names are on the catalog entry (`GET /api/models/<name>`, `classify.label_names`).
+The label names are on the catalog entry (`GET /api/models/<name>`, `classify.label_names`). A zero-shot answer's
+`probs` follow the request's `labels`, which it echoes with `multi_label`.
 
 | Unit | How |
 |---|---|
-| tokens | `prompt_tokens` from the engine's answer, as for embeddings. A key's tokens per minute applies |
+| tokens | `prompt_tokens` from the engine's answer, as for embeddings (zero-shot: the tokens of every text and label pair). A key's tokens per minute applies |
+| `busy_ms` | The time a transformers-server replica worked on the request (1.5.4) |
 
 ### Headers
 
@@ -672,7 +725,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `wrong_endpoint` | The model is served at another endpoint; the message names it | Use that endpoint |
 | 400 | `context_length_exceeded` | Only on a route with **Spill a prompt that is too long**: the prompt does not fit the local context, and nothing else could take it | Shorten the prompt or lower `max_tokens` |
 | 400 | `invalid_content_part` | A content part that is not an object with a `type`, a type the gateway does not take (`*_embeds`, unknown ones), or a media part without its URL | Use the parts listed under [Images, audio and video in chat](#images-audio-and-video-in-chat) |
-| 400 | `invalid_media_data` | A `data:` URI that is not base64, or not of the part's kind (an image part with `data:text/plain`), or a `file` part without a `data:` URI | Send `data:<type>;base64,…` |
+| 400 | `invalid_media_data` | A `data:` URI that is not base64, or not of the part's kind (an image part with `data:text/plain`), or a `file` part without a `data:` URI; an embeddings image item that is neither base64, a `data:` URI nor a URL (1.5.4) | Send `data:<type>;base64,…` |
 | 400 | `media_url_refused` | A media URL with another scheme than http(s) or `data:` (`file://`…), credentials, or a host that resolves to a private, loopback, link-local or metadata address, also after a redirect; a URL in `input_audio.data` | Send a public URL or a `data:` URI |
 | 400 | `media_fetch_failed` | The gateway could not fetch a media URL: no answer, a status other than 200, more than 3 redirects, more than 20 seconds, or not of the part's kind | Check the URL, or send the file as a `data:` URI |
 | 400 | `media_not_supported` | The model does not take that medium (images to a text model, video while *Videos per request* is 0); the message says what it takes | Use a model that takes it, or enable video on the deployment |
@@ -687,9 +740,12 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
 | 400 | `streaming_not_supported` | Images and vision: `stream: true` | Leave it out |
 | 400 | `missing_image` | Vision: no file field `image`, or JSON without `image` | Send the image |
-| 400 | `labels_required` | Vision (1.4.4): a zero-shot detector was not told what to find, or a zero-shot classifier not given its labels | Send `labels` |
-| 400 | `labels_not_supported` | Vision (1.4.4): `labels` for a detector or classifier with fixed classes | Leave `labels` out, or use a zero-shot model |
-| 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
+| 400 | `labels_required` | Vision (1.4.4): a zero-shot detector was not told what to find, or a zero-shot classifier not given its labels; text classification (1.5.4): a zero-shot model without `labels` | Send `labels` |
+| 400 | `labels_not_supported` | Vision (1.4.4): `labels` for a detector or classifier with fixed classes; text classification (1.5.4): `labels` for a model with fixed labels | Leave `labels` out, or use a zero-shot model |
+| 400 | `too_many_pairs` | Text classification (1.5.4): texts x `labels` over the zero-shot deployment's *Zero-shot pairs per request* | Send fewer texts or labels, or raise `max_pairs` |
+| 400 | `images_not_supported` | Embeddings (1.5.4): `{"image"}` items for a model that embeds texts only, or served by providers only | Use a CLIP-like model or DINOv2 on the transformers server |
+| 400 | `text_not_supported` | Embeddings (1.5.4): texts for an image-only model (DINOv2) | Send images, or use a CLIP-like model |
+| 400 | `too_many_images` | Images: `n` over the deployment's *Images per request*. Embeddings (1.5.4): more `{"image"}` items than the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
 | 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
 | 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
 | 400 | `unsupported_output_format` | Images: an `output_format` other than png, jpeg or webp, or one the engine does not make | Ask for png |
@@ -1442,6 +1498,48 @@ layers another image shares stay); `free_bytes` / `total_bytes` are the space af
 Audited as `node.image_removed` (the image, its tags, the recipes that name it, `ok`, the bytes freed, or the
 agent's `code` and reason) for every removal the agent was asked for; refusals before that are not audited.
 
+## GPUs added, removed or not seen
+
+From 1.5.4 (no migration: everything below lives in the machine's `runtime_info`, which the agent's hello already
+fills, and in the audit log). How to act on it: [Add or remove a GPU on a machine](how-to.md#add-or-remove-a-gpu-on-a-machine).
+
+**What the agent counts.** At every connection the agent lists the host's PCI functions in `/sys/bus/pci/devices`,
+which a container sees whole, and counts the GPUs: NVIDIA (vendor `0x10de`) with class `0x0300` (VGA) or `0x0302` (3D
+controller); AMD (vendor `0x1002`) with class `0x0300`, `0x0302`, `0x0380` (Instinct MI100–MI250) or `0x1200` (MI300).
+A card's audio, USB-C and similar functions, an NVSwitch, and SR-IOV virtual functions do not count; an APU's graphics
+is one GPU, like a separate card. It sends `runtime_info.gpu_census`, which `GET /api/machines/{id}` shows:
+
+```json
+{"host_gpus": 9, "visible_gpus": 8, "missing": ["0000:c1:00.0"],
+ "vendors": {"nvidia": {"host": 9, "visible": 8, "missing": ["0000:c1:00.0"]}}}
+```
+
+`visible` counts the GPUs the agent's NVML or amd-smi lists; `missing`, the host's PCI addresses none of them has.
+`limited_by`, when present, says what limits the agent to some of that vendor's GPUs on purpose: its environment
+(`NVIDIA_VISIBLE_DEVICES` other than `all`, `CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+`GPU_DEVICE_ORDINAL`), or, added by the server from the agent's install report, its container's `--gpus "device=…"`
+or `--gpus N`. Setup health warns only when the agent sees some but not all of a vendor's GPUs and nothing limits it.
+An agent that sees none of them is taken to run without them on purpose (a CPU-only agent on a GPU host), and one
+limited on purpose is left alone; the machine's page says either quietly. Servers before 1.5.4 drop the field, and
+agents before 1.5.4 send nothing (no finding then).
+
+**What the server records.** It keeps the GPUs a machine last reported, by key (the UUID; an AMD card's PCI address),
+and when a report adds or removes one it appends to `runtime_info.gpu_changes` (the last 20):
+
+```json
+{"at": "2026-11-24T09:12:03+00:00", "gpus": 9,
+ "added": [{"key": "nvidia:GPU-…", "vendor": "nvidia", "index": 8, "model": "NVIDIA A100 80GB PCIe",
+            "vram_total": 85899345920, "pci_bus_id": "00000000:C1:00.0"}],
+ "removed": []}
+```
+
+A removed card also names the deployments placed on it (`deployments`) in the audit entry and Setup health, not in
+`GET /api/machines`. Not a change: the first report of a machine (or the first after the upgrade to 1.5.4), a card
+reported under a new key that names its old one, and cards of a vendor whose collector failed in that report. Each
+change is audited as `node.gpus_changed` (actor `agent`): `added`, `removed` and `gpus`, the machine's GPU count
+after it. The Setup health checks are `machine-gpus-hidden`, `machine-gpu-not-allowed`, `machine-gpu-added` and
+`machine-gpu-removed` ([table](#setup-health-checks)).
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
@@ -1479,6 +1577,10 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
 | `machine-gpu-access-lost` | error | New processes on an online machine cannot open its GPUs (the agent checks every 5 minutes as its workload account; an agent container started with `--gpus` alone loses that access when the host runs `systemctl daemon-reload`). Process workloads are not placed on those GPUs meanwhile; the fix opens the machine's update command ([what to do](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)) |
+| `machine-gpus-hidden` | warning | An online machine's host has more GPUs of a vendor on its PCI bus than its agent sees (agents from 1.5.4 count them), the agent sees some of them, and nothing limits it to those, with the PCI address of each one it does not see: usually a GPU installed after the agent container was created. An agent that sees none of them (a CPU-only agent on a GPU host) or was limited to some on purpose is not warned; the machine's page says so. The fix opens the machine's update command ([what to do](how-to.md#add-or-remove-a-gpu-on-a-machine)) |
+| `machine-gpu-not-allowed` | warning | In the last 7 days a GPU appeared on a machine that has a GPU access list, and it is not on the list: Forgeyard does not use it until an admin allows it |
+| `machine-gpu-added` | note | In the last 7 days a GPU appeared on a machine without a GPU access list: placement already uses it |
+| `machine-gpu-removed` | warning | In the last 7 days a machine stopped reporting a GPU, with the deployments that were placed on it (they keep their place until restarted) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
@@ -1610,8 +1712,9 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
-| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
-| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.5.4rc1` (linux/amd64 and arm64) |
+| `transformers` (1.5.4) | `cuda`, `cpu` | as `vision` | the same image as `vision` (pinned to the same digests) |
 
 `vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`: vLLM's
 compile cache is kept between starts, in a directory per replica on its machine, so a restart or a wake loads
@@ -1630,9 +1733,10 @@ classification head: `BertForSequenceClassification`, `RobertaForSequenceClassif
 `XLMRobertaForSequenceClassification`, `ModernBertForSequenceClassification`,
 `GteNewForSequenceClassification`, `GPT2ForSequenceClassification`, `JambaForSequenceClassification`,
 `LlamaBidirectionalForSequenceClassification`. vLLM's pooling runner picks the classify task by itself for
-them (no flag). Refused when added, with the reason (422 `cannot_inspect`): one output (a reranker), a
-regression head, a zero-shot (NLI) model (labels such as entailment and contradiction) and any other
-architecture (DeBERTa, DistilBERT, BART: the transformers engine in 1.5). A repository without a
+them (no flag). Refused when added, with the reason (422 `cannot_inspect`): one output (a reranker) and a
+regression head. Since 1.5.4 a zero-shot (NLI) model (labels such as entailment and contradiction) and any other
+architecture (DeBERTa, DistilBERT, BART) are added and served by the `transformers` recipe only (`vllm-pooling` is
+not offered for them, and deploying one on it answers 422 `incompatible`). A repository without a
 `config.json` to read (GGUF, ONNX) answers 422 `not_a_text_classifier`. A model added as another kind
 cannot become a text classifier (its labels were not read: add it again), and a text classifier cannot
 become a reranker.
@@ -1716,6 +1820,51 @@ Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
 1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU);
 Grounding DINO and MM-Grounding-DINO add 512 MiB (their text encoder and 800-pixel features: peak 2.24 GiB on a
 CPU with 0.64 GiB of files, 1.4.4).
+
+The `transformers` recipe (1.5.4, #141 and #144) runs the same Forgeyard image as `vision`, with `--task embed` or
+`--task classify`: image embeddings at `/v1/embeddings` and text classification at `/v1/classify`. It is offered for
+an `embed` model that is CLIP-like (CLIP, SigLIP, SigLIP 2, ALIGN, AltCLIP, Chinese-CLIP, MetaCLIP 2: texts and
+images in one space) or DINOv2 (`Dinov2Model`, images only), and for every `classify` model (fixed labels:
+DistilBERT, DeBERTa, BERT, RoBERTa, XLM-R…; or zero-shot with an NLI model, whose labels come with each request), and
+listed after the other recipes that serve the model: a text embedding model keeps `vllm-pooling` only, and deploying
+one on `transformers` answers 422 `incompatible`.
+
+Which engine a model is offered, and so its default (the first of its recipes: the deploy form, the add preview),
+1.5.4: `vllm-pooling` keeps every model it served before (text embedders, BERT, RoBERTa, XLM-R and the other
+classifiers of vLLM's list), first; it is not offered an image embedder (CLIP-like, DINOv2), an NLI model or a
+classifier of another architecture, which the transformers server alone serves. A multimodal embedding model that vLLM
+serves with chat-style messages (Qwen3-VL-Embedding, GME: a vision tower in a model added as `embed`) is refused when
+added (422 `no_engine`): it is planned for a later 1.5 patch. An entry added before 1.5.4 that `vllm-pooling` does not
+run is refused on it at deploy (422 `incompatible`). The catalog keeps what an embedding model takes (`embed`: its
+family, `modalities` text and image, image or text, its vector size and text length) and the languages its card names
+(`languages`; the recommended list gives them when the card names none). The recommended list adds two zero-shot
+classifiers (`bge-m3-zeroshot-v2.0-c`, multilingual; `roberta-base-zeroshot-v2.0-c`, English only; MIT weights trained
+on commercially friendly data only) and SigLIP 2 base, CLIP ViT-B/32 LAION-2B and DINOv2 small as embedding models
+(Apache-2.0 and MIT; one repository may be listed once per task, so SigLIP 2 and CLIP are there as image classifiers
+too). No code from a model's repository is run: a `config.json` with
+`auto_map` stops the replica at start. Parameters (advanced): `threads` (4, a CPU's torch threads), `max_images`
+(32, images per embeddings request, each at most 20 MiB and 40 megapixels) and `max_pairs` (256: a zero-shot model
+runs once per text and label, so texts x labels per request is at most this). The server itself:
+
+- `POST /v1/embeddings`: `input` is a text, or a list of texts, `{"text": …}` and `{"image": "<base64 or data:
+  URI>"}` items (the Jina shape; the gateway fetches image URLs, the engine never does); answered in OpenAI's shape,
+  each vector L2-normalised, in the order sent; `encoding_format` `float` or `base64`; `dimensions` only the model's
+  own. Texts are cut to the model's length (CLIP 77 tokens, SigLIP 64) and counted in `usage.truncated_inputs`;
+  `usage` also counts `images` and `kilopixels`. An image-only model (DINOv2) refuses texts (400
+  `text_not_supported`).
+- `POST /classify` (and `/v1/classify`): vLLM's request and answer (`input`, `truncate_prompt_tokens`,
+  `use_activation`; `data[index, label, probs, num_classes]`, `usage`). A zero-shot model also takes `labels`
+  (required, at most 32 distinct names), `multi_label` (false) and `hypothesis_template` (`"This text is about {}."`)
+  and answers transformers' zero-shot pipeline: `probs` in the request's label order, which the answer echoes
+  (`labels`, `multi_label`); single-label probabilities add up to 1. A fixed-label model given `labels` answers 400
+  `labels_not_supported`, a zero-shot one without them `labels_required`; too many pairs `too_many_pairs`.
+
+On a CPU it holds the weights in float32 (half precision is several times slower there: a bge-m3 NLI pass took 1.4 s
+in float16, 0.2 s in float32 on four threads), so the estimate counts a 16-bit checkpoint's parameters at 4 bytes each
+(recipe estimate field `cpu_float32`) plus 1.25 GiB; on a GPU the files plus 1 GiB, like `vision`. The tasks need a
+vision image from 1.5.4 on, which the built-in recipe pins (`forgeyard-vision` 1.5.4rc1); on a custom recipe that names
+an older one, deploying or estimating answers 422 `vision_image_too_old`. The gateway's side: [Embeddings](#embeddings) and
+[Text classification](#text-classification).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
@@ -1891,7 +2040,7 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.5.3` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
+- **Tags**: `1.5.4` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

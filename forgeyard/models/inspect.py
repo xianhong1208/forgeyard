@@ -7,10 +7,11 @@ for these requests only and never stored here.
 from __future__ import annotations
 
 import json
+import re
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import fetch, gguf, kvlayout, modalities, safetensors, sources, textcls, vision
+from forgeyard.models import encoders, fetch, gguf, kvlayout, modalities, safetensors, sources, textcls, vision
 from forgeyard.models.estimate import vllm_mm_item_tokens
 from forgeyard.models.sources import Source, SourceError
 
@@ -108,6 +109,26 @@ def license_of(info: dict) -> Optional[str]:
         lic = next((t.split(":", 1)[1] for t in info.get("tags") or [] if isinstance(t, str) and t.startswith("license:")),
                    None)
     return lic.strip().lower()[:64] if isinstance(lic, str) and lic.strip() else None
+
+
+MAX_LANGUAGES = 64
+_LANG_RE = re.compile(r"^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$|^multilingual$", re.I)
+
+
+def languages_of(info: dict) -> Optional[list[str]]:
+    """The languages a Hugging Face repository's card declares (`language`: a code or a list of codes, or
+    "multilingual"), lower case, in the card's order (1.5.4: the console shows them, as an English-only zero-shot model
+    does badly on Chinese). None when the card says nothing (CLIP, SigLIP and DINOv2 cards name none)."""
+    card = info.get("cardData") if isinstance(info.get("cardData"), dict) else {}
+    raw = card.get("language")
+    raw = [raw] if isinstance(raw, str) else raw
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for x in raw:
+        if isinstance(x, str) and _LANG_RE.match(x.strip()) and x.strip().lower() not in out:
+            out.append(x.strip().lower().replace("_", "-"))
+    return out[:MAX_LANGUAGES] or None
 
 
 MAX_COMPONENT_SHARDS = 64
@@ -283,6 +304,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         "gated": bool(info.get("gated")), "private": bool(info.get("private")),
         "license": license_of(info),
     }
+    if langs := languages_of(info):
+        out["languages"] = langs
 
     def url(path: str) -> str:
         return f"{ep}/{repo}/resolve/{sha}/{quote(path)}"
@@ -335,9 +358,14 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
                 # 1.4.3 (#147): a text classifier is never served as a reranker.
                 raise InspectError(why)
             if (task or out["task_hint"]) == "classify":
+                # 1.5.4: refused only when no engine runs it (one output, a regression head, no classification head);
+                # what vLLM alone cannot run (NLI, DeBERTa, DistilBERT…) is the transformers server's (encoders.py).
                 if why := textcls.refusal(labelled):
                     raise InspectError(why)
                 out["classify"] = labelled
+            if (task or out["task_hint"]) == "embed" and isinstance(config, dict):
+                # 1.5.4 (#141): what it embeds (texts, images or both), its vector size and text length.
+                out["embed"] = encoders.embed_summary(config)
             out["modalities"] = modalities.from_config(config, paths)
             seen = vision.summary(config) if isinstance(config, dict) else None
             if seen is not None:

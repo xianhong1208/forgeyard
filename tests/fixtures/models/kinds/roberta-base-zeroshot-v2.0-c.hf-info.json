@@ -1,0 +1,25 @@
+{
+  "id": "MoritzLaurer/roberta-base-zeroshot-v2.0-c",
+  "sha": "d825e740e0c59881cf0b0b1481ccf726b6d65341",
+  "pipeline_tag": "zero-shot-classification",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "safetensors",
+    "roberta",
+    "text-classification",
+    "zero-shot-classification",
+    "en",
+    "arxiv:2312.17543",
+    "license:mit",
+    "endpoints_compatible",
+    "region:us"
+  ],
+  "cardData": {
+    "language": [
+      "en"
+    ],
+    "pipeline_tag": "zero-shot-classification",
+    "license": "mit"
+  }
+}

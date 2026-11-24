@@ -64,11 +64,26 @@ export function tierSummary(route: RouteInfo): string {
     .join(" → ");
 }
 
+// What a route does when its first tier cannot serve: from a saved route (spillRules), or from what the
+// routing editor holds now (spillRulesOf, 1.5.4: the summary follows the tiers on screen, not the saved ones).
+export type SpillShape = { localOnly: boolean; tiers: number; waitMs: number; longPrompt: boolean };
+
+export function spillRulesOf(s: SpillShape): string {
+  if (s.localOnly) return t("cloud.spill.localOnly");
+  if (s.tiers < 2) return t("cloud.spill.oneTier");
+  const wait = s.waitMs ? t("cloud.spill.wait", { ms: String(s.waitMs) }) : "";
+  return t(s.longPrompt ? "cloud.spill.rulesLong" : "cloud.spill.rules", { wait });
+}
+
 export function spillRules(route: RouteInfo): string {
-  if (route.local_only) return t("cloud.spill.localOnly");
-  if (tiers(route).length < 2) return t("cloud.spill.oneTier");
-  const wait = route.wait_ms ? t("cloud.spill.wait", { ms: String(route.wait_ms) }) : "";
-  return t(route.spill_on_long_prompt ? "cloud.spill.rulesLong" : "cloud.spill.rules", { wait });
+  return spillRulesOf({ localOnly: route.local_only, tiers: tiers(route).length, waitMs: route.wait_ms, longPrompt: route.spill_on_long_prompt });
+}
+
+// local: only targets inside your network; cloud: only cloud targets; mixed: both (as the server's route_kind).
+export function kindOf(cloudFlags: boolean[]): RouteKind {
+  const cloud = cloudFlags.some(Boolean);
+  const local = cloudFlags.some((c) => !c);
+  return cloud && local ? "mixed" : cloud ? "cloud" : "local";
 }
 
 export function targetHeader(target: string | null): string | null {
@@ -78,11 +93,12 @@ export function targetHeader(target: string | null): string | null {
   return target;
 }
 
-// 1.4 (#81): where each route lives in the console. A deployment's own route is its cloud fallback,
-// on the deployment's page. A route an admin made under a name of its own lives on Cloud → Cloud
-// models: with a provider's model in it it is a cloud model; with deployments only it is "another
+// 1.4 (#81): where each route lives in the console. A deployment's own route is its routing and fallback
+// (called "cloud fallback" until 1.5.4, at #cloud-fallback, which still opens it), on the deployment's
+// page. A route an admin made under a name of its own lives on Cloud → Cloud models: with a provider's model in it it is a cloud model; with deployments only it is "another
 // name" for them (several deployments behind one name, or one under a second name).
-export const FALLBACK_ANCHOR = "cloud-fallback";
+export const FALLBACK_ANCHOR = "routing";
+export const OLD_FALLBACK_ANCHOR = "cloud-fallback";
 
 export function routeHome(r: Pick<RouteInfo, "id" | "deployment_id">): string {
   return r.deployment_id !== null ? `/serving/${r.deployment_id}#${FALLBACK_ANCHOR}` : `/cloud/models/${r.id}`;

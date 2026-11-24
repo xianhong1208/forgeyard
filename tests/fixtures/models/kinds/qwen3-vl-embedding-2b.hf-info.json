@@ -1,0 +1,28 @@
+{
+  "id": "Qwen/Qwen3-VL-Embedding-2B",
+  "sha": "9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda",
+  "pipeline_tag": "sentence-similarity",
+  "library_name": "sentence-transformers",
+  "tags": [
+    "sentence-transformers",
+    "safetensors",
+    "qwen3_vl",
+    "image-text-to-text",
+    "transformers",
+    "multimodal embedding",
+    "qwen",
+    "embedding",
+    "sentence-similarity",
+    "arxiv:2601.04720",
+    "base_model:Qwen/Qwen3-VL-2B-Instruct",
+    "base_model:finetune:Qwen/Qwen3-VL-2B-Instruct",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "deploy:sagemaker",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0",
+    "pipeline_tag": "sentence-similarity"
+  }
+}

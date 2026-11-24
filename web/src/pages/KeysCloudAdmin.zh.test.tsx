@@ -105,7 +105,7 @@ const ACTIONS = [
   "hf_token.cleared", "hf_token.set", "machine.gpu_allowlist_changed", "machine.gpu_keys_changed", "machine.join_refused",
   "machine.join_token_cancelled", "machine.join_token_created", "machine.joined", "machine.removed", "machine.revoked", "model.added",
   "model.cache_removed", "model.changed", "model.checksum_recorded", "model.download_cancelled", "model.download_requested", "model.removed",
-  "model_sources.changed", "node.fetch_via_changed", "node.image_copied", "node.image_removed", "node.image_uploaded", "node.relay_copy_refused",
+  "model_sources.changed", "node.fetch_via_changed", "node.gpus_changed", "node.image_copied", "node.image_removed", "node.image_uploaded", "node.relay_copy_refused",
   "provider.changed", "provider.cloned", "provider.created", "provider.deleted", "provider.model_changed", "provider.model_removed",
   "provider.models_added", "provider.prices_refreshed", "recipe.created", "recipe.deleted", "recipe.updated", "route.changed", "route.created",
   "route.deleted", "secret_key.backup_confirmed", "secret_key.backup_downloaded", "secret_key.backup_failed", "setup.owner_created",
@@ -387,14 +387,14 @@ describe("Cloud in zh-TW", () => {
     expect(targetName(gone)).toBe("(removed)");
     expect(spillRules(SMART)).toBe("Moves to the next tier when no local replica is ready, every replica is busy, the engine answers 429 or 503, the prompt is longer than the local context (after waiting up to 250 ms for a slot). Never once the answer has started.");
     expect(spillRules({ ...SMART, wait_ms: 0, spill_on_long_prompt: false })).toBe("Moves to the next tier when no local replica is ready, every replica is busy, the engine answers 429 or 503. Never once the answer has started.");
-    expect(spillRules(one)).toBe("One tier: nothing to spill to.");
+    expect(spillRules(one)).toBe("Only one tier has a target: a request has nowhere else to go. Put another local deployment or a cloud model in a later tier.");
     expect(spillRules({ ...one, local_only: true })).toBe("Never leaves your network (local only).");
     expect(targetHeader("local:chat")).toBe("local chat");
     zh();
     expect(ROUTE_KIND_LABEL.cloud).toBe("僅雲端");
     expect(targetWhere(off)).toBe("雲端 · 供應商已停用");
     expect(targetName(gone)).toBe("（已移除）");
-    expect(spillRules(one)).toBe("只有一層：沒有地方可以溢出。");
+    expect(spillRules(one)).toBe("只有一層有目標：請求沒有別的地方可去。把另一個本機部署或雲端模型放進後面的層。");
     expect(spillRules({ ...SMART, wait_ms: 0, spill_on_long_prompt: false })).toBe("沒有就緒的本機副本、每個副本都在忙、或推論引擎回傳 429 或 503 時，移到下一層。回答一旦開始就不會再移。");
     expect(targetHeader("local:chat")).toBe("本機 chat");
     expect(targetHeader("provider:Gemini/x")).toBe("Gemini/x");

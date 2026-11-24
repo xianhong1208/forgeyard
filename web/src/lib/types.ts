@@ -115,7 +115,10 @@ export type Machine = {
   image_upload_max_bytes?: number;
   // 1.4.5 (#171): `address`, where its replicas are published (what the gateway dials); `same_host`, whether its
   // agent runs on the server's own host (agents before 1.4.5 report neither).
-  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>> & { address?: string; same_host?: boolean };
+  // 1.5.4: `gpu_census`, the host's GPUs next to the ones its agent sees; `gpu_changes`, GPUs added or removed.
+  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>> & {
+    address?: string; same_host?: boolean; gpu_census?: GpuCensus; gpu_changes?: GpuChange[];
+  };
   // 1.4.2 (#122): why its agent should be updated (null: it need not be), and the server's version.
   agent_behind?: AgentBehind | null;
   server_version?: string;
@@ -368,9 +371,16 @@ export type CatalogModel = {
   classify?: TextClassifier | null;
   // 1.3, video models: the native size and frame rate, and the pipeline's components.
   video?: VideoModel | null;
+  // 1.5.4: an embedding model's modalities and vector size, and the languages its card names (null: unknown).
+  embed?: EmbedModel | null;
+  languages?: string[] | null;
 };
 
-export type TextClassifier = { architecture?: string; labels?: number; label_names?: string[]; problem?: string };
+// 1.5.4: zero_shot, an NLI model told the labels in each request (its label_names are entailment and the like).
+export type TextClassifier = { architecture?: string; labels?: number; label_names?: string[]; problem?: string; zero_shot?: boolean };
+
+// 1.5.4: what an embedding model embeds (texts, images or both), its vector size and its longest text.
+export type EmbedModel = { family?: string; modalities: ("text" | "image")[]; dimensions?: number; text_max_tokens?: number };
 
 // /v1/classify's answer (vLLM's shape): each input's most likely label and every label's probability.
 export type ClassifyAnswer = {
@@ -447,7 +457,10 @@ export type Deployment = {
     // 1.4: what it takes in chat besides text (null: unknown), so a chat model can be listed as multimodal.
     modalities?: Medium[] | null;
     // 1.4.4: a text classifier's labels (names in index order), for the Playground.
-    classify?: TextClassifier | null };
+    classify?: TextClassifier | null;
+    // 1.5.4: what an embedding model takes (Try it sends the test image to one that embeds images), and (an
+    // embedding or classification model) the languages its card names, for the Playground's English-only warning.
+    embed?: EmbedModel | null; languages?: string[] | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
@@ -762,6 +775,24 @@ export type AgentBehind = { agent: string | null; server: string; older: boolean
 
 // 1.4.2 (#121): GET /api/machines/{id}/agent-update (admins): the command that updates a machine's agent.
 export type UpdateStep = { title: string; command: string };
+// 1.5.4: the host's GPUs (from its PCI bus) next to the ones the agent sees, per vendor.
+export type GpuCensus = {
+  host_gpus: number;
+  visible_gpus: number;
+  missing: string[];
+  // limited_by: what limits the agent to some of that vendor's GPUs on purpose ("--gpus device=0,2",
+  // "NVIDIA_VISIBLE_DEVICES=0,1").
+  vendors: Record<string, { host: number; visible: number; missing: string[]; limited_by?: string }>;
+};
+
+// 1.5.4: one card in a GPU change.
+export type GpuChangeCard = {
+  key: string; vendor: string; index: number; model: string; vram_total: number | null; pci_bus_id?: string;
+};
+
+// 1.5.4: GPUs added to or removed from a machine since its agent last reported them.
+export type GpuChange = { at: string; gpus: number; added: GpuChangeCard[]; removed: GpuChangeCard[] };
+
 export type AgentUpdate = {
   machine_id: number;
   name: string;
@@ -777,6 +808,9 @@ export type AgentUpdate = {
   alternative: { title: string; steps: UpdateStep[] } | null;
   notes: string[];
   guide: string;
+  // 1.5.4: how an NVIDIA agent's device nodes are passed: "host" = the shell lists the host's when the command runs
+  // (explained under the command), "listed" = by name (an agent limited to some GPUs). Absent from older servers.
+  nvidia_devices?: "host" | "listed" | null;
 };
 
 // 1.4.3 (#140): a catalog model's page and an engine's page.

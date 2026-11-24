@@ -131,7 +131,11 @@ class GuardThread:
 
     def __init__(self, upstream: int, key: Optional[str] = KEY, **kw):
         self.loop = asyncio.new_event_loop()
+        # Never the upstream's own number: a test's "dead engine" is a free_port() that is closed again at once, and the
+        # OS may hand the same number out next — the guard would then forward to itself (CI flake of FY-RTLS-009).
         self.port = free_port()
+        while self.port == upstream:
+            self.port = free_port()
         self.guard = Guard(listen=("127.0.0.1", self.port), upstream=("127.0.0.1", upstream), key=key, name="test", **kw)
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()

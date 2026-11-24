@@ -57,11 +57,12 @@ image to a machine without registry access. `scripts/pin_images.py` checks both 
 
 - **Bumping an engine:** change the tag in its recipe, run `pin_images.py --write`, review the diff, run the
   tests.
-- **Forgeyard's own vision image** (`images/vision`, recipe `vision`) is pinned the same way (1.4.1). A
-  release publishes `forgeyard-vision:X.Y.Z` and `X.Y.Z-cuda` from that release's code, so its digest is
-  only known after the tag: **after a release that changed `images/vision`**, a small PR into `dev` changes
-  the two tags in `forgeyard/recipes/vision.yaml` to the new version and runs `pin_images.py --write`
-  (FY-VIS-001 and FY-VIS-019 name the pinned references). A release that did not change it keeps the pin:
+- **Forgeyard's own vision image** (`images/vision`, recipes `vision` and, 1.5.4, `transformers`) is pinned the
+  same way (1.4.1). A release publishes `forgeyard-vision:X.Y.Z` and `X.Y.Z-cuda` from that release's code, so its
+  digest is only known after the tag: **after a release that changed `images/vision`**, a small PR into `dev`
+  changes the two tags in `forgeyard/recipes/vision.yaml` **and** `forgeyard/recipes/transformers.yaml` (the same
+  image) to the new version and runs `pin_images.py --write` (FY-VIS-001, FY-VIS-019 and FY-TFM-001 name the pinned
+  references; FY-TFM-004 expects the old image's refusal until the pin reaches 1.5.4). A release that did not change it keeps the pin:
   a server upgrade alone never changes the image a vision model runs.
 
 ## Before a release
@@ -175,7 +176,7 @@ fixed time for something to happen, or read a page before the data it needed had
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a process sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
-| `images/vision/` | the vision server the `vision` recipe runs (detection, segmentation, depth, image classification): its Dockerfile, pinned models and dependencies, smoke test |
+| `images/vision/` | the vision server the `vision` recipe runs (detection, segmentation, depth, image classification) and, 1.5.4, the `transformers` recipe (image embeddings, text classification): its Dockerfile, pinned models and dependencies, smoke test and its tiny test models (`tinymodels.py`) |
 | `scripts/accept_scale.py` | the real-hardware acceptance of sleep when idle, waking and automatic replicas (also the `scale` group of `accept_all.py`; [how](guide/how-to.md#check-sleep-waking-and-automatic-replicas)) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

@@ -39,7 +39,9 @@ def _model(db: DbSession, model_id: int) -> CatalogModel:
 
 
 def _recipes(db: DbSession, model: CatalogModel) -> list[str]:
-    return [n for n, (r, _) in all_recipes(db).items() if model.format in r.formats and model.task in r.tasks]
+    from forgeyard.api.models import compatible
+
+    return compatible(model, all_recipes(db))
 
 
 def _recipe(db: DbSession, model: CatalogModel, name: Optional[str]):
