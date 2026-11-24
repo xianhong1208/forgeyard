@@ -89,10 +89,11 @@ deployment's **Edit** page then moves it to the copy and back, keeping its name,
 ([how](docs/guide/how-to.md#try-a-newer-version-of-an-engine)). Back up before upgrading: the server's database
 changes. A server run from source installs with `uv sync --extra server`; the agents need no update.
 
-1.5.3 **removes apps** (deprecated since 1.4): `POST /api/workloads`, the templates and the gateway's `/x/` answer
-410, and the upgrade stops and removes the apps that are left, writing each one in the audit log. Before upgrading,
-see what it would remove with `python -m forgeyard check-apps` and deploy what you still need as a model
-([what changes and how to check](docs/guide/reference.md#apps-removed)).
+1.5.3 **removes apps** (deprecated since 1.4), a breaking change in a patch release: `POST /api/workloads`, the
+templates and the gateway's `/x/` answer 410, and the upgrade removes the apps that are left, writing each one in
+the audit log. Before upgrading, run `python -m forgeyard check-apps` to see what it would remove, deploy what you
+still need as a model, and back up ([release notes](CHANGELOG.md#153--2026-11-24),
+[how to check](docs/guide/reference.md#apps-removed)). Model deployments are not affected; the agents need no update.
 
 ## What's new in 1.4
 
@@ -125,7 +126,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.2
+  docker.io/tonyhuang1101/forgeyard:1.5.3
 sudo docker logs forgeyard
 ```
 
@@ -171,7 +172,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
