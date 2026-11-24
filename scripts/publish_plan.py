@@ -67,7 +67,8 @@ def plan(version: str, namespace: str, ref_type: str, ref_name: str, have_secret
         "server_repository": server,
         "agent_tags": ",".join(f"{agent}:{t}" for t in tags),
         "server_tags": ",".join(f"{server}:{t}" for t in tags),
-        # The workload templates' vision server (1.3): the CPU build under the same tags, the CUDA build
+        # The vision server the built-in vision engine runs (1.4; first made for the 1.3 workload templates, removed in
+        # 1.5.3): the CPU build under the same tags, the CUDA build
         # with -cuda after each (latest-cuda).
         "vision_repository": vision,
         "vision_tags": ",".join(f"{vision}:{t}" for t in tags),

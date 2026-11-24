@@ -54,12 +54,19 @@ workload（runtime 為 `model`）執行；微調（1.8）也會。
 
 **應用程式離開 Forgeyard**（#88、#89）。使用者自己執行、不是模型的 workload 叫 *app*：1.4（#81）在 console 的 **Apps**，
 用 `POST /api/workloads` 建立，可以公開在 `/x/`。Forgeyard 的重點是執行和管理模型，所以 1.4 把應用程式從 console 拿掉（頁面、範本、
-金鑰的 *Apps at /x/* 設定、Playground 的視覺應用程式），其餘淘汰：`/api/workloads` 屬於應用程式的部分、`GET /api/workloads/templates`
-和 `/x/` 在 1.5 之前照常運作，並明白告知（forgeyard/deprecation.py：每個回應，包括錯誤，都帶 `Deprecation` 標頭（RFC 9745）和指向指南的
-`Link`；伺服器紀錄每類最多每小時警告一次；只要還有應用程式，就有 Setup health 檢查 `apps-deprecated`）。`GET /api/keys` 與 Playground
-的視覺選項不再列出應用程式。1.5 會移除 API、`/x/`、範本和金鑰的設定，並以 migration 移除剩下的應用程式。舊的 console 連結（`/apps…`、
-1.3 的 `/workloads…`）會打開模型的部署或 Machines。**Machines** 仍會列出佔用顯示卡的應用程式名稱（沒有連結），所以使用中的卡不會被顯示成空閒。
-模型部署的 workload 只在 **Serving** 底下看得到，API 也仍然拒絕停止、啟動或刪除它（409 `managed_by_deployment`）。spec：
+金鑰的 *Apps at /x/* 設定、Playground 的視覺應用程式），其餘淘汰，並以 `Deprecation` 標頭、伺服器紀錄的警告和 Setup health 檢查告知。
+**1.5.3 移除它們**（#89）：透過 `/api/workloads` 建立、公開、停止、啟動和刪除應用程式，`GET /api/workloads/templates`、`/x/`，以及
+console 送到公開視覺應用程式的路由，在 1.5.x 剩下的版本都回 **410 Gone**（`forgeyard/removed.py`：code `apps_removed`，本文寫出版本和
+指南的章節，帶 `Deprecation` 與 `Link` 標頭；`/x/` 保留 gateway 的錯誤格式），1.6 起回 404。用 410 而不是 404，是為了讓還在呼叫的腳本
+知道原因。migration `0019_remove_apps` 為每個剩下的應用程式寫一筆稽核紀錄（`workload.removed_in_upgrade`：不含環境變數值的 spec、
+replica 跑在哪裡），每把能呼叫 `/x/` 的 API key 也寫一筆（`api_key.x_access_removed`），然後刪除應用程式，並刪除 `workloads.gateway`
+以及 key 的 `workloads`、`workload_list`、`workloads_locked_by`。選擇刪除而不是封存：稽核紀錄本來就是管理員或稽核人員查變更的地方，
+而且永久保留；封存表只會是一個已移除功能的半套副本。要回去，就用升級前的備份。agent 照平常的方式停止被移除的 replica（它們離開工作
+清單），絕不強制終止。Setup health 在 30 天內說明移除了什麼（`apps-removed`），`forgeyard check-apps` 可以事先列出升級會移除什麼。
+key 的請求如果還送 `workloads: "none"` 會照常接受；任何要求存取應用程式的值都會被拒絕（422 `apps_removed`）。讀取 workload 的 API
+保留（`GET /api/workloads`、replica 的紀錄）：現在每個 workload 都屬於某個模型部署。舊的 console 連結（`/apps…`、1.3 的 `/workloads…`）
+會打開模型的部署或 Machines。模型部署的 workload 只在 **Serving** 底下看得到，並透過它的部署停止、啟動和刪除（舊的
+`/api/workloads/{id}/stop|start` 和 `DELETE` 回 410，並寫出那個部署）。workload 引擎本身保留：模型在上面執行，微調也會。spec：
 
 ```json
 {"name": "web", "kind": "service",
@@ -320,11 +327,13 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
     就重新打開 guard。能在那台機器上執行程式的人（包括跑在那裡的 Forgeyard workload）連得到 loopback port；在那裡，引擎自己的 key
     仍然守著它的 `/v1` 路徑。
   - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
-    （把部署停止再啟動）。一般 workload（不是模型）只有公開在 `/x/` 時才有 guard（見下）。
+    （把部署停止再啟動）。一般 workload（不是模型）以前只有公開在 `/x/` 時才有 guard（見下；1.5.3 移除）。
 
 真機檢查：`scripts/accept_m4.py`。
 
-### 在 /x/ 的 workload（1.3，通用直通；1.4 淘汰、1.5 移除）
+### 在 /x/ 的 workload（1.3，通用直通；1.4 淘汰、1.5.3 移除）
+
+**1.5.3 移除**（#89，見上面的〈應用程式離開 Forgeyard〉）：`/x/` 回 410，範本也已移除。以下是它原本的設計紀錄。
 
 不是對話、嵌入、語音或圖片模型的東西（偵測、分割、深度估計、Triton 或 KServe 模型、FastAPI 或 BentoML 服務），以 service
 workload 執行，並**公開**在 gateway 後面的 **`https://<server>:7860/x/<name>/…`**，使用和 `/v1` 相同的 API key、限制與用量。研究與

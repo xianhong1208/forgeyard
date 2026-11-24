@@ -6,7 +6,7 @@ export default {
   "admin.users.index": "08 · Users",
   "admin.users.title": "Users",
   "admin.users.lead":
-    "Who can sign in, and with which role. Admins manage users, machines and the model catalog; operators run apps and deploy models; users call the models with their own API keys and see their own usage.",
+    "Who can sign in, and with which role. Admins manage users, machines and the model catalog; operators deploy models; users call the models with their own API keys and see their own usage.",
   "admin.users.add": "Add user",
   "admin.users.linkFor": "One-time link for {name}",
   "admin.users.linkBody": "Send this to {name}. It sets their password, works once and expires in {hours} hours. It is shown only now.",
@@ -48,7 +48,7 @@ export default {
   "admin.audit.index": "09 · Audit log",
   "admin.audit.title": "Audit log",
   "admin.audit.lead":
-    "Sign-ins, failed sign-ins and every change to accounts, API keys, machines, apps, models, providers and budgets, newest first.",
+    "Sign-ins, failed sign-ins and every change to accounts, API keys, machines, models, providers and budgets, newest first.",
   "admin.audit.show": "Show",
   "admin.audit.filter.all": "Everything",
   "admin.audit.filter.auth": "Sign-ins and sessions",
@@ -56,7 +56,7 @@ export default {
   "admin.audit.filter.setup": "Setup",
   "admin.audit.filter.api_key": "API keys",
   "admin.audit.filter.machine": "Machines",
-  "admin.audit.filter.workload": "Apps",
+  "admin.audit.filter.workload": "Workloads and apps",
   "admin.audit.filter.deployment": "Deployments",
   "admin.audit.filter.model": "Models and sources",
   "admin.audit.filter.recipe": "Engines",
@@ -75,6 +75,7 @@ export default {
   "admin.action.api_key.changed": "API key changed",
   "admin.action.api_key.created": "API key created",
   "admin.action.api_key.revoked": "API key revoked",
+  "admin.action.api_key.x_access_removed": "API key's /x/ access removed by the 1.5.3 upgrade",
   "admin.action.api_key_cloud.changed": "Cloud policy for keys changed",
   "admin.action.api_key_limits.changed": "Limits for keys changed",
   "admin.action.auth.login": "Signed in",
@@ -148,8 +149,9 @@ export default {
   "admin.action.workload.created": "App created",
   "admin.action.workload.deleted": "App deleted",
   "admin.action.workload.gateway_changed": "App's gateway access changed",
-  "admin.action.workload.started": "App started",
-  "admin.action.workload.stopped": "App stopped",
+  "admin.action.workload.removed_in_upgrade": "App removed by the 1.5.3 upgrade",
+  "admin.action.workload.started": "Workload started",
+  "admin.action.workload.stopped": "Workload stopped",
 
   // My account
   "admin.account.index": "My account",

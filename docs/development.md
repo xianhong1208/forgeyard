@@ -151,7 +151,6 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/gateway/speech.py` | text to speech: request checks, voice cloning refused, what each engine is given, the audio's length |
 | `forgeyard/gateway/imagegen.py` | image generation: request checks, per-deployment caps, what each engine is given, the queue, the answer and its size |
 | `forgeyard/gateway/videogen.py`, `videojobs.py` | video generation: request checks, per-deployment caps, the job object; the jobs on their replica, the sweeper, expiry, content and usage |
-| `forgeyard/gateway/passthrough.py` | the generic passthrough at `/x/<name>`: paths refused, headers dropped and forced, the answer as raw bytes, limits, usage |
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
@@ -173,11 +172,10 @@ fixed time for something to happen, or read a page before the data it needed had
 | `.github/workflows/dockerhub-login.yml`, `scripts/dockerhub_check.py` | every push to `dev` and `main` checks that the Docker Hub secrets log in and may push ([before a release](#before-a-release)) |
 | `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
-| `scripts/gpu_probe.py` | checks which NVIDIA GPU an app sees, through the CUDA driver only |
+| `scripts/gpu_probe.py` | checks which NVIDIA GPU a process sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
-| `images/vision/` | the vision server behind the app templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
-| `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
+| `images/vision/` | the vision server the `vision` recipe runs (detection, segmentation, depth, image classification): its Dockerfile, pinned models and dependencies, smoke test |
 | `scripts/accept_scale.py` | the real-hardware acceptance of sleep when idle, waking and automatic replicas (also the `scale` group of `accept_all.py`; [how](guide/how-to.md#check-sleep-waking-and-automatic-replicas)) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

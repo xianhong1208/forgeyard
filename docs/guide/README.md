@@ -41,7 +41,7 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
    or a server of your own; route a model to the cloud; when a request spills; which keys may use the
    cloud; what each provider's endpoint cannot do; what leaves your server.
 6. [Reference](reference.md): every server setting, every agent setting, the gateway's endpoints,
-   headers and error codes, an app's environment, the command line, files and ports.
+   headers and error codes, a replica's environment, what was removed with apps, the command line, files and ports.
 
 ## Conventions
 

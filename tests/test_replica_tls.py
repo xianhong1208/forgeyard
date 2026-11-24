@@ -406,9 +406,9 @@ def test_fy_rtls_012_try_it_and_the_routes_use_the_same_tls(tls_gw, owner):
     assert r.json()["summary"] == "hello from a" and gw.guards[0].guard.forwarded == 1
 
 
-def test_fy_rtls_013_passthrough_and_video_jobs_dial_with_the_binding(owner):
-    """FY-RTLS-013: /x/ and /v1/videos build their targets the same way: https:// and the machine's binding for a TLS
-    agent, plain HTTP for an older one."""
+def test_fy_rtls_013_video_jobs_dial_with_the_binding(owner):
+    """FY-RTLS-013: /v1/videos builds its targets the way routes do: https:// and the machine's binding for a TLS
+    agent, plain HTTP for an older one. (It covered /x/ too until /x/ was removed in 1.5.3, #89.)"""
     from forgeyard.gateway import videojobs
 
     seed_catalog()
@@ -735,26 +735,6 @@ def test_fy_rtls_021_one_pool_per_machine(tmp_path, engine):
         assert g.guard.forwarded == 2
     finally:
         g.close()
-
-
-def test_fy_rtls_022_x_passthrough_over_tls(owner, tmp_path):
-    """FY-RTLS-022: an app exposed at /x/ on a TLS machine is reached over TLS with that machine's certificate (its
-    guard strips the key as before)."""
-    from tests.test_passthrough import GUARDED, App, expose_workload, ready_behind
-
-    node = make_node("cpu-tls", "nvidia-rtx4090x2", features=GUARDED + (FEATURE_GUARD_TLS,))
-    app = App()
-    guard = GuardThread(app.port, strip_auth=True, ssl_context=certified(node_of(node), tmp_path).context)
-    try:
-        expose_workload(owner, "web", node)
-        ready_behind("web", [guard.port])
-        api = api_client(owner, new_key(owner, "laptop", workloads="all")["key"])
-        r = api.get("/x/web/hello")
-        assert r.status_code == 200, r.text
-        assert r.json()["path"] == "/hello" and r.json()["auth"] is None and guard.guard.forwarded == 1
-    finally:
-        guard.close()
-        app.close()
 
 
 def test_fy_rtls_023_voices_and_speech_over_tls(owner, tmp_path):

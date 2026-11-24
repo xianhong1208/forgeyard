@@ -41,7 +41,6 @@ from forgeyard.api import (
 )
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
-from forgeyard.deprecation import DeprecationMiddleware
 from forgeyard.db import get_engine, new_session
 from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy, videojobs
 from forgeyard.gateway.usage import FLUSH_SECONDS as USAGE_FLUSH_SECONDS, recorder as usage_recorder
@@ -130,8 +129,6 @@ def create_app() -> FastAPI:
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     app.add_middleware(GuardMiddleware)
     app.add_middleware(WebSocketHostGuard)
-    # 1.4 (#88): the answers of the deprecated apps API, templates and /x/ say so (forgeyard/deprecation.py).
-    app.add_middleware(DeprecationMiddleware)
 
     @app.exception_handler(HTTPException)
     async def _http_error(_request: Request, exc: HTTPException):
@@ -165,7 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(secret_key_api.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
-    app.include_router(passthrough.router)
+    app.include_router(passthrough.router)  # /x/: 410 since 1.5.3 (#89, forgeyard/removed.py)
     app.include_router(agent_api.router)
     app.include_router(relay.router)
     app.include_router(peers.router)

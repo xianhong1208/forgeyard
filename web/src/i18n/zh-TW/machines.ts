@@ -38,7 +38,7 @@ export default {
   "machines.legend": "每一格是一張卡（或 RAM），由下往上填。",
   "machines.empty.title": "還沒有機器",
   "machines.empty.body":
-    "Forgeyard 在你加入的機器上執行模型和應用程式：GPU 伺服器、工作站，或只有 CPU 的電腦。每台都執行 Forgeyard agent，它會回報硬體並和這台伺服器保持連線。",
+    "Forgeyard 在你加入的機器上執行模型：GPU 伺服器、工作站，或只有 CPU 的電腦。每台都執行 Forgeyard agent，它會回報硬體並和這台伺服器保持連線。",
   "machines.empty.admin": "要加入一台，就在這裡建立加入指令，貼到那台機器上：一行就能把 agent 安裝成服務（或用 Docker 執行）。",
   "machines.empty.user": "機器由管理員加入；請管理員幫你加入你的機器。",
   "machines.kind.nvidia": "CUDA 顯示卡，透過 NVML 讀取",
@@ -72,7 +72,7 @@ export default {
     "它會先下載伺服器的憑證授權單位，並用{inCommand}指紋核對；之後才透過以那個授權單位檢查過的連線取得安裝程式。接著它會：",
   "machines.install.inCommand": "指令裡的",
   "machines.install.does1": "從這台伺服器把 agent {version} 安裝到 {dir}；",
-  "machines.install.does2": "建立帳號 {account}，應用程式以行程執行時用它的身分；",
+  "machines.install.does2": "建立帳號 {account}，推論引擎以行程執行時用它的身分；",
   "machines.install.does3": "依它找到的東西（GPU、Docker、systemd）寫出 {file}；",
   "machines.install.does4": "用權杖加入，並啟動 {service} 服務（systemd）。",
   "machines.install.again": "之後再執行同一行，會升級 agent 並保留這台機器。加上 {flag} 會移除它。",

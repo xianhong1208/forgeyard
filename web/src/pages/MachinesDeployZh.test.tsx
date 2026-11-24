@@ -138,7 +138,7 @@ describe("a machine's page in zh-TW", () => {
     const box = screen.getByRole("group", { name: "a100-box 的 GPU 存取：Forgeyard 可以指派的 GPU" });
     fireEvent.click(within(box).getByRole("button", { name: "都不選" }));
     fireEvent.click(within(box).getByRole("button", { name: "儲存" }));
-    expect(ask).toHaveBeenCalledWith("要讓 Forgeyard 在 a100-box 上不指派任何 GPU 嗎？那裡只會執行使用 CPU 的模型和應用程式。");
+    expect(ask).toHaveBeenCalledWith("要讓 Forgeyard 在 a100-box 上不指派任何 GPU 嗎？那裡只會執行使用 CPU 的模型。");
     expect(within(box).getByRole("button", { name: "取消" })).toBeTruthy();
   });
 

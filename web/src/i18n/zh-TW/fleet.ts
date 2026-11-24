@@ -82,7 +82,6 @@ export default {
   "fleet.legend.free": "可用",
   "fleet.nothingHere": "這裡還沒有執行任何東西。",
   "fleet.more": "還有 {count} 個",
-  "fleet.appTitle": "應用程式 {name}：應用程式已淘汰，1.5 會移除（在那之前只能透過 API 使用）",
   "fleet.cpu": "CPU",
   "fleet.layers": "{done}/{total} 層",
   "fleet.pull.relayLoading": "經由伺服器拉取映像檔：載入中",
@@ -120,4 +119,5 @@ export default {
   "fleet.behind.version": "agent {agent}，伺服器 {server}：請更新",
   "fleet.behind.lacks": "agent {agent} 缺少 {missing}：請更新",
   "fleet.behind.title": "開啟更新這個 agent 的指令",
+  "fleet.workloadTitle": "workload {name}：它在這裡執行，但沒有任何部署列出它",
 } satisfies Record<keyof typeof en, string>;

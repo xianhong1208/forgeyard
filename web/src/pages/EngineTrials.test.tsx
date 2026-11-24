@@ -258,7 +258,7 @@ describe("Try it out (1.5.2, #95 PR 4)", () => {
     expect(p.holders).toHaveLength(1);
     const h = p.holders[0];
     expect([h.name, h.href, h.key, h.reserved, h.trial?.id]).toEqual(["Trial of vllm-0-34-0", "/models/engines/vllm-0-34-0#trials", "trial:7", 5 * GIB, 7]);
-    expect(placement([w], [], []).holders[0].key).toBe("app:21");
+    expect(placement([w], [], []).holders[0].key).toBe("workload:21");
   });
 
   it("FY-WEB-895 Edit names the chosen engine's last trial (or that it was never tried), never as a gate", () => {

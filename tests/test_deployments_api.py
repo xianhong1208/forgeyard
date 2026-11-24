@@ -16,7 +16,7 @@ from forgeyard.workloads import state as wstate
 from tests.conftest import add_user, sign_in
 from tests.model_helpers import FakeHF, gguf_repo, qwen4b_repo, tiny_repo
 from tests.test_scheduler import MODELS, deploy, seed_catalog
-from tests.workload_helpers import make_node
+from tests.workload_helpers import create_workload, make_node
 
 PW = "quiet-meadow-4821"
 
@@ -138,13 +138,11 @@ def test_fy_dep_003_deployment_expands_into_workload_and_route(owner):
     runs = w["replica_list"][0]["runs"]
     assert runs["type"] == "container" and runs["command"] is None
     assert runs["image"].startswith("ghcr.io/speaches-ai/speaches:0.8.3-cuda@sha256:")  # what the agent runs
-    bad = {"name": "x", "kind": "service", "runtime": {"type": "model", "recipe": "vllm", "model": "qwen3-4b"}}
-    assert owner.post("/api/workloads", json=bad).json()["detail"]["message"].startswith("runtime: model workloads")
     assert owner.post("/api/deployments", json={"name": "asr2", "model": "faster-whisper-small", "recipe": "faster-whisper",
                                                 "served_name": "whisper-small"}).status_code == 409
     assert owner.post("/api/deployments", json={"name": "asr", "model": "faster-whisper-small",
                                                 "recipe": "faster-whisper"}).status_code == 409
-    assert owner.delete(f"/api/workloads/{w['id']}").status_code == 409
+    assert owner.delete(f"/api/workloads/{w['id']}").status_code == 410  # 1.5.3 (#89): through the deployment
     assert owner.delete(f"/api/deployments/{d['id']}").status_code == 200
     db = new_session()
     try:
@@ -204,9 +202,9 @@ def test_fy_dep_006_desired_state_for_new_and_old_agents(owner):
     cpu = make_node("cpu", features=MODELS, runtime_info={"process": {"ok": True}, "container": {"ok": False}})
     deploy(owner, "small", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})
     old = make_node("m2", features=("workloads",))
-    owner.post("/api/workloads", json={"name": "web", "kind": "service", "machine_id": old,
-                                       "runtime": {"type": "process", "command": "true"}, "ports": [{"name": "http"}],
-                                       "health": {"type": "tcp"}})
+    create_workload(owner, {"name": "web", "kind": "service", "machine_id": old,
+                            "runtime": {"type": "process", "command": "true"}, "ports": [{"name": "http"}],
+                            "health": {"type": "tcp"}})
     db = new_session()
     try:
         rep = wstate.desired_message(db, cpu, 1)["replicas"][0]
@@ -326,9 +324,8 @@ def test_fy_dep_009_a_model_workload_names_the_deployment_that_created_it(owner)
     seed_catalog()
     make_node("a100", allowlist=[4], features=MODELS)
     d = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
-    plain = owner.post("/api/workloads", json={"name": "web", "kind": "service", "runtime": {
+    create_workload(owner, {"name": "web", "kind": "service", "runtime": {
         "type": "process", "command": "python3", "args": ["-m", "http.server", "${PORT}"]}, "ports": [{"name": "http"}]})
-    assert plain.status_code == 201, plain.text
     listed = {w["name"]: w for w in owner.get("/api/workloads").json()["workloads"]}
     assert listed["embed"]["deployment"] == {"id": d["id"], "name": "embed", "gpus": 1} and listed["embed"]["deployment_id"] == d["id"]
     assert "deployment" not in listed["web"]
@@ -337,33 +334,28 @@ def test_fy_dep_009_a_model_workload_names_the_deployment_that_created_it(owner)
 
 
 def test_fy_dep_010_a_deployments_workload_is_stopped_started_and_deleted_through_the_deployment(owner):
-    """FY-DEP-010 (1.4, #36): stop, start and delete on a deployment's own workload are refused with 409
-    managed_by_deployment, naming the deployment, and change nothing; the deployment's own buttons still
-    work, and so do a plain workload's."""
+    """FY-DEP-010 (1.4, #36; 1.5.3, #89): stop, start and delete on a deployment's own workload are refused (410
+    apps_removed since those routes went with apps; 409 managed_by_deployment before), naming the deployment, and
+    change nothing; the deployment's own buttons still work."""
     seed_catalog()
     make_node("a100", allowlist=[4], features=MODELS)
     d = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
     wid = d["workload"]["id"]
     for method, path in (("post", f"/api/workloads/{wid}/stop"), ("delete", f"/api/workloads/{wid}")):
         r = getattr(owner, method)(path)
-        assert r.status_code == 409, (path, r.status_code)
+        assert r.status_code == 410, (path, r.status_code)
         detail = r.json()["detail"]
-        assert detail["code"] == "managed_by_deployment" and detail["deployment"] == {"id": d["id"], "name": "embed"}
+        assert detail["code"] == "apps_removed" and detail["deployment"] == {"id": d["id"], "name": "embed"}
         assert "deployment embed" in detail["message"]
     w = owner.get(f"/api/workloads/{wid}").json()["workload"]
     assert w["desired_state"] == "running"
     assert owner.get(f"/api/deployments/{d['id']}").status_code == 200
     assert owner.post(f"/api/deployments/{d['id']}/stop").status_code == 200
     r = owner.post(f"/api/workloads/{wid}/start")
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "managed_by_deployment"
+    assert r.status_code == 410 and r.json()["detail"]["deployment"] == {"id": d["id"], "name": "embed"}
     assert owner.get(f"/api/workloads/{wid}").json()["workload"]["desired_state"] == "stopped"
     assert owner.delete(f"/api/deployments/{d['id']}").status_code == 200
     assert owner.get(f"/api/workloads/{wid}").status_code == 404
-    plain = owner.post("/api/workloads", json={"name": "web", "kind": "service", "runtime": {
-        "type": "process", "command": "python3", "args": ["-m", "http.server", "${PORT}"]}, "ports": [{"name": "http"}]})
-    pid = plain.json()["workload"]["id"]
-    assert owner.post(f"/api/workloads/{pid}/stop").status_code == 200
-    assert owner.delete(f"/api/workloads/{pid}").status_code == 200
 
 
 def test_fy_dep_011_a_deployment_says_what_its_model_takes_besides_text(owner):

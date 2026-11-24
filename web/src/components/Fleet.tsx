@@ -20,7 +20,7 @@ import { useEffect, useMemo } from "react";
 import { Link } from "react-router";
 
 import {
-  MACHINE_KIND, appTitle, memoryLabel, placement, share, uniqueHolders,
+  MACHINE_KIND, workloadTitle, memoryLabel, placement, share, uniqueHolders,
   type CardMemory, type Holder, type MachineKind, type ModelKind, type Placement,
 } from "../lib/fleet";
 import { useT } from "../i18n/react";
@@ -99,7 +99,7 @@ export function HolderChips({ list, max, empty, link = true }: { list: Holder[];
   return (
     <div className="holder-chips">
       {shown.map((h) => {
-        const title = h.trial ? `${h.name} · ${h.trial.model}` : h.kind === "workload" ? appTitle(h.name) : `${h.deployment?.model.name ?? h.name}`;
+        const title = h.trial ? `${h.name} · ${h.trial.model}` : h.kind === "workload" ? workloadTitle(h.name) : `${h.deployment?.model.name ?? h.name}`;
         return link && h.href ? (
           <Link key={h.key} to={h.href} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></Link>
         ) : (

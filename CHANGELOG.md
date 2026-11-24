@@ -6,7 +6,67 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **Apps, their API, the app templates and the gateway's `/x/` are removed (1.5.3, #89).** They were deprecated in
+  1.4 (#88), with a `Deprecation` header on every answer and a Setup health warning while any app existed. An app was
+  a workload that is not a model deployment's: your own container or process, made with `POST /api/workloads`
+  (perhaps from a template) and perhaps exposed at `/x/<name>/`. Forgeyard runs and manages models; the workload
+  engine stays (every model deployment and engine trial runs on it), only apps go. This is a breaking change in a
+  patch release, announced in 1.4; read this before upgrading a server that still has apps.
+  - **Does it affect you?** Only if your server still has apps, or a program calls `/x/`, the templates or
+    `POST /api/workloads`, or an API key has an `/x/` setting other than `none`. Model deployments, their routes,
+    the API keys themselves, `/v1` and the console are unaffected.
+  - **Check before you upgrade.** On the running 1.5.2 server, `GET /api/workloads` lists every workload: an app is
+    one whose `runtime` is not `model`; `GET /api/keys?all=true` shows each key's `workloads` (anything but `none`
+    loses its `/x/` access). Or, with the 1.5.3 code and the server stopped, `python -m forgeyard check-apps`
+    reads the database without changing it, lists what the upgrade will remove and exits with 1 when there is
+    anything (`--json` for scripts; in Docker: `docker run --rm -v <data volume>:/data tonyhuang1101/forgeyard:1.5.3
+    python -m forgeyard check-apps`, with the same `DATABASE_URL` as the server for PostgreSQL). The guide's
+    reference has the commands ([Apps (removed)](docs/guide/reference.md#apps-removed)).
+  - **Use instead:** a model deployment (a model Forgeyard has no engine for runs with a custom engine, **Models →
+    Engines**); for the vision templates, vision models from **Models** (the built-in vision engine runs detection,
+    segmentation, depth and image classification), called at `/v1/vision/<task>`.
+  - **What the upgrade does** (migration `0019_remove_apps`, at the first start of 1.5.3): it writes one audit entry
+    per app, `workload.removed_in_upgrade` (actor `forgeyard`): its name, kind, runtime, image or command, ports,
+    the **names** of its environment variables (never their values), GPUs, machine, who made it and when, where it
+    was exposed at `/x/`, and where its replicas ran; then deletes the apps with their replicas and events. Nothing
+    is killed by force: a machine's agent stops and removes the app's container or process the moment it is next
+    sent its work list (on reconnecting to the upgraded server; a machine that is offline then, when it comes back),
+    as a deleted app always was. It writes one entry per API key whose `/x/` setting was not `none`,
+    `api_key.x_access_removed` (the key keeps working for models), and drops `api_keys.workloads`,
+    `api_keys.workload_list`, `api_keys.workloads_locked_by` and `workloads.gateway`. A model deployment's workload
+    and an engine trial's are never touched. For 30 days **Setup health** says what it removed (`apps-removed`,
+    info, on Machines, linking to the audit log).
+  - **Calls to what was removed answer 410 Gone**, not 404, for the rest of 1.5.x (404 from 1.6): `POST
+    /api/workloads`, `GET /api/workloads/templates`, `PUT /api/workloads/{id}/gateway`, `POST
+    /api/workloads/{id}/stop|start`, `DELETE /api/workloads/{id}` (for a deployment's workload the answer names the
+    deployment to use instead), the console's `POST /api/playground/vision/<name>/<task>` (code `apps_removed`, in
+    `detail`), and `/x` and `/x/…` with any method (in the gateway's OpenAI error shape, `error.code`
+    `apps_removed`). Each carries `Deprecation: @1794787200`, `Link: </guide/en/reference#apps-removed>;
+    rel="deprecation"` and the release notes. A key's `workloads` sent as `none`, `null` or with an empty list is
+    accepted and means nothing; asking for any `/x/` access is 422 `apps_removed`.
+  - **The way back.** Going down from 0019 adds the four columns back (every key `none`) but cannot bring the apps
+    back: the audit log says what they were. To keep using apps, restore the backup taken before the upgrade and
+    run 1.5.2. **Take a backup before upgrading** ([Back up and restore](docs/guide/how-to.md#back-up-and-restore)).
+
+### Removed
+
+- **Apps (#89)**, as above: the apps part of `/api/workloads` (create, expose, stop, start, delete), the templates
+  (`forgeyard/workloads/templates.py`), the `/x/` passthrough (`forgeyard/gateway/passthrough.py`,
+  `forgeyard/workloads/expose.py`), the console's route to exposed vision apps, the keys' `workloads`,
+  `workload_list` and `workloads_locked_by`, the deprecation headers and log lines of 1.4
+  (`forgeyard/deprecation.py`) and the Setup health warning `apps-deprecated`. `GET /api/workloads`,
+  `GET /api/workloads/{id}` and a replica's logs stay (the console shows the model deployments' workloads with them);
+  a workload no longer has `gateway`. `GET /api/playground/vision/options` no longer lists the templates' tasks
+  (`tasks`). In the console, Machines names a workload no deployment lists (only for a moment now) as a workload, not
+  an app, and the texts that said "models and apps" say models. The baked-in models of the vision image, used only
+  by the templates, stay in the image for now (the `vision` engine always gives its model).
+
 ### Added
+
+- **`forgeyard check-apps` (#89)**: what upgrading to 1.5.3 removes (apps, keys' `/x/` access), or removed (from the
+  audit log), read only, with the server's own settings; exit code 1 when something will be removed.
 
 - **A dependency audit on every pull request** (`.github/workflows/dependency-audit.yml`): pip-audit on uv.lock's
   runtime set (every extra, no dev group) and `npm audit --omit=dev` for the web UI. Information, not a required

@@ -27,8 +27,8 @@ DOCKERHUB_NAMESPACE = "tonyhuang1101"
 REGISTRY = "docker.io"
 SERVER_REPOSITORY = "forgeyard"
 AGENT_REPOSITORY = "forgeyard-agent"
-# The vision server behind the ready-made workload templates (1.3, images/vision): tag X.Y.Z (CPU, amd64 and
-# arm64) and X.Y.Z-cuda (NVIDIA, amd64).
+# The vision server (images/vision) the built-in `vision` engine runs (1.4): tag X.Y.Z (CPU, amd64 and arm64) and
+# X.Y.Z-cuda (NVIDIA, amd64). (It began as the image of the 1.3 workload templates, removed with apps in 1.5.3.)
 VISION_REPOSITORY = "forgeyard-vision"
 # A local build of the agent image (Dockerfile.agent) while nothing is published.
 LOCAL_AGENT_IMAGE = AGENT_REPOSITORY
@@ -90,7 +90,7 @@ def agent_image(setting: str, version: str, namespace: str | None = None) -> Age
 
 def vision_image(version: str, variant: str = "cpu", namespace: str | None = None) -> str:
     """The vision server's image for a server of `version`: the published one (X.Y.Z, or X.Y.Z-cuda), else
-    a local build's tag (forgeyard-vision:X.Y.Z). For the 1.3 workload templates and a custom recipe's
-    `forgeyard_image`; the built-in `vision` recipe pins its image by digest instead (1.4.1, #113)."""
+    a local build's tag (forgeyard-vision:X.Y.Z). For a custom recipe's `forgeyard_image`; the built-in `vision`
+    recipe pins its image by digest instead (1.4.1, #113)."""
     repository = published_repository(VISION_REPOSITORY, namespace) or VISION_REPOSITORY
     return f"{repository}:{version}{'-cuda' if variant == 'cuda' else ''}"

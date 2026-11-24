@@ -122,7 +122,6 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種推論引擎拿到什麼、音訊長度 |
 | `forgeyard/gateway/imagegen.py` | 圖片生成：檢查請求、每個部署的上限、每種推論引擎拿到什麼、佇列、回應與圖片尺寸 |
 | `forgeyard/gateway/videogen.py`、`videojobs.py` | 影片生成：檢查請求、每個部署的上限、工作物件；工作留在它的副本上、清掃器、過期、內容與用量 |
-| `forgeyard/gateway/passthrough.py` | `/x/<name>` 的通用直通：拒絕哪些路徑、拿掉與強制哪些標頭、以原始位元組轉送回應、限制與用量 |
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
@@ -144,11 +143,10 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `.github/workflows/dockerhub-login.yml`, `scripts/dockerhub_check.py` | 每次推送到 `dev` 與 `main` 時，確認 Docker Hub secrets 能登入且可以推送（[發布之前](#發布之前)） |
 | `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](guide/zh-TW/how-to.md#從頭到尾檢查一台伺服器)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
-| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查應用程式看到哪張 NVIDIA GPU |
+| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查行程看到哪張 NVIDIA GPU |
 | `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
-| `images/vision/` | 應用程式範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
-| `scripts/accept_x.py` | `/x/` 直通在真實硬體上的驗收（也是 `accept_all.py` 的 `passthrough` 群組） |
+| `images/vision/` | `vision` 配方執行的 vision server（偵測、分割、深度、圖片分類）：Dockerfile、固定版本的模型與相依套件、smoke test |
 | `scripts/accept_scale.py` | 閒置時休眠、喚醒和自動副本數在真實硬體上的驗收（也是 `accept_all.py` 的 `scale` 群組；[做法](guide/zh-TW/how-to.md#檢查休眠喚醒和自動副本數)） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

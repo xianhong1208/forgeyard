@@ -1,7 +1,7 @@
 // The Playground's vision panel (1.4, #86; one picker since #100): vision models, the deployments of detection, SAM 2 and depth models,
 // called through /api/playground/vision/<task> with the model's name (the /v1 gateway path) as the signed-in
-// person. The exposed vision apps of 1.3 (workload templates) are not offered: apps left the console in 1.4
-// (#88; deprecated, they keep running at /x/ until 1.5), and the options no longer list them.
+// person. (The exposed vision apps of 1.3, made from the workload templates, left the console in 1.4 (#88) and were
+// removed in 1.5.3 (#89).)
 
 import { labels, t } from "../i18n/core";
 
@@ -17,7 +17,6 @@ export type VisionModel = {
 
 export type VisionOptions = {
   models?: VisionModel[];
-  tasks: { task: VisionTask; title: string; template: string; model: string }[];
 };
 
 export type Detection = { label: string; score: number; box: [number, number, number, number] };

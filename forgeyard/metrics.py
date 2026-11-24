@@ -10,8 +10,8 @@ recipe label a recipe's name.
 No metric carries an API key, a key id, a user name, a prompt or a provider's model id. As a last guard, a label
 that has seen MAX_VALUES different values already takes `_other`.
 
-Requests are counted where their usage is (forgeyard/gateway/proxy.py `record`, the `/x/` passthrough and video
-jobs), so the two never disagree. What describes the state now (replicas by state, machines, GPU memory, the
+Requests are counted where their usage is (forgeyard/gateway/proxy.py `record` and video jobs), so the two never
+disagree. What describes the state now (replicas by state, machines, GPU memory, the
 waiting line, budget spend) is read when Prometheus scrapes, by `_State`, instead of being kept up to date.
 
 Recording never raises: a metrics bug must not fail a request.

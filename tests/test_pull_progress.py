@@ -490,13 +490,13 @@ def test_fy_pull_018_the_server_shows_pull_progress_without_an_event_per_step(ow
     A pull cancelled because the workload was stopped (not removed) says "stopped"."""
     from tests.machines_helpers import connect, joined
     from tests.test_workload_stream import online, recv_type, status
-    from tests.workload_helpers import container as ctr_spec
+    from tests.workload_helpers import container as ctr_spec, create_workload, stop_workload
 
     j = joined(owner)
     with connect(owner, j["credential"]) as ws:
         online(ws)
         recv_type(ws, "desired")
-        w = owner.post("/api/workloads", json=ctr_spec(machine_id=j["node_id"])).json()["workload"]
+        w = create_workload(owner, ctr_spec(machine_id=j["node_id"]))["workload"]
         rid = recv_type(ws, "desired")["replicas"][0]["id"]
         ws.send_json(status(rid, state="starting", reason="starting the container"))
         for n in range(1, 6):
@@ -515,7 +515,7 @@ def test_fy_pull_018_the_server_shows_pull_progress_without_an_event_per_step(ow
         assert rep["reason"] == "pulling the image: 0.50 of 1.00 GiB (50%)"
         pulls = [e for e in got["events"] if "pulling the image" in e["message"]]
         assert len(pulls) == 1, got["events"]
-        assert owner.post(f"/api/workloads/{w['id']}/stop").status_code == 200
+        stop_workload(w["id"])
         recv_type(ws, "desired")
         ws.send_json({"v": 1, "type": "status", "full": False, "replicas": [
             {"id": rid, "generation": 1, "state": "stopped", "reason": "cancelled: the workload was removed"}]})

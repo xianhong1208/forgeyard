@@ -683,23 +683,39 @@ def offline_with_replicas(ctx: Context) -> Iterator[Finding]:
                           scope=f"machine:{n.id}", pages=("machines", "serving"))
 
 
-@check
-def apps_deprecated(ctx: Context) -> Iterator[Finding]:
-    """V51 (1.4, #88): apps (workloads that are not models) are deprecated and go in 1.5, with /x/ and the
-    templates. Said while any app exists, so nobody learns it from the upgrade."""
-    from forgeyard import deprecation
+# How long Setup health says what the 1.5.3 upgrade removed (the audit log keeps it for good).
+APPS_REMOVED_DAYS = 30
 
-    apps = ctx.db.scalars(select(Workload.name).where(Workload.runtime != "model").order_by(Workload.name)).all()
-    if not apps:
+
+@check
+def apps_removed(ctx: Context) -> Iterator[Finding]:
+    """V51 (1.5.3, #89; was apps-deprecated in 1.4): the upgrade removed apps (workloads that were not models) and
+    the API keys' /x/ access, and wrote what it removed in the audit log. Said for a month after it did, so nobody
+    learns it only from a program that stopped working."""
+    from forgeyard import removed
+    from forgeyard.db import AuditEvent
+
+    since = ctx.now - timedelta(days=APPS_REMOVED_DAYS)
+    rows = ctx.db.execute(select(AuditEvent.action, AuditEvent.target)
+                          .where(AuditEvent.action.in_((removed.AUDIT_APP, removed.AUDIT_KEY)), AuditEvent.at >= since)
+                          .order_by(AuditEvent.id)).all()
+    apps = [t or "?" for a, t in rows if a == removed.AUDIT_APP]
+    keys = [t or "?" for a, t in rows if a == removed.AUDIT_KEY]
+    if not apps and not keys:
         return
-    yield Finding("apps-deprecated", "warning",
-                  f"{len(apps)} app{'s' if len(apps) != 1 else ''} will stop working in Forgeyard {deprecation.REMOVED_IN}",
-                  f"{_names(apps)} {'is an app' if len(apps) == 1 else 'are apps'}: a workload that is not a model. Apps, "
-                  "their API (/api/workloads, the templates) and the gateway's /x/ are deprecated and removed in "
-                  f"{deprecation.REMOVED_IN}, and the console no longer shows them. Deploy what you need as a model "
-                  "instead (a custom engine runs a model Forgeyard has no engine for), then delete the apps "
-                  "with DELETE /api/workloads/<id>.",
-                  f"{REFERENCE}#apps-deprecated", "What changes", pages=("machines",))
+    parts = []
+    if apps:
+        parts.append(f"stopped and removed {_plural(len(apps), 'app', 'apps')} ({_names(apps)})")
+    if keys:
+        parts.append(f"took /x/ access from {_plural(len(keys), 'API key', 'API keys')} ({_names(keys)})")
+    yield Finding("apps-removed", "info",
+                  f"The {removed.REMOVED_IN} upgrade removed {_plural(len(apps), 'app', 'apps')}" if apps else
+                  f"The {removed.REMOVED_IN} upgrade removed /x/ access from {_plural(len(keys), 'API key', 'API keys')}",
+                  f"Apps, the templates and the gateway's /x/ were removed in Forgeyard {removed.REMOVED_IN}. The upgrade "
+                  f"{' and '.join(parts)}; the audit log has one entry for each, with what it was (actions "
+                  f"{removed.AUDIT_APP} and {removed.AUDIT_KEY}). Deploy what you need as a model instead (a custom "
+                  "engine runs a model Forgeyard has no engine for).",
+                  "/audit", "Open the audit log", pages=("machines",))
 
 
 # --- models and deployments

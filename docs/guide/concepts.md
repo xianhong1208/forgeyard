@@ -32,7 +32,7 @@ While a machine is offline, requests no longer go to its replicas. When it stays
 deployment's own rules; a deployment **pinned** to that machine waits for it. When the machine comes back, its
 agent stops what moved away. See [When a machine stays offline](how-to.md#when-a-machine-stays-offline).
 
-Stopping or restarting the agent **leaves its models and apps running**: a restarted agent finds them and
+Stopping or restarting the agent **leaves its models running**: a restarted agent finds them and
 takes them over. That is why the installed service uses `KillMode=process`.
 
 The agent reads its settings from `/etc/forgeyard/agent.toml`, `FORGEYARD_*` environment variables
@@ -41,8 +41,8 @@ and flags ([all of them](reference.md#agent-settings)).
 The **Machines** page shows one tile per machine, with a mark for its kind: **NVIDIA GPU**,
 **AMD GPU**, **AMD APU** (an AMD GPU that shares the system memory, such as the Radeon 8060S) or
 **CPU only**. Its cards are a row of slots filled from the bottom: what Forgeyard reserved, then
-other use (other programs on the card, and apps that declare no memory), then free.
-The tile also says how much memory is free, how many models and apps run there, and their
+other use (other programs on the card), then free.
+The tile also says how much memory is free, how many models run there, and their
 names. Above the tiles, a summary counts the machines of each kind and the offline ones: *1 NVIDIA
 machine*, *2 CPU-only machines* (a machine, however many cards it has). Choose a machine for its own page: a **memory map** that splits each card by what holds it
 (named, with what it reserved), what runs there, its GPU access and runtimes, and its agent. Admins
@@ -85,24 +85,21 @@ when sharing would help:
 
 Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
 
-## Apps (deprecated)
+## Apps (removed)
 
 Before 1.4 the console could also run **apps**: programs of your own (a container or a process,
 a service or a one-off task) on your machines, optionally exposed at `/x/<name>` with API keys.
-Forgeyard is about running and managing models, so in 1.4 apps left the console, and **in 1.5 they
-are removed**: their part of the API (`/api/workloads`), the templates and the gateway's `/x/`. Until
-then they keep working through the API only, and say so: every answer carries a `Deprecation` header,
-the server log warns (at most once an hour), and **Setup health** warns while any app exists. Details
-are in the [reference](reference.md#apps-deprecated).
+Forgeyard is about running and managing models, so apps left the console in 1.4 and were **removed in
+1.5.3**, with the templates and the gateway's `/x/`: their addresses answer 410, and the upgrade removed the
+apps that were left, writing each one in the audit log. Details, and how to check before upgrading, are in
+the [reference](reference.md#apps-removed).
 
 - To serve a model, deploy it under **Serving**. Object detection, segmentation and depth are
   [vision models](#vision-models) since 1.4.
 - A model that no built-in engine runs gets a **custom engine** (**Models → Engines → Add a
   custom engine**): a recipe like the built-in ones, for its container image or program.
 
-**Machines** still names an app that holds a card, so a card in use is never shown free. A model
-deployment runs as a workload too (of runtime `model`): that is how models run, and it is not
-deprecated.
+A model deployment runs as a workload (of runtime `model`): that is how models run, and it stays.
 
 ## Models, engines and estimates
 
@@ -179,7 +176,7 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
 ## Deployments and the gateway
 
 A **deployment** runs one model with one engine (recipe), as one or more replicas. Its replicas run as a
-workload of runtime `model`, seen only on the deployment's page (not on **Apps**). Forgeyard:
+workload of runtime `model`, seen only on the deployment's page. Forgeyard:
 
 1. places each replica where it fits. Among the machines that fit, in this order:
    - a machine that **could not reach** a source the replica would download from there (the model's
@@ -561,7 +558,7 @@ have the details.
 | Role | Can |
 |---|---|
 | `admin` | everything: users, machines and their GPU access, the model catalog and engines, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
-| `operator` | run apps and deploy models; everything a user can |
+| `operator` | deploy models; everything a user can |
 | `user` | look around, use deployed models in the Playground and with their own API keys, see their own usage |
 
 The **owner** is the first account. It is always an admin and cannot be demoted, disabled or

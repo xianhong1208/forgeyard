@@ -323,9 +323,9 @@ def test_fy_gacc_009_setup_health_shows_an_error_with_the_fix(owner):
 
 
 def _pending(c, spec) -> tuple[int, dict]:
-    r = c.post("/api/workloads", json=spec)
-    assert r.status_code == 201, r.text
-    w = r.json()["workload"]
+    from tests.workload_helpers import create_workload
+
+    w = create_workload(c, spec)["workload"]
     return w["id"], w["replica_list"][0]
 
 
