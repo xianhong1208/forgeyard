@@ -32,8 +32,7 @@ name: vllm-omni-image
 title: vLLM-Omni (images)
 description: >-
   Text to image on NVIDIA GPUs with vLLM-Omni: diffusers pipelines such as Z-Image-Turbo, Stable
-  Diffusion XL and FLUX.1-schnell, behind OpenAI's /v1/images/generations (base64 images); edit pipelines such as
-  FLUX.2 [klein] behind /v1/images/edits.
+  Diffusion XL and FLUX.1-schnell, behind OpenAI's /v1/images/generations (base64 images).
 engine: vllm-omni
 version: "0.32.0"
 tasks: [image]

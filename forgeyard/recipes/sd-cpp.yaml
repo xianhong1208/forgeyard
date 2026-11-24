@@ -49,7 +49,7 @@ title: stable-diffusion.cpp
 description: >-
   Text to image with stable-diffusion.cpp: AMD GPUs and APUs (Vulkan) and NVIDIA GPUs in a container,
   or the CPU as a plain process. GGUF and single-file models (Stable Diffusion 1.5 / XL, Z-Image,
-  FLUX.1), behind OpenAI's /v1/images/generations; edit models (FLUX.2 [klein]) behind /v1/images/edits.
+  FLUX.1), behind OpenAI's /v1/images/generations.
 engine: stable-diffusion.cpp
 version: master-1088
 tasks: [image]
