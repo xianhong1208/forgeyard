@@ -8,6 +8,29 @@ version until 1.0.
 
 ### Added
 
+- **An admin learns when a machine's GPUs change.** No migration: everything lives in the machine's
+  `runtime_info` and the audit log.
+  - **GPUs the agent does not see.** At each connection the agent counts the host's GPUs on its PCI bus
+    (`/sys/bus/pci/devices`, which a container sees whole: NVIDIA 3D/VGA controllers; AMD display, 3D and accelerator
+    functions, an APU's graphics included; never audio functions, NVSwitches or SR-IOV virtual functions) and compares
+    them with the ones NVML or amd-smi lists. It sends `runtime_info.gpu_census` (`host_gpus`, `visible_gpus`,
+    `missing` PCI addresses, per vendor, and `limited_by` when its environment or its container's `--gpus "device=…"`
+    limits it to some on purpose); servers before 1.5.4 drop it. Setup health warns `machine-gpus-hidden` (*gpu-01:
+    the host has 9 NVIDIA GPUs but the agent sees 8*) only when the agent sees some but not all of a vendor's GPUs and
+    nothing limits it, linking to the machine's update command. An agent that sees none of them (a CPU-only agent on a
+    GPU host) or was limited on purpose is not warned; the machine's GPU access section says so quietly (and shows the warning for the
+    case Setup health warns about).
+  - **GPUs added or removed.** The server compares each report with the GPUs it last trusted, by UUID (an AMD card by
+    its PCI address), never by index; a vendor whose collector failed in that report changes nothing, and a machine's
+    first report (also the first after upgrading) only sets what is known. A change is audited as `node.gpus_changed`
+    (added / removed, model, memory, and the deployments placed on a removed card), kept in
+    `runtime_info.gpu_changes` (the last 20, listed under the machine's GPU access) and, for 7 days, in Setup health:
+    `machine-gpu-not-allowed` (a new GPU on a machine with a GPU access list stays not allowed, as before, until an
+    admin ticks it), `machine-gpu-added` (no list: placement already uses it) and `machine-gpu-removed` (with the
+    deployments placed on it, which keep their place until restarted).
+  - The guide has [Add or remove a GPU on a machine](docs/guide/how-to.md#add-or-remove-a-gpu-on-a-machine) and the
+    reference [GPUs added, removed or not seen](docs/guide/reference.md#gpus-added-removed-or-not-seen).
+
 - **The `transformers` engine (1.5.4, #141 and #144; part 1: the engine and its recipe).** Forgeyard's vision server
   (the same `forgeyard-vision` image, no new dependency) gains `--task embed` (image and text embeddings with CLIP,
   SigLIP, SigLIP 2 and DINOv2: OpenAI's `/v1/embeddings` plus typed `{"text"}` / `{"image"}` items, vectors

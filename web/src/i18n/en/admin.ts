@@ -96,6 +96,7 @@ export default {
   "admin.action.hf_token.set": "Hugging Face token set",
   "admin.action.machine.gpu_allowlist_changed": "GPUs Forgeyard may use changed",
   "admin.action.machine.gpu_keys_changed": "GPU keys changed",
+  "admin.action.node.gpus_changed": "GPUs added or removed",
   "admin.action.machine.join_refused": "Join refused",
   "admin.action.machine.join_token_cancelled": "Join token cancelled",
   "admin.action.machine.join_token_created": "Join token created",
