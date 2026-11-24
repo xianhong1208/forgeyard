@@ -21,6 +21,23 @@ version until 1.0.
   recipe's pin moves to the 1.5.4 image, deploying on it answers 422 `vision_image_too_old`. The gateway's public
   shapes, the catalog's rules and the console follow.
 
+### Changed
+
+- **The machine page's update command finds the NVIDIA devices on the host when it runs.** For an NVIDIA agent
+  with every GPU (`--gpus all`) it now has the same `$(for d in …)` line as the Add-a-machine Docker command instead of
+  one `--device /dev/nvidiaN` per node the running agent had: a GPU installed after the agent started is passed too,
+  and one command fits every NVIDIA machine whatever its GPU count. The shell expands the line into plain `--device`
+  options before `docker run` starts, so Docker still records each node and the agent keeps its GPUs after the host's
+  `systemctl daemon-reload` (#202). An agent limited to some GPUs (`--gpus "device=…"`, a count, or
+  `NVIDIA_VISIBLE_DEVICES`) keeps the nodes it reported, by name, and a reported node the line would not find (another
+  `/dev/nvidia…` name) is kept by name; the agent now reports such nodes too. AMD and CPU commands are unchanged. The
+  console says under the command, in both languages, that it passes every NVIDIA device of the host and that the
+  machine's GPU access setting still decides which GPUs Forgeyard uses. `GET /api/machines/{id}/agent-update` has a
+  new `nvidia_devices` field (`host`, `listed` or null).
+
+- The update notes say models, not "models and apps" (the server's notes under the command).
+
+
 ## [1.5.3] — 2026-11-24
 
 Apps are removed (#89): their API, the app templates and the gateway's `/x/` passthrough. They were deprecated in
