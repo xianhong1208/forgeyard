@@ -30,7 +30,7 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, EngineTrial, Node, get_db, new_session, utcnow
-from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
+from forgeyard.models import (catalog, encoders, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
                               recommended as rec, scheduler, sources, textcls, vision)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
@@ -70,8 +70,17 @@ def _engine_args(raw) -> dict:
     return out
 
 
+def serving(fmt: Optional[str], task: Optional[str], meta: Optional[dict],
+            all_recipes: dict[str, tuple[Recipe, str]]) -> list[str]:
+    """The recipes that serve a model of this format and task (any task when None), the transformers server's only for
+    the models it runs and after the others (1.5.4, forgeyard/models/encoders.py)."""
+    names = [n for n, (r, _) in all_recipes.items() if fmt in r.formats and (task is None or task in r.tasks)
+             and (meta is None or task is None or encoders.offered(r, task, meta))]
+    return encoders.order(names, all_recipes, task)
+
+
 def compatible(model: CatalogModel, all_recipes: dict[str, tuple[Recipe, str]]) -> list[str]:
-    return [n for n, (r, _) in all_recipes.items() if model.format in r.formats and model.task in r.tasks]
+    return serving(model.format, model.task, model.meta or {}, all_recipes)
 
 
 def model_summary(m: CatalogModel) -> dict:
@@ -274,7 +283,7 @@ def suggest(db: DbSession, meta: dict, task: Optional[str], recipe_name: Optiona
 
     all_r = catalog.all_recipes(db)
     fmt = meta.get("format")
-    usable = [n for n, (r, _) in all_r.items() if fmt in r.formats and (task is None or task in r.tasks)]
+    usable = serving(fmt, task, meta, all_r)
     if not usable:
         what = f"{fmt} {TASK_LABEL.get(task, task).lower()}" if task else str(fmt)
         return {"recipe": None, "recipes": [], "error": f"No recipe serves {what} models."}
@@ -319,7 +328,7 @@ def inspect_model(body: InspectPreviewIn, _: Caller = Depends(require_admin), db
     all_r = catalog.all_recipes(db)
     fmt = meta.get("format")
     task = body.task if body.task in recipes.TASKS else meta.get("task_hint")
-    fits = [n for n, (r, _) in all_r.items() if fmt in r.formats and (task is None or task in r.tasks)]
+    fits = serving(fmt, task, meta, all_r)
     preview = {k: v for k, v in meta.items() if k not in ("files",)}
     preview["file_count"] = len(meta.get("files") or [])
     preview.update(media_out(meta, fmt))
@@ -373,7 +382,7 @@ def search_hub(q: str = Query(default="", max_length=200), task: Optional[str] =
     for r in results:
         r = dict(r)
         r["in_catalog"] = have.get(r["source"])
-        r["recipes"] = [n for n, (rc, _) in all_r.items() if r["format"] in rc.formats and (r["task"] is None or r["task"] in rc.tasks)]
+        r["recipes"] = serving(r["format"], r["task"], None, all_r)
         out.append(r)
     return {"results": out, "cached": cached, "endpoint": s.hf_endpoint.rstrip("/")}
 

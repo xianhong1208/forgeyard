@@ -44,10 +44,11 @@ cd web && npm audit --omit=dev
 `scripts/pin_images.py` 對照 registry 檢查這兩者（有任何不同就以 1 結束）；`--write` 重新解析 tag，改寫配方與 lock。
 
 - **升級推論引擎：**改配方裡的 tag，執行 `pin_images.py --write`，檢查 diff，跑測試。
-- **Forgeyard 自己的視覺映像檔**（`images/vision`，配方 `vision`）也一樣固定（1.4.1）。release 會用該版的程式碼發布
-  `forgeyard-vision:X.Y.Z` 與 `X.Y.Z-cuda`，所以 digest 要在打 tag 之後才知道：**改過 `images/vision` 的 release 之後**，
-  另開一個小 PR 進 `dev`，把 `forgeyard/recipes/vision.yaml` 的兩個 tag 改成新版本，再執行 `pin_images.py --write`
-  （FY-VIS-001 與 FY-VIS-019 寫著固定的 reference）。沒改到它的 release 就保留原本的固定：單是升級伺服器，視覺模型執行的映像檔永遠不會變。
+- **Forgeyard 自己的視覺映像檔**（`images/vision`，配方 `vision` 與 1.5.4 起的 `transformers`）也一樣固定（1.4.1）。release
+  會用該版的程式碼發布 `forgeyard-vision:X.Y.Z` 與 `X.Y.Z-cuda`，所以 digest 要在打 tag 之後才知道：**改過 `images/vision`
+  的 release 之後**，另開一個小 PR 進 `dev`，把 `forgeyard/recipes/vision.yaml` **和** `forgeyard/recipes/transformers.yaml`
+  （同一個映像檔）的兩個 tag 改成新版本，再執行 `pin_images.py --write`（FY-VIS-001、FY-VIS-019 與 FY-TFM-001 寫著固定的
+  reference；FY-TFM-004 在固定的映像檔到 1.5.4 之前預期會被舊映像檔拒絕）。沒改到它的 release 就保留原本的固定：單是升級伺服器，視覺模型執行的映像檔永遠不會變。
 
 ## 發布之前
 
@@ -146,7 +147,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查行程看到哪張 NVIDIA GPU |
 | `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
-| `images/vision/` | `vision` 配方執行的 vision server（偵測、分割、深度、圖片分類）：Dockerfile、固定版本的模型與相依套件、smoke test |
+| `images/vision/` | `vision` 配方執行的 vision server（偵測、分割、深度、圖片分類），1.5.4 起也是 `transformers` 配方的（圖片嵌入、文字分類）：Dockerfile、固定版本的模型與相依套件、smoke test 和它的迷你測試模型（`tinymodels.py`） |
 | `scripts/accept_scale.py` | 閒置時休眠、喚醒和自動副本數在真實硬體上的驗收（也是 `accept_all.py` 的 `scale` 群組；[做法](guide/zh-TW/how-to.md#檢查休眠喚醒和自動副本數)） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

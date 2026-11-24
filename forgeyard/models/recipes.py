@@ -351,6 +351,10 @@ class Estimate(_M):
     # Weights the engine holds in 16 bits whatever the file stores (vLLM-Omni casts float32 to bfloat16);
     # False: the files' own size (stable-diffusion.cpp keeps a GGUF's quantisation).
     cast_16bit: bool = False
+    # 1.5.4, method files on a CPU: the engine holds the weights in float32 whatever the file stores (Forgeyard's
+    # transformers server widens 16-bit checkpoints: half precision is several times slower on a CPU), so a 16-bit
+    # file counts twice its size there. On a GPU the files' own size.
+    cpu_float32: bool = False
     # 1.3, video generation (method diffusers): the denoiser's activations per thousand tokens of the
     # longest, largest video the deployment allows (tokens = latent frames x the frame's patches); the
     # VAE's decode is `vae_per_mp` per megapixel of one frame (it decodes a few frames at a time).

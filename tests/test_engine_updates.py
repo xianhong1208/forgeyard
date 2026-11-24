@@ -102,7 +102,8 @@ def test_fy_eup_003_a_check_finds_what_the_registries_held_on_2026_11_23(up):
     e = r["engines"]
     assert {n: x["status"] for n, x in e.items()} == {
         "faster-whisper": "up_to_date", "llama-cpp": "up_to_date", "sd-cpp": "newer_build",
-        "speaches-tts": "up_to_date", "vision": "not_checked", "vllm": "newer", "vllm-omni-image": "up_to_date",
+        "speaches-tts": "up_to_date", "transformers": "not_checked", "vision": "not_checked", "vllm": "newer",
+        "vllm-omni-image": "up_to_date",
         "vllm-omni-tts": "up_to_date", "vllm-omni-video": "up_to_date", "vllm-pooling": "newer"}
     for name in ("vllm", "vllm-pooling"):
         cands = e[name]["candidates"]
@@ -134,7 +135,7 @@ def test_fy_eup_003_a_check_finds_what_the_registries_held_on_2026_11_23(up):
         assert e[name]["newest"] == "0.32.0" and not e[name]["candidates"]
     assert e["faster-whisper"]["newest"] == "0.8.3" and "upstream" not in e["faster-whisper"]
     assert e["llama-cpp"]["newest"] == "1.0.0"
-    assert e["vision"]["why"]["code"] == "own_image"
+    assert e["vision"]["why"]["code"] == e["transformers"]["why"]["code"] == "own_image"   # 1.5.4: the same image
     assert not any(x["errors"] for x in e.values())
     assert r["checked_by"] == "tester" and r["github_requests"] <= ev.GITHUB_MAX_CALLS
     # One tag listing per repository, however many recipes share it; only HEADs for tags (no pulls counted).
@@ -300,7 +301,7 @@ def test_fy_eup_011_egress_rules_refuse_and_every_engine_says_so(up, monkeypatch
     rules: every engine that was to be checked says "could not check" with the reason; none is skipped quietly."""
     r = ev.check_all(by="tester", allow_private=False, recipes=up.recipes())
     for name, e in r["engines"].items():
-        if name == "vision":
+        if name in ("vision", "transformers"):      # Forgeyard's own image: never checked
             continue
         assert e["status"] == "could_not_check", name
         assert "plain http is refused" in e["errors"][0]["text"]
@@ -343,7 +344,8 @@ def test_fy_eup_013_the_deadline_bounds_the_whole_check(up):
     up.requests.clear()
     r = run(up, seconds=0)
     assert up.requests == []
-    assert all("stopped after 0 s" in e["errors"][0]["text"] for n, e in r["engines"].items() if n != "vision")
+    assert all("stopped after 0 s" in e["errors"][0]["text"] for n, e in r["engines"].items()
+               if n not in ("vision", "transformers"))
 
 
 def test_fy_eup_014_github_budget_is_bounded(up, monkeypatch):

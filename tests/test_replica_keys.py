@@ -37,7 +37,7 @@ def test_fy_rk_001_builtin_recipes_name_their_engines_key_variable():
                    # stable-diffusion.cpp's sd-server has no key: the agent's key guard alone keeps its port closed.
                    "vllm-omni-image": "VLLM_API_KEY", "sd-cpp": None, "vllm-omni-video": "VLLM_API_KEY",
                    # 1.4: Forgeyard's own vision server reads its key on every path but /health.
-                   "vision": "VISION_API_KEY"}
+                   "vision": "VISION_API_KEY", "transformers": "VISION_API_KEY"}
     base = builtin_recipes()["llama-cpp"][1]
     for bad, msg in [("FORGEYARD_KEY", "cannot be used"), ("PORT", "cannot be used"), ("1BAD", "cannot be used")]:
         with pytest.raises(RecipeError, match=msg):

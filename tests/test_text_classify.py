@@ -158,7 +158,8 @@ def test_fy_tcls_005_adding_and_retasking_through_the_api(owner, hf):
     r = owner.post("/api/models", json={"name": "sentiment", "source": f"hf://{SENTIMENT}"})
     assert r.status_code == 201, r.text
     m = r.json()["model"]
-    assert m["task"] == "classify" and m["task_label"] == "Text classification" and m["recipes"] == ["vllm-pooling"]
+    assert m["task"] == "classify" and m["task_label"] == "Text classification" and \
+        m["recipes"] == ["vllm-pooling", "transformers"]     # 1.5.4: the transformers server too, listed after vLLM
     assert m["classify"] == {"architecture": "BertForSequenceClassification", "labels": 5,
                              "label_names": ["1 star", "2 stars", "3 stars", "4 stars", "5 stars"]}
     assert m["modalities"] == [] and m["summary"]["max_context"] == 512
@@ -176,7 +177,7 @@ def test_fy_tcls_005_adding_and_retasking_through_the_api(owner, hf):
     assert r.status_code == 422 and "Forgeyard read no labels" in r.json()["detail"]["message"]
     assert owner.patch(f"/api/models/{m['id']}", json={"task": "classify", "title": "Stars"}).status_code == 200
     page = owner.get("/api/models/sentiment").json()
-    assert page["model"]["classify"]["labels"] == 5 and [x["name"] for x in page["recipes"]] == ["vllm-pooling"]
+    assert page["model"]["classify"]["labels"] == 5 and [x["name"] for x in page["recipes"]] == ["vllm-pooling", "transformers"]
     # An ONNX export tagged text-classification: no safetensors config is read, so no labels: refused.
     r = owner.post("/api/models", json={"name": "onnx-cls", "source": "hf://acme/sentiment-onnx"})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "not_a_text_classifier"
@@ -201,7 +202,8 @@ def test_fy_tcls_006_a_classifier_deploys_on_the_pooling_runner_with_its_own_con
     assert not {"--convert", "--task", "--pooler-config"} & set(args)
     assert recipes.builtin_recipes()["vllm-pooling"][0].api_for("classify") == "classify"
     preview = owner.post("/api/models/inspect", json={"source": f"hf://{SENTIMENT}"}).json()
-    assert preview["recipes"] == ["vllm-pooling"] and preview["suggestion"]["params"]["context"] == 512
+    assert preview["recipes"] == ["vllm-pooling", "transformers"] and preview["suggestion"]["recipe"] == "vllm-pooling"
+    assert preview["suggestion"]["params"]["context"] == 512
     assert "error" not in preview["suggestion"]
     # The model's page says whether a copy fits each machine with the engine's defaults: the same context.
     page = owner.get("/api/models/lang").json()
@@ -366,7 +368,7 @@ def test_fy_tcls_012_searching_for_text_classifiers(owner, monkeypatch):
         body = owner.get("/api/models/search", params={"q": "x", "task": "classify"}).json()
         assert [q["pipeline_tag"] for q in fake.queries] == [["text-classification"]]
         assert [(x["id"], x["task"]) for x in body["results"]] == [(SENT["id"], "classify"), (RERANK["id"], "classify")]
-        assert body["results"][0]["recipes"] == ["vllm-pooling"]
+        assert body["results"][0]["recipes"] == ["vllm-pooling", "transformers"]   # 1.5.4: vLLM first
         body = owner.get("/api/models/search", params={"q": "x", "task": "rerank"}).json()
         assert [(x["id"], x["task"]) for x in body["results"]][0] == (RERANK["id"], "rerank")
         assert owner.get("/api/models/search", params={"task": "nope"}).json()["detail"]["message"].endswith("or classify")

@@ -10,11 +10,17 @@ to run it:
   /v1/vision/classify) any `AutoModelForImageClassification` (ViT, ConvNeXt V2, DINOv2 classifiers, …) or a
   CLIP-like model for zero-shot classification (CLIP, SigLIP, SigLIP 2, …). The gateway reaches it at
   /v1/vision/<path> by the deployment's model name.
+- **Embeddings and text classification (1.5.4, #141 and #144, the built-in `transformers` recipe):** `--task embed`
+  with a CLIP-like model (CLIP, SigLIP, SigLIP 2, …: texts and images in one space) or DINOv2 (images only), and
+  `--task classify` with any `AutoModelForSequenceClassification` model: fixed labels (DistilBERT, DeBERTa, BERT,
+  RoBERTa, XLM-R…), or zero-shot with an NLI model (bge-m3-zeroshot, roberta-zeroshot…), whose labels come with each
+  request. No code from a model's repository is run (auto_map is refused).
 - **A model baked into the image (1.3, the workload templates exposed at /x/<name>):** without `--model`,
   the task's model of models.json, fetched at a pinned revision when the image was built, so it starts
   without the network.
 
-    python app.py --task detect|segment|depth|image-classify [--model DIR --served-name NAME] [--host 0.0.0.0] [--port 8000]
+    python app.py --task detect|segment|depth|image-classify|embed|classify [--model DIR --served-name NAME]
+                  [--host 0.0.0.0] [--port 8000]
                   [--models /models] [--device cpu|cuda]
 
 Endpoints (JSON; an image is sent as a multipart file `image`, or as JSON {"image": "<base64 or data: URI>"}):
@@ -33,15 +39,37 @@ Endpoints (JSON; an image is sent as a multipart file `image`, or as JSON {"imag
     POST /v1/classify          best first; options: top_k (5; a zero-shot model: all its labels), labels (zero-shot
                                models only, and required there), template ("This is a photo of {}.", zero-shot)
 
-Only the started task's two paths answer (404 for the others). Every answer carries "model" (the served
+The transformers recipe's tasks (1.5.4) take JSON only, in the OpenAI / vLLM shapes the gateway serves:
+
+    POST /v1/embeddings        embed: {"input": "a text" | ["a text", {"text": "…"}, {"image": "<base64 or data: URI>"}, …],
+                               "encoding_format": "float" | "base64", "dimensions": <the model's own, or left out>}
+                               -> {"object": "list", "data": [{"object": "embedding", "index", "embedding"}, …],
+                               "usage": {"prompt_tokens", "total_tokens", "images", "kilopixels", "truncated_inputs"}}.
+                               Every vector is L2-normalised, in the order of `input`. Texts are cut to the model's length
+                               (CLIP 77 tokens, SigLIP 64) and counted in truncated_inputs; an image-only model (DINOv2)
+                               refuses texts (text_not_supported); at most VISION_MAX_IMAGES images (32); a URL is
+                               refused (image_url_not_supported: the gateway fetches URLs, this server never does)
+    POST /classify             classify (vLLM's shape): {"input": "a text" | [texts], "truncate_prompt_tokens": k | -1,
+    POST /v1/classify          "use_activation": true} -> {"id", "object": "list", "created", "data": [{"index", "label",
+                               "probs", "num_classes"}], "usage": {"prompt_tokens", "total_tokens", "truncated_inputs"}};
+                               probs in the model's label order. Zero-shot (an NLI model) also takes "labels": [names]
+                               (required, at most 32, no repeats), "multi_label" (false) and "hypothesis_template"
+                               ("This text is about {}."); its probs follow the request's labels, which the answer echoes
+                               ("labels", "multi_label"); texts x labels is at most VISION_MAX_PAIRS (256), too_many_pairs
+                               otherwise. A fixed-label model given labels is 400 labels_not_supported, a zero-shot one
+                               without them labels_required.
+
+GET / also says what the model takes: for embed its modalities, dimensions and text length; for classify whether it is
+zero-shot, its labels and its length. Only the started task's paths answer (404 for the others). Every answer carries "model" (the served
 name, or the baked model's repository), "ms", and for a baked model "revision". Errors:
-{"error": {"message", "code"}} with 400 (a bad image or option; labels_required: a zero-shot detector was not
+{"error": {"message", "code"}} with 400 (a bad image, input or option; labels_required: a zero-shot detector was not
 told what to find; labels_not_supported: a detector with fixed classes was given labels), 401 (a missing or wrong
-key), 413 (more than MAX_IMAGE_MB) or 500.
+key), 413 (an image larger than MAX_IMAGE_MB, or a text task's request too large for its images) or 500.
 
 **The key (1.4):** with VISION_API_KEY set (Forgeyard sets a random one per replica), every path but
 /health needs `Authorization: Bearer <that key>`, compared in constant time; without it, nothing is asked
-(the 1.3 templates, behind the agent's key guard). VISION_THREADS caps torch's CPU threads.
+(the 1.3 templates, behind the agent's key guard). VISION_THREADS caps torch's CPU threads; on a CPU the
+transformers recipe's models run in float32 (16-bit checkpoints are widened: half-precision is far slower there).
 """
 
 from __future__ import annotations
@@ -151,6 +179,28 @@ async def read_request(request: Request) -> tuple[Image.Image, dict]:
     except (binascii.Error, ValueError):
         raise Refused(400, "invalid_image", "'image' is not base64.") from None
     return decode_image(raw), body
+
+
+def max_body() -> int:
+    """The largest JSON body a text task reads: its images (base64 is 4/3 of the bytes) and some text."""
+    return env_int("VISION_MAX_IMAGES", 32, 1, 1024) * MAX_IMAGE_MB * 1024**2 * 4 // 3 + 64 * 1024**2
+
+
+async def read_json(request: Request) -> dict:
+    """A text task's JSON object (1.5.4), refused above max_body() before it is read."""
+    size = request.headers.get("content-length", "")
+    if size.isdigit() and int(size) > max_body():
+        raise Refused(413, "request_too_large", "The request is too large: send fewer or smaller images.")
+    raw = await request.body()
+    if len(raw) > max_body():
+        raise Refused(413, "request_too_large", "The request is too large: send fewer or smaller images.")
+    try:
+        body = json.loads(raw or b"null")
+    except ValueError:
+        raise Refused(400, "invalid_json", "Send a JSON object.") from None
+    if not isinstance(body, dict):
+        raise Refused(400, "invalid_json", "Send a JSON object.")
+    return body
 
 
 def number(fields: dict, name: str, default: float, low: float, high: float) -> float:
@@ -490,7 +540,438 @@ class Classify(Task):
         return {"labels": ranked(names, probs, top_k), "multi_label": bool(self.sigmoid)}
 
 
-TASKS = {"detect": Detect, "segment": Segment, "depth": Depth, "image-classify": Classify}
+# ------------------------------------------------------------------ the transformers recipe's tasks (1.5.4, #141, #144)
+# Image (and text) embeddings and text classification, the built-in `transformers` recipe: same image, other tasks.
+# Each request is JSON (no multipart), and these limits are the recipe's parameters (VISION_MAX_IMAGES,
+# VISION_MAX_PAIRS) or OpenAI's (MAX_INPUTS).
+MAX_INPUTS = 2048                  # items (texts and images) per request, OpenAI's limit for embeddings
+MAX_TEXT_CHARS = 100_000           # one text; it is cut to the model's length in tokens anyway
+TEXT_BATCH = 32                    # texts per forward pass
+IMAGE_BATCH = 8                    # images per forward pass
+PAIR_BATCH = 16                    # (text, hypothesis) pairs per forward pass, NLI zero-shot
+DEFAULT_HYPOTHESIS = "This text is about {}."
+# Image-only embedders: DINOv2 (and its registers variant), model_type -> architecture. Their vector is the
+# backbone's pooled output (the class token after the final layer norm).
+IMAGE_ONLY_EMBED = {"dinov2": "Dinov2Model", "dinov2_with_registers": "Dinov2WithRegistersModel"}
+NLI_WORDS = ("entail", "contradict")
+
+
+def env_int(name: str, default: int, low: int, high: int) -> int:
+    raw = os.environ.get(name, "")
+    try:
+        value = int(raw) if raw.strip() else default
+    except ValueError:
+        value = default
+    return min(max(value, low), high)
+
+
+def load_dtype(device: str):
+    """The weights' type: float32 on a CPU, where half-precision matrix products are several times slower (an
+    NLI pass of bge-m3-zeroshot took 1.4 s in float16 against 0.2 s in float32, four threads); the checkpoint's own
+    on a GPU."""
+    return torch.float32 if device == "cpu" else "auto"
+
+
+def remote_code(config: dict) -> bool:
+    """config.json asks for code from the repository (auto_map): never run here (trust_remote_code stays off)."""
+    return bool(config.get("auto_map"))
+
+
+def embed_family(config: dict) -> str | None:
+    """"text+image" for a CLIP-like model (ZERO_SHOT_CLASSIFY: CLIP, SigLIP, SigLIP 2, …: a text and an image in
+    one space), "image" for an image-only backbone (DINOv2), else None."""
+    if zero_shot_classifier(config):
+        return "text+image"
+    archs = {a for a in config.get("architectures") or [] if isinstance(a, str)}
+    if archs & set(IMAGE_ONLY_EMBED.values()) or (not archs and classifier_type(config) in IMAGE_ONLY_EMBED):
+        return "image"
+    return None
+
+
+def sequence_labels(config: dict) -> list[str]:
+    """A sequence classifier's label names in index order (id2label), or LABEL_i for num_labels without names."""
+    names = config.get("id2label")
+    if isinstance(names, dict) and names:
+        def index(k) -> int:
+            try:
+                return int(k)
+            except (TypeError, ValueError):
+                return 1 << 30
+        return [str(v) for _, v in sorted(names.items(), key=lambda kv: index(kv[0]))]
+    n = config.get("num_labels")
+    return [f"LABEL_{i}" for i in range(n)] if isinstance(n, int) and not isinstance(n, bool) and n > 0 else []
+
+
+def nli_ids(names: list[str]) -> tuple[int, int] | None:
+    """(entailment, contradiction) columns of an NLI head (entailment / neutral / contradiction, entailment /
+    not_entailment), or None for a classifier with fixed labels. The contradiction column is the one named so (or
+    not_entailment); with neither, transformers' zero-shot pipeline rule (the first column, or the last when
+    entailment is the first)."""
+    low = [n.lower() for n in names]
+    if not any(w in n for n in low for w in NLI_WORDS):
+        return None
+    entail = next((i for i, n in enumerate(low) if n.startswith("entail")), None)
+    if entail is None:
+        return None
+    contra = next((i for i, n in enumerate(low) if n.startswith("contradict") or n.startswith("not_entail")
+                   or n.startswith("not entail")), None)
+    if contra is None:
+        contra = len(names) - 1 if entail == 0 else 0
+    return entail, contra
+
+
+def text_classifier_problem(config: dict) -> str | None:
+    """Why a config.json is not a text classifier this server runs (None when it is): an architecture ending in
+    ForSequenceClassification with two labels or more, not a regression head."""
+    archs = [a for a in config.get("architectures") or [] if isinstance(a, str)]
+    if not any(a.endswith("ForSequenceClassification") for a in archs):
+        return "not a text classification model (no …ForSequenceClassification architecture)"
+    if len(sequence_labels(config)) < 2:
+        return "a model with one output (num_labels 1) scores pairs: it is a reranker, not a classifier"
+    if config.get("problem_type") == "regression":
+        return "a regression head predicts numbers, not labels"
+    return None
+
+
+def strict_labels(fields: dict) -> list[str] | None:
+    """A zero-shot text classifier's `labels`: a list of names in the caller's order, which the answer's
+    probabilities follow, so a repeat (in any case) is refused rather than dropped; at most MAX_LABELS of at most
+    MAX_LABEL_CHARS characters of plain text. None when none were sent."""
+    raw = fields.get("labels")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+        raise Refused(400, "invalid_option", "labels must be a list of names (strings).")
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in raw:
+        x = " ".join(x.split())
+        if not x or len(x) > MAX_LABEL_CHARS or any(ord(c) < 32 or ord(c) == 127 for c in x):
+            raise Refused(400, "invalid_option", f"Each label is 1 to {MAX_LABEL_CHARS} characters of plain text.")
+        if x.lower() in seen:
+            raise Refused(400, "invalid_option", f"labels has {x!r} twice: the probabilities follow the labels' order, "
+                                                 "so each label comes once.")
+        seen.add(x.lower())
+        out.append(x)
+    if not out:
+        raise Refused(400, "invalid_option", "labels is empty: send the labels to choose from.")
+    if len(out) > MAX_LABELS:
+        raise Refused(400, "invalid_option", f"At most {MAX_LABELS} labels per request.")
+    return out
+
+
+def texts_of(fields: dict) -> list[str]:
+    """`input`: a text or a non-empty list of texts (token ids are not taken)."""
+    inp = fields.get("input")
+    texts = [inp] if isinstance(inp, str) else inp
+    if not isinstance(texts, list) or not texts or not all(isinstance(t, str) for t in texts):
+        raise Refused(400, "invalid_input", "'input' is a text or a non-empty list of texts (token ids are not taken).")
+    if len(texts) > MAX_INPUTS:
+        raise Refused(400, "invalid_input", f"'input' has {len(texts)} texts; at most {MAX_INPUTS} per request.")
+    for i, t in enumerate(texts):
+        if not t.strip():
+            raise Refused(400, "invalid_input", f"input[{i}] is empty.")
+        if len(t) > MAX_TEXT_CHARS:
+            raise Refused(400, "invalid_input", f"input[{i}] has more than {MAX_TEXT_CHARS} characters.")
+    return texts
+
+
+def image_of(data: str, where: str) -> Image.Image:
+    """An image item's data: base64 or a data: URI. A URL is the gateway's to fetch (through its egress guard): this
+    server never fetches anything."""
+    if data.startswith(("http://", "https://")):
+        raise Refused(400, "image_url_not_supported", f"{where}: send the image's bytes (base64 or a data: URI); "
+                                                      "this engine does not fetch URLs.")
+    if data.startswith("data:"):
+        data = data.split(",", 1)[-1]
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        raise Refused(400, "invalid_image", f"{where} is not base64 or a data: URI.") from None
+    img = decode_image(raw)
+    if img.width * img.height > MAX_PIXELS:
+        raise Refused(400, "image_too_large", f"{where} has more than 40 megapixels.")
+    return img
+
+
+def chunks(seq: list, n: int):
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+def features(out):
+    """get_text_features / get_image_features answer a tensor (older transformers) or an output whose pooled value
+    is the projected vector (5.x)."""
+    return out if isinstance(out, torch.Tensor) else out.pooler_output
+
+
+def max_length_of(tokenizer, config, cap: int = 1 << 20) -> int:
+    """The longest input the model reads, in tokens: the tokenizer's model_max_length when it is set, else the loaded
+    model's position embeddings (its text model's for a CLIP-like one; RoBERTa-like models start their positions
+    after the padding index)."""
+    n = getattr(tokenizer, "model_max_length", None)
+    if isinstance(n, int) and 0 < n < cap:
+        return n
+    text = getattr(config, "text_config", None) or config
+    pos = int(getattr(text, "max_position_embeddings", 0) or 512)
+    pad = getattr(text, "pad_token_id", None)
+    if getattr(text, "model_type", "") in ("roberta", "xlm-roberta", "camembert") and isinstance(pad, int):
+        pos -= pad + 1
+    return max(pos, 1)
+
+
+class Embed(Task):
+    """Embeddings (1.5.4, #141): a CLIP-like model (CLIP, SigLIP, SigLIP 2, …) puts texts and images in one space
+    (text -> image search); DINOv2 embeds images only (image -> image similarity, duplicates). Every vector is
+    L2-normalised (cosine similarity = dot product), the order of `input` kept."""
+
+    name = "embed"
+
+    def __init__(self, path: Path, device: str):
+        super().__init__(path, device)
+        config = json.loads((path / "config.json").read_text())
+        self.family = embed_family(config)
+        dtype = load_dtype(device)
+        if self.family == "text+image":
+            from transformers import AutoModel, AutoProcessor
+
+            self.processor = AutoProcessor.from_pretrained(path)
+            self.tokenizer = self.processor.tokenizer
+            self.image_processor = self.processor.image_processor
+            self.model = AutoModel.from_pretrained(path, dtype=dtype).to(device).eval()
+            # SigLIP was trained on texts padded to 64 tokens (transformers' pipeline asks it so): its texts are padded
+            # to its length; CLIP's to the longest of the batch.
+            self.pad_to_max = classifier_type(config) in SIGMOID_TYPES
+            self.text_max = max_length_of(self.tokenizer, self.model.config, cap=4096)
+        else:
+            from transformers import AutoImageProcessor, AutoModel
+
+            self.tokenizer = None
+            self.image_processor = AutoImageProcessor.from_pretrained(path)
+            self.model = AutoModel.from_pretrained(path, dtype=dtype).to(device).eval()
+            self.pad_to_max, self.text_max = False, 0
+        # One small image tells the vector's size (and warms the model up).
+        self.dim = int(self._images([Image.new("RGB", (32, 32), (128, 128, 128))]).shape[-1])
+
+    def describe(self) -> dict:
+        return {"modalities": ["text", "image"] if self.tokenizer is not None else ["image"], "dimensions": self.dim,
+                "text_max_tokens": self.text_max or None}
+
+    def _images(self, imgs: list[Image.Image]):
+        inputs = self.image_processor(images=imgs, return_tensors="pt").to(self.device)
+        with torch.inference_mode():
+            if self.family == "text+image":
+                vec = features(self.model.get_image_features(**inputs))
+            else:
+                vec = self.model(**inputs).pooler_output
+        return torch.nn.functional.normalize(vec.float(), dim=-1).cpu()
+
+    def _texts(self, texts: list[str]) -> tuple[torch.Tensor, int, int]:
+        """(the vectors, the tokens read, how many texts were cut to the model's length)."""
+        full = self.tokenizer(texts, truncation=False)["input_ids"]
+        cut = sum(len(ids) > self.text_max for ids in full)
+        tokens = sum(min(len(ids), self.text_max) for ids in full)
+        kw = {"padding": "max_length"} if self.pad_to_max else {"padding": True}
+        inputs = self.tokenizer(texts, truncation=True, max_length=self.text_max, return_tensors="pt", **kw).to(self.device)
+        with torch.inference_mode():
+            vec = features(self.model.get_text_features(**inputs))
+        return torch.nn.functional.normalize(vec.float(), dim=-1).cpu(), tokens, cut
+
+    def items(self, fields: dict) -> list[tuple[str, object]]:
+        """`input` as ("text", str) and ("image", Image) items: a text, or a list of texts, {"text": …} and
+        {"image": "<base64 or data: URI>"} (the Jina shape) in any mix."""
+        inp = fields.get("input")
+        raw = [inp] if isinstance(inp, (str, dict)) else inp
+        if not isinstance(raw, list) or not raw:
+            raise Refused(400, "invalid_input", "'input' is a text, an item ({\"text\": …} or {\"image\": …}) or a "
+                                                "non-empty list of them (token ids are not taken).")
+        if len(raw) > MAX_INPUTS:
+            raise Refused(400, "invalid_input", f"'input' has {len(raw)} items; at most {MAX_INPUTS} per request.")
+        most = env_int("VISION_MAX_IMAGES", 32, 1, 1024)
+        out: list[tuple[str, object]] = []
+        for i, item in enumerate(raw):
+            where = f"input[{i}]" if isinstance(inp, list) else "input"
+            if isinstance(item, dict) and set(item) == {"image"} and isinstance(item["image"], str):
+                out.append(("image", item["image"]))
+                continue
+            text = item if isinstance(item, str) else None
+            if isinstance(item, dict) and set(item) == {"text"}:
+                text = item["text"]
+            if not isinstance(text, str):
+                raise Refused(400, "invalid_input", f"{where}: a text, {{\"text\": \"…\"}} or {{\"image\": \"<base64 or "
+                                                    "data: URI>\"}.")
+            if not text.strip() or len(text) > MAX_TEXT_CHARS:
+                raise Refused(400, "invalid_input", f"{where} is empty or longer than {MAX_TEXT_CHARS} characters.")
+            if self.tokenizer is None:
+                raise Refused(400, "text_not_supported", f"{where} is a text, but this model embeds images only "
+                                                         "(DINOv2): send images, or use a CLIP-like model for texts.")
+            out.append(("text", text))
+        n = sum(kind == "image" for kind, _ in out)
+        if n > most:
+            raise Refused(400, "too_many_images", f"{n} images in one request; this deployment takes at most {most}.")
+        return [(kind, image_of(v, f"input[{i}]") if kind == "image" else v) for i, (kind, v) in enumerate(out)]
+
+    def run(self, fields: dict) -> dict:
+        fmt = fields.get("encoding_format", "float")
+        if fmt not in ("float", "base64"):
+            raise Refused(400, "invalid_option", "encoding_format is float or base64.")
+        dims = fields.get("dimensions")
+        if dims is not None and dims != self.dim:
+            raise Refused(400, "invalid_option", f"dimensions: this model's vectors have {self.dim} (it cannot shorten "
+                                                 "them); leave dimensions out or send that number.")
+        items = self.items(fields)
+        vectors: list = [None] * len(items)
+        texts = [(i, v) for i, (kind, v) in enumerate(items) if kind == "text"]
+        imgs = [(i, v) for i, (kind, v) in enumerate(items) if kind == "image"]
+        tokens = cut = 0
+        for batch in chunks(texts, TEXT_BATCH):
+            vec, n, c = self._texts([t for _, t in batch])
+            tokens, cut = tokens + n, cut + c
+            for (i, _), v in zip(batch, vec):
+                vectors[i] = v
+        for batch in chunks(imgs, IMAGE_BATCH):
+            for (i, _), v in zip(batch, self._images([im for _, im in batch])):
+                vectors[i] = v
+
+        def encode(v):
+            if fmt == "base64":
+                return base64.b64encode(v.numpy().astype("<f4").tobytes()).decode("ascii")
+            return v.tolist()
+
+        kpx = sum(round(im.width * im.height / 1000) for _, im in imgs)
+        return {"object": "list",
+                "data": [{"object": "embedding", "index": i, "embedding": encode(v)} for i, v in enumerate(vectors)],
+                "usage": {"prompt_tokens": tokens, "total_tokens": tokens, "images": len(imgs), "kilopixels": kpx,
+                          "truncated_inputs": cut}}
+
+
+class TextClassify(Task):
+    """Text classification (1.5.4, #144) with any sequence classifier (DistilBERT, DeBERTa, BERT, RoBERTa,
+    XLM-RoBERTa…): fixed labels (its id2label), or zero-shot with an NLI model (labels entailment / neutral /
+    contradiction or entailment / not_entailment), which scores each label sent as a hypothesis ("This text is
+    about {}.") against each text: texts x labels forward passes. Answered in vLLM's /classify shape."""
+
+    name = "classify"
+
+    def __init__(self, path: Path, device: str):
+        super().__init__(path, device)
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        config = json.loads((path / "config.json").read_text())
+        self.names = sequence_labels(config)
+        self.nli = nli_ids(self.names)
+        self.multi = config.get("problem_type") == "multi_label_classification"
+        self.tokenizer = AutoTokenizer.from_pretrained(path)
+        self.model = AutoModelForSequenceClassification.from_pretrained(path, dtype=load_dtype(device)).to(device).eval()
+        self.max_len = max_length_of(self.tokenizer, self.model.config)
+
+    def describe(self) -> dict:
+        out = {"zero_shot": self.nli is not None, "max_tokens": self.max_len}
+        if self.nli is None:
+            out.update(labels=self.names, multi_label=self.multi)
+        return out
+
+    def _logits(self, first: list[str], second: list[str] | None, max_length: int, left: bool):
+        """One batch: its logits, the tokens read, and which inputs were longer than max_length (and cut: the
+        text's end, or with `left` its start; a pair cuts its text, never the hypothesis)."""
+        self.tokenizer.truncation_side = "left" if left else "right"
+        try:
+            kw = {"text_pair": second, "truncation": "only_first"} if second is not None else {"truncation": True}
+            full = self.tokenizer(first, text_pair=second)["input_ids"]
+            inputs = self.tokenizer(first, max_length=max_length, padding=True, return_tensors="pt", **kw)
+        finally:
+            self.tokenizer.truncation_side = "right"
+        tokens = int(inputs["attention_mask"].sum())
+        with torch.inference_mode():
+            logits = self.model(**inputs.to(self.device)).logits.float().cpu()
+        return logits, tokens, [len(ids) > max_length for ids in full]
+
+    def run(self, fields: dict) -> dict:
+        texts = texts_of(fields)
+        labels = strict_labels(fields)
+        zero_shot = self.nli is not None
+        if zero_shot and labels is None:
+            raise Refused(400, "labels_required", "This is a zero-shot model: send the labels to choose from, e.g. "
+                                                  "\"labels\": [\"billing\", \"technical problem\", \"praise\"].")
+        if not zero_shot:
+            if labels is not None:
+                raise Refused(400, "labels_not_supported", "This classifier has fixed labels: leave labels out (a "
+                                                           "zero-shot NLI model takes them).")
+            for k in ("multi_label", "hypothesis_template"):
+                if k in fields:
+                    raise Refused(400, "invalid_option", f"{k} is for zero-shot models only.")
+        use_act = fields.get("use_activation", True)
+        if not isinstance(use_act, bool) or (zero_shot and use_act is not True):
+            raise Refused(400, "invalid_option", "use_activation is true or false (a zero-shot model always answers "
+                                                 "probabilities).")
+        k = fields.get("truncate_prompt_tokens")
+        if k is not None:
+            if not isinstance(k, int) or isinstance(k, bool) or k == 0 or k < -1 or k > self.max_len:
+                raise Refused(400, "invalid_option", f"truncate_prompt_tokens is 1 to {self.max_len} (this model's "
+                                                     "length), or -1 for that length.")
+        max_length = self.max_len if k in (None, -1) else k
+        if zero_shot:
+            return self._zero_shot(texts, labels, fields, max_length)
+        # vLLM's rule: truncate_prompt_tokens keeps the last k tokens; without it, a text longer than the model is cut
+        # at its end (and counted).
+        order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+        rows: list = [None] * len(texts)
+        tokens = cut = 0
+        for batch in chunks(order, TEXT_BATCH):
+            logits, n, over = self._logits([texts[i] for i in batch], None, max_length, left=k not in (None, -1))
+            tokens, cut = tokens + n, cut + sum(over)
+            for i, row in zip(batch, logits):
+                rows[i] = row
+        data = []
+        for i, row in enumerate(rows):
+            probs = (row.sigmoid() if self.multi else row.softmax(-1)) if use_act else row
+            best = int(row.argmax())
+            data.append({"index": i, "label": self.names[best] if best < len(self.names) else str(best),
+                         "probs": [float(p) for p in probs], "num_classes": len(row)})
+        return {"data": data, "usage": {"prompt_tokens": tokens, "total_tokens": tokens, "truncated_inputs": cut}}
+
+    def _zero_shot(self, texts: list[str], labels: list[str], fields: dict, max_length: int) -> dict:
+        multi = fields.get("multi_label", False)
+        if not isinstance(multi, bool):
+            raise Refused(400, "invalid_option", "multi_label is true or false.")
+        template = fields.get("hypothesis_template", DEFAULT_HYPOTHESIS)
+        if not isinstance(template, str) or template.count("{}") != 1 or len(template) > 200 or \
+                any(ord(c) < 32 or ord(c) == 127 for c in template):
+            raise Refused(400, "invalid_option", "hypothesis_template is one line of at most 200 characters with one {} "
+                                                 "where the label goes, e.g. \"This text is about {}.\"")
+        most = env_int("VISION_MAX_PAIRS", 256, 1, 100_000)
+        pairs = [(t, template.replace("{}", label)) for t in texts for label in labels]
+        if len(pairs) > most:
+            raise Refused(400, "too_many_pairs", f"{len(texts)} texts x {len(labels)} labels = {len(pairs)} pairs, each "
+                                                 f"one pass of the model; this deployment takes at most {most} per "
+                                                 "request: send fewer texts or labels.")
+        entail, contra = self.nli
+        out = []
+        tokens = 0
+        cut_pairs = set()
+        for start in range(0, len(pairs), PAIR_BATCH):
+            batch = pairs[start:start + PAIR_BATCH]
+            logits, n, over = self._logits([p for p, _ in batch], [h for _, h in batch], max_length, left=False)
+            tokens += n
+            out.append(logits)
+            cut_pairs.update((start + j) // len(labels) for j, o in enumerate(over) if o)
+        logits = torch.cat(out).reshape(len(texts), len(labels), -1)
+        # transformers' ZeroShotClassificationPipeline: one label alone, or multi_label, scores each label on its own
+        # (entailment against contradiction); otherwise the entailment logits are a softmax across the labels.
+        if multi or len(labels) == 1:
+            probs = logits[..., [contra, entail]].softmax(-1)[..., 1]
+        else:
+            probs = logits[..., entail].softmax(-1)
+        data = [{"index": i, "label": labels[int(row.argmax())], "probs": [float(p) for p in row],
+                 "num_classes": len(labels)} for i, row in enumerate(probs)]
+        return {"data": data, "labels": labels, "multi_label": bool(multi or len(labels) == 1),
+                "usage": {"prompt_tokens": tokens, "total_tokens": tokens, "truncated_inputs": len(cut_pairs)}}
+
+
+TEXT_TASKS = {"embed": Embed, "classify": TextClassify}
+# A text task's paths: the gateway calls /v1/embeddings and /classify (vLLM's path, without /v1).
+TEXT_PATHS = {"embed": ("/v1/embeddings",), "classify": ("/classify", "/v1/classify")}
+TASKS = {"detect": Detect, "segment": Segment, "depth": Depth, "image-classify": Classify, **TEXT_TASKS}
 
 
 def task_of(config: dict) -> str | None:
@@ -515,7 +996,20 @@ def check_model_dir(task: str, model_dir: Path) -> None:
         config = json.loads((model_dir / "config.json").read_text())
     except (OSError, ValueError) as e:
         raise SystemExit(f"{model_dir}: no readable config.json ({e})") from None
-    found = task_of(config if isinstance(config, dict) else {})
+    config = config if isinstance(config, dict) else {}
+    if task in TEXT_TASKS:
+        # 1.5.4: the transformers recipe's tasks. No code from the model's repository is ever run.
+        if remote_code(config):
+            raise SystemExit(f"{model_dir} needs code from its repository (auto_map in config.json), which this server "
+                             "never runs.")
+        if task == "embed" and embed_family(config) is None:
+            raise SystemExit(f"{model_dir} (architectures {config.get('architectures')}) is not an image embedding model "
+                             "this server runs: a CLIP-like model (CLIP, SigLIP, SigLIP 2, …) or DINOv2. Text embedding "
+                             "models run on vLLM (the vllm-pooling recipe).")
+        if task == "classify" and (why := text_classifier_problem(config)):
+            raise SystemExit(f"{model_dir} (architectures {config.get('architectures')}) is {why}.")
+        return
+    found = task_of(config)
     if found != task:
         what = f"a {found} model" if found else "not a detection, SAM 2, depth or image classification model"
         raise SystemExit(f"{model_dir} is {what} (architectures {config.get('architectures')}), not one for {task}.")
@@ -541,7 +1035,10 @@ def create_app(task: str, models_dir: Path, device: str, *, model_dir: Path | No
     loaded_s = round(time.monotonic() - t0, 1)
     app = FastAPI(title=f"Forgeyard vision: {task}", docs_url=None, redoc_url=None, openapi_url=None)
     path = PATHS.get(task, task)
-    about.update(device=device, endpoints=[f"/v1/vision/{path}", f"/v1/{path}"], loaded_s=loaded_s)
+    endpoints = list(TEXT_PATHS[task]) if task in TEXT_PATHS else [f"/v1/vision/{path}", f"/v1/{path}"]
+    about.update(device=device, endpoints=endpoints, loaded_s=loaded_s)
+    if hasattr(worker, "describe"):
+        about.update(worker.describe())
     want = f"Bearer {api_key}".encode() if api_key else None
 
     @app.middleware("http")
@@ -567,6 +1064,25 @@ def create_app(task: str, models_dir: Path, device: str, *, model_dir: Path | No
     def root():
         return about
 
+    from starlette.concurrency import run_in_threadpool
+
+    if task in TEXT_TASKS:
+        async def run_text(request: Request):
+            fields = await read_json(request)
+            start = time.monotonic()
+
+            def call():
+                with worker.lock:
+                    return worker.run(fields)
+
+            out = await run_in_threadpool(call)
+            extra = {"id": f"classify-{os.urandom(12).hex()}", "created": int(time.time())} if task == "classify" else {}
+            return {**extra, "object": "list", **named, **out, "ms": round((time.monotonic() - start) * 1000, 1)}
+
+        for p in TEXT_PATHS[task]:
+            app.add_api_route(p, run_text, methods=["POST"])
+        return app
+
     @app.post(f"/v1/vision/{path}")
     @app.post(f"/v1/{path}")
     async def run(request: Request):
@@ -578,8 +1094,6 @@ def create_app(task: str, models_dir: Path, device: str, *, model_dir: Path | No
         def call():
             with worker.lock:
                 return worker.run(img, fields)
-
-        from starlette.concurrency import run_in_threadpool
 
         out = await run_in_threadpool(call)
         return {**named, "width": img.width, "height": img.height, **out,
