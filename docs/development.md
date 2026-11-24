@@ -12,7 +12,7 @@ build the container images.
 ## Build and test
 
 ```bash
-uv sync
+uv sync --extra server
 uv run --no-sync python -m pytest -q          # backend tests (SQLite); a test that hangs fails after 5 min
                                                # with every thread's stack (pytest-timeout)
 uv run --no-sync ruff check .
@@ -35,6 +35,17 @@ After `uv lock` (or a Dependabot update of `uv.lock`), run `uv run --no-sync pyt
 forgeyard.install.requirements`: it rewrites the lists of the agent's dependencies, with their hashes, that
 install.sh installs from (`forgeyard/install/agent-requirements*.txt`), and FY-INST-020 fails while they
 differ from the lock.
+
+The **Dependency audit** workflow (`.github/workflows/dependency-audit.yml`) runs on every pull request and push
+to dev and main: pip-audit on uv.lock's runtime set (every extra, no dev group) and `npm audit --omit=dev` for the
+web UI. It is not a required check: a new advisory against a package nobody touched must not block other work, but
+a red result means a dependency to update in its own pull request. The same locally:
+
+```bash
+uv export --locked --no-dev --all-extras --format requirements-txt -o /tmp/requirements-audit.txt
+uvx --from pip-audit==2.10.1 pip-audit -r /tmp/requirements-audit.txt --disable-pip
+cd web && npm audit --omit=dev
+```
 
 ## Pinned engine images
 

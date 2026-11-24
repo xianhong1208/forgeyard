@@ -30,7 +30,7 @@ are fine for almost everyone.
 | `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
 | `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate. Empty: the address each browser opened Forgeyard with, which other machines cannot use when that was `127.0.0.1` |
 | `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token. A relative path is relative to the folder the server starts in |
-| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
+| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra server --extra postgres`) |
 | `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key: both or neither (one alone stops the start). Checked every 12 hours and reloaded when they changed. Ignored with `TLS=off` |
 | `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it. Ignored without your own certificate |
@@ -90,7 +90,7 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
+| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too). Also applies to the check for newer engine versions |
 | `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Sources**, the database wins. Until then the panel marks it *from .env* |
 | `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
@@ -995,8 +995,9 @@ value.
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
 | `dry_run` | `true`: only check. The answer is the same, without `deployment`, and nothing is saved |
+| `recipe` | (1.5.2) Another version of its engine: the built-in recipe it runs or was copied from, or a copy of that built-in (`based_on`), which serves the model with the same protocol. The name, served name, keys and routes stay; the estimate is made again with it; parameters it does not take are dropped (`dropped`) |
 
-The model, the recipe, the name and the served name cannot be changed (422). The answer:
+The model, the name and the served name cannot be changed (422). The answer:
 
 | Field | What it is |
 |---|---|
@@ -1005,6 +1006,9 @@ The model, the recipe, the name and the served name cannot be changed (422). The
 | `changes` | `{name: {before, after}}` for each parameter, `replicas` and `machine_id` that changes; `{}` when nothing does |
 | `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, `on_start` (stopped: the settings apply when it starts), or (1.5.0) `on_wake` (asleep: the settings apply when it wakes) |
 | `restart_text` | The same in a sentence |
+| `recipe` | (1.5.2) The engine it would run |
+| `dropped` | (1.5.2) Parameters it had that this engine does not take: they are dropped |
+| `outage` | (1.5.2) When `restart` is `all` (the only running replica restarts): `{seconds, source, first_start, image_missing, avoid, cloud, text}`. `seconds` is about how long the model will not answer, from `source`: `last_start` (its own), `engine` (the middle value of the latest starts of the other deployments of this engine) or `typical`. `first_start`: the engine changes, and a new version can take longer on its first start. `image_missing`: machines of its replicas without the new engine's image. `avoid`: `add_replica`, `autoscale` (or `min_replicas` when automatic replicas are on), and `cloud` when its route has a cloud tier. Otherwise `null` |
 | `deployment` | The deployment after saving (not on a dry run) |
 
 | Status | `code` | When |
@@ -1013,11 +1017,14 @@ The model, the recipe, the name and the served name cannot be changed (422). The
 | 409 | `recipe_gone` | Its recipe no longer exists |
 | 422 | `invalid_params` | A parameter is unknown or out of its range |
 | 422 | `cannot_estimate` | The new parameters cannot be estimated for this model |
-| 404 | `not_found`, `machine_not_found` | No such deployment, or no such machine for `machine_id` |
+| 422 | `engine_not_related`, `incompatible`, `engine_not_compatible` | (1.5.2) `recipe` is not its built-in engine or a copy of it; does not serve the model; or answers it with another protocol, which would change the route |
+| 404 | `not_found`, `machine_not_found`, `recipe_not_found` | No such deployment, no such machine for `machine_id`, or no such engine for `recipe` |
 | 403 | | Not an admin or an operator |
 
-Each saved change is audited as `deployment.changed`, with the changes and the restart. `GET
-/api/deployments/{id}` also gives `pinned` (the machine chosen, or `null`), `rollout` (while replicas
+Each saved change is audited as `deployment.changed`, with the changes and the restart (1.5.2: with
+another engine, `recipe: {from, to}`, `engine_versions: {from, to}` and `dropped`). `GET
+/api/deployments/{id}` also gives (1.5.2) `engine` (`{name, title, version, builtin, based_on}`) and `engines` (the
+versions it can move to, with `current`), `pinned` (the machine chosen, or `null`), `rollout` (while replicas
 restart: `{generation, updated, total, next}`) and, per replica, `not_picked_up`: set when the replica
 was placed on a connected machine whose agent has not reported it for 2 minutes
 ([A replica stays pending](troubleshooting.md#a-replica-stays-pending)), and (1.4)
@@ -1182,19 +1189,21 @@ header). Everyone signed in can look; admins and operators start and cancel down
 |---|---|
 | `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | Each machine, and whether it can take this model (and the recipe's engine) |
 | `POST /api/downloads` with `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | Starts a download on each machine that can take it; `engine` is on by default, and `recipe` defaults to the first recipe that serves the model |
-| `GET /api/downloads?model_id=<id>&machine_id=<id>` | The downloads under way first, then the finished ones (the last 100) |
+| `GET /api/downloads/targets?recipe=<name>` | (1.5.2) Without `model_id`: each machine, and whether it can take this engine alone |
+| `POST /api/downloads` with `{"recipe": "<name>", "machine_ids": [<id>, …]}` | (1.5.2) Without `model_id`: the engine alone (the image or program of the variant each machine would run) |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>&engine=<name>` | The downloads under way first, then the finished ones (the last 100); `engine`: only those of that engine alone |
 | `POST /api/downloads/{id}/cancel` | Cancels one under way; its agent stops it at once and keeps what is on disk |
 | `PUT /api/machines/{id}/fetch-via` with `{"fetch_via": "auto"}` | Admins only: how that machine fetches models and engine archives: `auto` (directly, through the server after a network failure), `server` (always through the server) or `direct` (never through it). Its agent gets the new way at once |
 
 Each machine in `targets` has a `state`: `ok`, `cached` (already there), `downloading`, `too_old` (an
 agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB margin is more than the
-cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
+cache's free disk), `revoked` or (1.5.2, an engine alone) `no_engine` (no variant of it runs there), with a `note` saying why; `need_bytes` and `free_bytes`; and, with
 the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
 when no variant of the recipe runs there; and `via`, how the model would come (`direct`, `auto` or
 `server`), with `from_machine` (1.4.1) naming the machine that would send it through the server, or null. The variant is the one the machine would run: a GPU variant
 when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
 
-A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
+A download has `id`, `model` (null for an engine alone), `engine_only` (1.5.2), `machine` (with `connected`), `file`, `recipe` (null: the model only),
 `state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
 shape as a deployment replica's, with `via: "server"` while the bytes come through the server),
 `reason`, `via` (`direct`, `server` once it came through the server, or `machine` once the model came from
@@ -1208,11 +1217,13 @@ most 20 per machine.
 | 409 | `download_finished` | Cancel of a download that already ended |
 | 422 | `local_model` | A local model is a directory on the machines: there is nothing to download |
 | 422 | `recipe_not_compatible`, `bad_fetch_via` | The recipe does not serve the model; a `fetch_via` that is not one of the three |
+| 422 | `model_or_engine` | (1.5.2) Neither a model nor an engine named, or `engine: false` without a model |
 | 404 | `not_found` | No such model, machine or download |
 | 403 | | Not an admin or an operator (not an admin, for `fetch-via`) |
 
 Audit events: `model.download_requested` (one per machine, with the model and the engine),
-`model.download_cancelled`, `node.fetch_via_changed`, and `model.checksum_recorded` when the SHA-256 of
+`model.download_cancelled`, (1.5.2) `engine.download_requested` (one per machine, with `recipe`, `version`, `variant`
+and `engine`, the image or archive) and `engine.download_cancelled`, `node.fetch_via_changed`, and `model.checksum_recorded` when the SHA-256 of
 a URL model is recorded: a single GGUF file from a URL has no published checksum, so the first one an
 agent computes after a complete download is kept in the catalog entry (`files[0].sha256` of the model's
 metadata, with `sha256_from`, the machine, and `sha256_at`), and every later download must match it. A
@@ -1226,6 +1237,15 @@ locks, resume from partial files, checksums and cancel; an image with the pull p
 starts nothing, runs at most two at a time and reports `status.downloads` (`{id, state, reason,
 download}`); a download missing from the next list is cancelled. Migration `0015` adds the table
 `model_downloads` and the column `nodes.fetch_via` (`auto` for every existing machine).
+
+(1.5.2) An engine alone is a row without a model: its item in `desired.downloads` has no `model` block, only the
+`engine` archive (with its SHA-256) or the `image` (with `image_ids`, and `image_relay` where the machine fetches
+images through the server; a copy's image by the ids in `image_pins`). Agents with `prefetch` take it as it is. The
+engine page (`GET /api/recipes/{name}`) adds `can_download`, `downloads` (that engine's, newest first) and, per
+machine, `download` (one under way there), and for a copy `caught_up`: `{builtin, title, version, same}` when its
+built-in engine now runs the copy's version or a newer one, else `null`. Migration `0017_engine_downloads` makes
+`model_downloads.model_id` nullable (every existing row is unchanged; on SQLite the table is rebuilt, which is safe
+because nothing references it); going down deletes the engine-only rows and makes it NOT NULL again.
 
 ### Downloads through the server (the relay)
 
@@ -1714,6 +1734,165 @@ A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asyn
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
 `openai-videos`, and its `{keep_seconds}` placeholder is the deployment's `keep_minutes` and an hour.
 
+### Newer versions of the built-in recipes
+
+1.5.2 (#95). `POST /api/engine-updates/check` (admins) asks, now, every built-in recipe's own image
+repositories (`GET /v2/<repo>/tags/list`, following `Link: rel="next"`: GHCR answers 1,000 tags a page;
+`HEAD` of a candidate tag for its digest, which Docker Hub does not count as a pull) and GitHub's releases
+(anonymous: 60 requests an hour per address; a check makes about five). Through the server's model-source rules
+(https and public addresses; `MODEL_ALLOW_PRIVATE_HOSTS`), at most 20 seconds a request and 90 seconds in all,
+at most 30 pages of tags per repository. It answers 200 with the result even when a registry fails (that engine
+says `could_not_check`), and 409 `check_running` while another check runs. The `vision` recipe is not checked.
+
+`GET /api/engine-updates` (everyone signed in) returns `{"result": …, "can_check": bool}`, `result` being null
+before the first check. The result is kept in one `server_settings` row, `engine_updates` (no migration), and each
+check is audited as `recipe.updates_checked` with the newer versions per recipe.
+
+```json
+{"checked_at": "…", "checked_by": "admin", "seconds": 21.4, "github_requests": 5,
+ "engines": {"vllm": {"recipe": "vllm", "version": "0.32.0", "kind": "release", "status": "newer",
+   "newest": "0.34.0", "errors": [], "candidates": [
+     {"version": "0.34.0", "kind": "release",
+      "release": {"tag": "v0.34.0", "url": "https://github.com/vllm-project/vllm/releases/tag/v0.34.0", "published_at": "…"},
+      "variants": [
+        {"name": "cuda", "available": true, "tag": "v0.34.0", "digest": "sha256:…", "image": "vllm/vllm-openai:v0.34.0@sha256:…"},
+        {"name": "cuda-12.9", "available": false, "why": {"code": "no_image", "tag": "v0.34.0-cu129", "last": "0.32.0", "text": "…"}}],
+      "mentions": [{"flag": "--gpu-memory-utilization", "lines": 5, "excerpts": ["…"]}]}]}}}
+```
+
+| Field | Values |
+|---|---|
+| `status` | `newer`, `newer_build` (a moving tag points at a later image), `up_to_date`, `partly_checked`, `could_not_check`, `not_checked` (the vision image) |
+| `kind` | `release` (tags carry the version), `rolling` (moving tags only: stable-diffusion.cpp), `own` |
+| `candidates` | newest first, at most 8: stable versions greater than the recipe's `version`, found as tags of each variant's form (the built-in tag with its version replaced; llama.cpp's `-b<build>-<commit>` optional). Release candidates, nightlies and other tags never match |
+| `variants[].why.code` | `no_image`, `tag_unversioned`, `registry_error`, `digest_failed`; process variants: `installed_command`, `not_github`, `release_unknown`, `no_release`, `no_archive`, `no_sha256`, `github_error`; moving tags: `not_moved`, `not_newer`, `other_build` |
+| `mentions` | the recipe's `--flags` (also in `snake_case` when two words or more) and environment variables that the release notes name, up to three lines each; `notes` instead when the notes could not be read (`no_notes`, `github_error`) |
+| `upstream` | `release_without_image`: GitHub has a newer stable release whose images are not published yet |
+
+`GET /api/engine-updates` also returns `signatures`: per built-in recipe, what its engine's project signs
+(`{"signed": true, "kind": "github-attestation", "repository": "ggml-org/llama.cpp"}`, or `{"signed": false, "text": …}`).
+
+#### Trying a version: engine copies
+
+`POST /api/recipes/{name}/try {"version": "0.34.0", "name": "vllm-0-34-0"}` (admins; `name` optional) makes a custom
+recipe from the built-in `{name}` for a version the last check found, and answers 201 with the new recipe, the
+variants left out and the signatures. It takes a version, never an image: each variant's tag comes from the stored
+result, checked again against the built-in variant's own tag form; the registry and repository always come from
+the built-in variant's image. Each included image's digest is resolved again (a tag that moved since the check is a
+409 `digest_moved`), its recorded ids are read from the registry by digest, as `scripts/pin_images.py` does for
+the lock file (`forgeyard/workloads/pinning.py`), and its signature is verified where the project publishes one.
+A process archive's SHA-256 is read again from GitHub.
+
+| Answer | Code | When |
+|---|---|---|
+| 409 | `check_again` | no check result for that version, the built-in changed since the check, or the stored answer is not one Forgeyard can use |
+| 409 | `name_taken`, `builtin_name`, `not_builtin`, `try_running`, `digest_moved` | as named (`digest_moved` names the `variant`) |
+| 422 | `invalid_name`, `nothing_to_pin`, `signature_failed`, `signature_missing` | a signature that does not verify, or a signing project with no attestation for that digest |
+| 502 | `cannot_verify`, `registry_error`, `github_error` | GitHub, Sigstore's trust root or a registry could not be reached, or (`cannot_verify`) this server has no sigstore: nothing is made. `cannot_verify` carries `can_override` |
+
+`"allow_unverified": true` makes the copy although its signatures could not be checked (`cannot_verify` only, and only
+while `can_override` is true): each signed image and archive records `{"status": "not_verified", "reason",
+"overridden_by", "at"}`, the console shows it as *Not verified*, and `recipe.created` carries `"unverified_override":
+true` and the variants (`not_verified`). A signature that fails, or is missing for a project that signs, is never
+overridden.
+
+The copy is the built-in's YAML text with a header comment, `name`, `title` (`vLLM 0.34.0`), `version`, the new
+images (`repo:tag@sha256:…`) and archives, the left-out variants removed, and two fields (custom recipes only):
+
+| Field | Meaning |
+|---|---|
+| `based_on` | the built-in recipe (same `engine`) it came from. A catalog model's `engine_args` for that recipe apply to the copy too, unless the model has an entry of the copy's own name |
+| `copy` | `from_version`, `kind` (`release` or `build`), `made_at`, `made_by`, `left_out` (`variant`, `code`, `text`, `params`), `archives` (`variant`, `release`, `signature`) |
+
+Audited as `recipe.created` with `based_on`, `from_version`, `version`, `images`, `left_out` and `signatures`. Copies
+are changed and deleted as any custom recipe.
+
+**`image_pins`** (migration `0016_image_pins`, additive): one row per pinned image reference (`ref`, primary key),
+shared by the copies that name it: `entry` (`{"index", "platforms": {"linux/amd64": {"manifest", "config",
+"content"}}}`, the shape of `forgeyard/recipes/images.lock.json`), `signature`, `recorded_by`, `recorded_at`. Every
+reader of recorded ids reads the lock file first, then this table (`images.entry_for`): the relay through the
+server, the ids sent with a replica or a download for a `docker load`ed copy, a machine's engine images and their
+removal, an engine page's presence. The server holds the rows in memory (loaded at start, reloaded after each
+change); a row that no custom recipe names any more is removed when a recipe is changed or deleted. Going down to
+0015 drops the table: copies then pull their images directly, by digest. `GET /api/recipes/{name}` adds `pins`: per
+variant, the row's `signature`, `recorded_at` and `recorded_by`.
+
+**Signatures.** Verified on the server only (agents run the digest the server pinned), with
+[sigstore-python](https://github.com/sigstore/sigstore-python) (Apache-2.0). It is the server's own extra
+(`uv sync --extra server`; the server image has it): the agent's wheel and image do not carry it, and a server
+without it cannot check signatures (`cannot_verify`).
+
+| Engine | Published | Checked |
+|---|---|---|
+| llama.cpp | GitHub artifact attestations (SLSA provenance in a Sigstore bundle) for its images and release archives | the bundle from `GET https://api.github.com/repos/ggml-org/llama.cpp/attestations/sha256:<hex>` (anonymous): the certificate chains to Fulcio and was valid when the entry was logged in Rekor (inclusion proof and checkpoint), the DSSE signature, the OIDC issuer `https://token.actions.githubusercontent.com`, the source repository, the signer being a workflow file of that same repository, a SLSA provenance v1 statement whose subject is that digest |
+| vLLM, vLLM-Omni, speaches | nothing | recorded as `{"status": "unsigned", "note": …}` |
+| stable-diffusion.cpp | an unsigned BuildKit provenance manifest | recorded as unsigned |
+
+A verified image or archive records `{"status": "verified", "repository", "workflow", "ref", "commit", "run",
+"predicate", "issuer", "log_index", "signed_at"}`. The trust root (Fulcio's certificates, Rekor's and the CT logs'
+keys) comes from Sigstore's TUF repository, `https://tuf-repo-cdn.sigstore.dev`, refreshed through the same network
+rules (kept for 5 minutes, metadata in `DATA_DIR/sigstore/`); the first refresh starts from the root shipped with
+sigstore-python. A refresh that fails is `cannot_verify`. A server that reaches only its registries (an
+air-gapped site with a mirror) cannot verify a signed engine's version: an admin may make the copy anyway, and it
+stays marked *Not verified*.
+
+### Trial runs through the API
+
+1.5.2 (#95). A trial deploys one catalog model with an engine on one machine for a few minutes, checks it and removes
+it ([how-to](how-to.md#try-out-a-new-engine-version-before-switching)).
+
+| Request | Who | What |
+|---|---|---|
+| `POST /api/recipes/{name}/trials {"model", "machine_id", "params"?, "timeout_minutes"?, "dry_run"?}` | admins, operators | 201 `{"trial": …}`. `params` left out: those of a deployment of the model on the built-in engine (`params_from`), else the engine's defaults; `gpus` follows the machine's variant. Sleep, automatic replicas and `first_answer_timeout` are dropped. `timeout_minutes` bounds the start (30 by default, 5 to 180); measuring and asking have 15 minutes of their own. `dry_run`: 200 with `estimate`, `placement`, `params`, `params_from`, `engine_on` (whether its image is on the machine), `running` and `limit`; nothing is made |
+| `GET /api/recipes/{name}/trials` | everyone signed in | the latest 50, newest first, and `can_run`; still answers after the recipe is deleted |
+| `GET /api/engine-trials/{id}` | everyone signed in | one trial, with its `events` (the temporary deployment's last 15), `log_tail` (the replica's last output), `requests` and `memory` (each reading) |
+| `POST /api/engine-trials/{id}/cancel` | admins, operators | removes its deployment; 409 `not_running` once it has ended |
+
+Refusals: 404 `not_found`, `model_not_found`, `machine_not_found`; 422 `incompatible` (the engine does not serve the
+model), `invalid_params`; 409 `machine_offline`, `does_not_fit` (with `machines` and `estimate`, as a deploy),
+`trial_running` (one per engine), `too_many_trials` (four on a server). While a trial runs, `DELETE` of its recipe or
+its model answers 409 `trial_running`.
+
+```json
+{"trial": {"id": 7, "recipe": "vllm-0-34-0", "builtin": "vllm", "engine_version": "0.34.0",
+  "model": {"id": 1, "name": "qwen3-0.6b", "task": "chat"}, "machine": {"id": 2, "name": "gpu-01"},
+  "gpus": [{"key": "nvidia:GPU-…", "index": 4, "model": "NVIDIA A100 80GB PCIe"}],
+  "params": {"context": 4096, "concurrency": 4, "gpus": 1, "share": "vram"}, "params_from": "chat",
+  "estimate": 5948108800, "reserved": 5948108800, "state": "passed", "phase": null,
+  "start": {"seconds": 95.2, "phases": {"image": 2.1, "engine": 93.1}, "source": "agent"},
+  "measured": 5551245721, "p50_ms": 120, "p95_ms": 180, "first_answer": "A GPU is a processor …",
+  "checks": [{"id": "memory", "label": "Memory", "value": 5551245721, "expected": "at most 5.54 GiB (reserved; estimate 5.54 GiB)",
+              "ok": true, "note": "Approximate: …", "codes": [{"code": "approximate"}]}],
+  "why": null, "summary": "Passed: ready in 95 s, 6/6 answers, p50 120 ms, +5.17 GiB of 5.54 GiB reserved.",
+  "comparison": {"builtin": "vllm", "deployment": {"id": 3, "name": "chat", "reserved": 5948108800, "start_seconds": 112.0,
+                                                    "same_machine": true}, "trial": null}}}
+```
+
+| Field | Values |
+|---|---|
+| `state` | `running`, `passed` (no check failed), `failed`, `cancelled` |
+| `phase` | while running: `starting`, `measuring` (memory readings after it is ready), `asking`, `settling` (one reading after the answers) |
+| `checks[].id` | `started`, `memory`, `answers`, `latency`, `same_answer`; `ok` is `true`, `false` or `null` (not checked, the note says why) |
+| `checks[].codes` | what the note says, for the console's translation: `slower`, `log`, `timeout_reason`, `not_run`, `approximate`, `approximate_ram`, `cards`, `after_answers`, `over`, `not_measured`, `went_down`, `went_down_ram`, `first_answer`, `error`, `not_asked` (`why`: `video`, `none`), `no_address`, `no_answer`, `same`, `different` |
+| `memory_unmeasured` | why the memory has no number: `went_down` (other work on the card released memory during the trial, so the difference would be negative), `went_down_ram` (the same for the machine's RAM), `no_readings`; then `measured` is null and the summary says it in words, never as a number |
+| `why` | why it failed or ended early: `start_failed`, `unplaced`, `timeout` (`phase`, `minutes`), `gone`, `error`, `restarted`, `stopped`, `not_ready`, `checks` (`checks`: the failed ids), `cancelled` (`who`) |
+
+The memory check takes the machine's readings of the replica's card (or of its RAM) before the engine was launched
+and after it was ready, three each when they come in time (the agent sends them with its heartbeat), and fails when
+the largest difference, including one reading after the answers, exceeds what the replica reserved by more than 5%.
+It is approximate on a card other work uses (more than 512 MiB in use before, or another Forgeyard replica there).
+
+**Data.** Table `engine_trials` (migration `0018_engine_trials`, additive: going down drops it, so finish or cancel
+trials first): one row per trial with the recipe and its built-in (`builtin`), `engine`, `engine_version`, `model_id`
+and `model_name`, `task`, `node_id` and `machine_name` (the names outlive the model and the machine), `gpus`, `params`,
+`estimate`, `reserved`, `deployment_id` (the temporary deployment while it exists), `requested_by`, `created_at`,
+`ready_at`, `finished_at`, `deadline_at`, `state`, `phase`, `checks`, `comparison`, `measurements` and `summary`. The
+temporary deployment is an ordinary `deployments` row without a gateway route, named `trial-<id>-<4 hex>` and pinned
+to the machine; every list, loop and check that should not see it leaves out the deployments `engine_trials`
+names. A server that starts with a trial still `running` ends it as `failed` (`why.code` `restarted`) and removes
+its deployment. Audited as `engine_trial.started`, `engine_trial.finished` (`state`, `failed` checks) and
+`engine_trial.cancelled`.
+
 ## Container images
 
 Each release publishes two images on Docker Hub, built by CI from the release's tag (and the vision
@@ -1725,7 +1904,7 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.5.1` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
+- **Tags**: `1.5.2` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

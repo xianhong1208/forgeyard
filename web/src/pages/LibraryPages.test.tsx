@@ -271,8 +271,8 @@ describe("model and engine pages (1.4.3, #140)", () => {
     mount("/models/engines/llama-cpp");
     await screen.findByRole("heading", { level: 1, name: "llama-cpp" });
     expect(document.querySelector(".lp-header .eyebrow")!.textContent).toBe("Engine · Built in");
-    expect(jumpLinks()).toEqual(["Overview", "Variants", "Machines", "Parameters", "Deployments and models"]);
-    expect(sectionOrder()).toEqual(["overview", "variants", "machines", "params", "deployments", "models"]);
+    expect(jumpLinks()).toEqual(["Overview", "Trials", "Variants", "Newer versions", "Machines", "Parameters", "Deployments and models"]);
+    expect(sectionOrder()).toEqual(["overview", "trials", "variants", "updates", "machines", "params", "deployments", "models"]);
     const variants = document.getElementById("variants")!;
     expect(within(variants).getByText("by digest")).toBeTruthy();
     expect(within(variants).getByText("sha256:a8cf841e…")).toBeTruthy();

@@ -111,8 +111,9 @@ def can_relay_images(node: Node) -> bool:
 
 
 def relayable_image(image: Optional[str]) -> bool:
-    """An image the server can relay: pinned by digest, with its ids recorded (images.lock.json)."""
-    return bool(image) and "@" in str(image) and isinstance(images.load_lock().get(str(image)), dict)
+    """An image the server can relay: pinned by digest, with its ids recorded (images.lock.json, or the image_pins
+    of an engine copy, 1.5.2)."""
+    return images.entry_for(str(image) if image else None) is not None
 
 
 def relays(node: Node, phase: str, image: Optional[str] = None) -> bool:
@@ -224,8 +225,8 @@ def image_target(node: Node, image: Optional[str]) -> ImageTarget:
     """What the server relays for this machine's engine image, from the recorded ids only; else Refused."""
     if not image:
         raise Refused(404, "relay_not_wanted", "There is no engine image to fetch for that.")
-    entry = images.load_lock().get(image) if "@" in image else None
-    if not isinstance(entry, dict):
+    entry = images.entry_for(image)
+    if entry is None:
         raise Refused(409, "relay_image_not_pinned",
                       f"{oci.tag_ref(image)} is not an image Forgeyard pinned by digest, so it cannot come through "
                       "the server: upload the image file to the machine instead (its page: Upload an image), or "
@@ -319,13 +320,14 @@ def _blocks(db: DbSession, node: Node, kind: str, uid: str) -> Wanted:
         image = runtime.get("image") if runtime.get("type") == "container" else None
         return Wanted(r.model, r.engine, image)
     row = _wanted_download(db, node, uid)
-    if row is None or row.model is None:
+    # 1.5.2 (#95): a download of an engine alone has no model, only its recipe.
+    if row is None or (row.model is None and (row.model_id is not None or not row.recipe)):
         raise Refused(404, "relay_not_wanted", "No download to this machine with that id is under way (any more).")
     from forgeyard.models import prefetch
     from forgeyard.models.catalog import get_recipe, model_block
 
     eng = prefetch.engine_of(node, get_recipe(db, row.recipe)) if row.recipe else {}
-    return Wanted(model_block(row.model), eng.get("engine"), eng.get("image"))
+    return Wanted(model_block(row.model) if row.model is not None else None, eng.get("engine"), eng.get("image"))
 
 
 def _token(db: DbSession, kind: str, uid: str, node: Node) -> Optional[str]:

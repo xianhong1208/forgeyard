@@ -26,7 +26,7 @@ from forgeyard.db import CatalogModel, Deployment, Node
 from forgeyard.machines import cache, engineimages
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import FEATURE_IMAGE_SAVE
-from forgeyard.models import cache_keys, prefetch, reach, render, scheduler, sources
+from forgeyard.models import cache_keys, prefetch, reach, render, scheduler, sources, trials
 from forgeyard.models.catalog import Context, model_block
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -173,23 +173,58 @@ def model_page(db: DbSession, m: CatalogModel, all_recipes: dict) -> dict:
         rows.append({**node_out(node), "cache": cache_entry(db, node, m, key),
                      "download": prefetch.row_out(active[node.id]) if node.id in active else None,
                      "engines": {n: engine_on(node, all_recipes[n][0]) for n in names}})
-    deps = db.scalars(select(Deployment).where(Deployment.model_id == m.id).order_by(Deployment.name)).all()
+    deps = db.scalars(select(Deployment).where(Deployment.model_id == m.id, trials.not_trial())
+                      .order_by(Deployment.name)).all()
     return {"files": files_of(m), "machines": rows,
             "fits": {n: fits(db, m, all_recipes[n][0]) for n in names},
             "deployments": [{"id": d.id, "name": d.name, "recipe": d.recipe} for d in deps]}
 
 
+ENGINE_DOWNLOADS = 20   # the engine page's list: those under way and the latest finished ones
+
+
 def engine_page(db: DbSession, recipe: Recipe) -> dict:
+    from forgeyard.db import ModelDownload
+
+    active = {r.node_id: r for r in prefetch.active_rows(db, engine_only=recipe.name)}
     rows = []
     for node in machines(db):
         conn = hub.get(node.id)
         rows.append({**node_out(node), **engine_on(node, recipe),
-                     "can_list": conn is not None and FEATURE_IMAGE_SAVE in conn.features})
-    deps = db.scalars(select(Deployment).where(Deployment.recipe == recipe.name).order_by(Deployment.name)).all()
+                     "can_list": conn is not None and FEATURE_IMAGE_SAVE in conn.features,
+                     # 1.5.2 (#95): a download of this engine alone under way there.
+                     "download": prefetch.row_out(active[node.id]) if node.id in active else None})
+    recent = db.scalars(select(ModelDownload).where(ModelDownload.model_id.is_(None), ModelDownload.recipe == recipe.name)
+                        .order_by(ModelDownload.id.desc()).limit(ENGINE_DOWNLOADS)).all()
+    downloads = sorted(recent, key=lambda r: (r.state not in prefetch.ACTIVE, -r.id))
+    deps = db.scalars(select(Deployment).where(Deployment.recipe == recipe.name, trials.not_trial())
+                      .order_by(Deployment.name)).all()
     models = [m for m in db.scalars(select(CatalogModel).order_by(CatalogModel.name)).all()
               if m.format in recipe.formats and m.task in recipe.tasks]
     return {"machines": rows, "deployments": [{"id": d.id, "name": d.name, "model_id": d.model_id} for d in deps],
-            "models": [{"id": m.id, "name": m.name, "title": m.title} for m in models]}
+            "models": [{"id": m.id, "name": m.name, "title": m.title} for m in models],
+            "downloads": [prefetch.row_out(r) for r in downloads], "caught_up": caught_up(recipe),
+            # 1.5.2 (#95, PR 4): its trial running now, and its latest finished one (the history: /trials).
+            "trial_running": next((trials.brief_out(t) for t in trials.running(db) if t.recipe == recipe.name), None),
+            "last_trial": trials.last_for(db, recipe.name)}
+
+
+def caught_up(recipe: Recipe) -> Optional[dict]:
+    """1.5.2 (#95): a copy whose built-in engine has moved (with a Forgeyard release) to the copy's version or past it:
+    {builtin, version, same}, so the page can say the deployments on the copy can switch back. Nothing is done."""
+    from forgeyard.models.engineversions import version_key
+    from forgeyard.models.recipes import builtin_recipes
+
+    if not recipe.based_on:   # a built-in recipe never has one
+        return None
+    found = builtin_recipes().get(recipe.based_on)
+    if found is None:
+        return None
+    base = found[0]
+    have, mine = version_key(base.version), version_key(recipe.version)
+    if not have or not mine or have < mine:
+        return None
+    return {"builtin": base.name, "title": base.title, "version": base.version, "same": have == mine}
 
 
 def listable(db: DbSession) -> list[Node]:

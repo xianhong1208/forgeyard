@@ -428,6 +428,20 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .engine-facts .vendor { display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .engine-facts .chip { flex: none; }
 .recipe .engine-serves { margin: 6px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 1.5.2 (#189): the image (or program) an engine runs, beside its name: one line, the name cut with an ellipsis,
+   never the "+N". */
+.engine-image { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; max-width: 100%; vertical-align: bottom; font-size: 11.5px; }
+.engine-image-name { display: flex; min-width: 0; white-space: nowrap; }
+.engine-image-repo { flex: 0 4 auto; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
+.engine-image-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.engine-image-more { flex: none; }
+.engine-image-line { display: flex; min-width: 0; height: 18px; line-height: 18px; margin: 4px 0 0; }
+.recipe p.engine-image-line { margin: 4px 0 0; }
+.lp-image { margin: 2px 0 0; }
+.lp-header .mk-title { max-width: 100%; }
+.field-hint.engine-image-line { height: auto; margin-top: 4px; }
+.engine-with-image { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; }
+.engine-with-image .engine-image { max-width: min(42ch, 60vw); }
 .engine-foot { display: flex; align-items: flex-start; gap: 8px; margin-top: auto; padding-top: 6px; min-height: 36px; }
 .engine-details { flex: 1; min-width: 0; }
 .engine-details > summary { cursor: pointer; color: var(--ink-2); width: max-content; line-height: 30px; }
@@ -435,6 +449,91 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .engine-details[open] > summary { margin-bottom: 4px; }
 .engine-actions { display: flex; gap: 2px; flex: none; }
 .engine-form textarea { width: 100%; }
+.eu-badge { flex: none; align-self: center; text-decoration: none; white-space: nowrap; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.eu-badge:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* 1.5.2 (#95): the check for newer engine versions, and an engine page's Newer versions section. */
+.eu-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+.eu-bar .eu-last { margin: 0; flex: 1 1 200px; min-width: 0; }
+.eu-bar .notice { flex-basis: 100%; margin: 0; }
+.panel-head .eu-bar { margin: 0; justify-content: flex-end; flex: 1 1 auto; }
+.panel-head .eu-bar .eu-last { flex: 0 1 auto; text-align: right; }
+.eu-errors { margin: 4px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+.eu-cand { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 0 0 12px; background: var(--surface-2); }
+.eu-cand-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 8px; }
+.eu-cand-head h3 { margin: 0; font-size: 15px; }
+.eu-cand-head .eu-actions { margin-left: auto; }
+.eu-cand-head .eu-actions:empty { display: none; }
+.eu-notes { display: inline-flex; align-items: center; gap: 3px; }
+.eu-variants td { vertical-align: top; }
+.eu-variants td:first-child, .eu-variants td:nth-child(2) { white-space: nowrap; }
+.eu-mentions { margin: 8px 0 0; }
+.eu-mentions p { margin: 0 0 4px; }
+.eu-mentions > ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.eu-mentions summary { cursor: pointer; }
+.eu-excerpts { margin: 4px 0 6px; padding-left: 18px; color: var(--ink-2); overflow-wrap: anywhere; }
+/* 1.5.2 (#95 PR 2): Try this version (its dialog) and a copy's page. */
+.et-block { display: grid; gap: 6px; }
+.et-block h3 { margin: 0; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.et-variants { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.et-variants li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; overflow-wrap: anywhere; }
+.et-note { margin: 0; }
+.et-sig { display: flex; gap: 8px; align-items: flex-start; margin: 0; }
+.et-sig svg { flex: none; margin-top: 2px; }
+.et-dlg .notice { margin: 0; }
+.et-pins td { vertical-align: top; }
+.et-pins td:first-child { white-space: nowrap; }
+.et-pins .chip svg { vertical-align: -2px; }
+.table-wrap + .et-block { margin-top: 14px; }
+.et-flag { white-space: nowrap; }
+.et-unverifiable { display: grid; gap: 6px; justify-items: start; padding: 10px 12px; border: 1px solid #f2c4c0;
+  border-radius: var(--radius); background: var(--bad-soft); overflow-wrap: anywhere; }
+.et-unverifiable p { margin: 0; }
+.et-unv-title { display: flex; align-items: center; gap: 6px; color: var(--bad); }
+.et-unverifiable .btn-danger { border-color: #f2c4c0; background: var(--surface, #fff); }
+.et-not-verified svg { vertical-align: -2px; }
+/* 1.5.2 (#95, PR 4): trying out an engine (components/EngineTrials.tsx). */
+.tr-dlg fieldset.tr-params { margin: 0; padding: 10px 12px 4px; border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: 6px; min-width: 0; }
+.tr-params legend { padding: 0 4px; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.tr-params p { margin: 0; }
+.tr-param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.tr-param-grid .field { margin: 0; min-width: 0; }
+.tr-param-grid input, .tr-param-grid select { width: 100%; }
+.tr-verdict { display: grid; gap: 6px; min-height: 22px; }
+.tr-verdict p { margin: 0; }
+.tr-fits { color: var(--ok); }
+.tr-dlg .notice { margin: 0; }
+.tr-running { display: grid; gap: 10px; justify-items: start; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--line); border-left: 3px solid var(--heat); border-radius: var(--radius); background: var(--heat-soft); }
+.tr-running > .table-wrap { width: 100%; }
+.tr-running-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; overflow-wrap: anywhere; }
+.tr-checks td { vertical-align: top; }
+.tr-checks td:first-child { white-space: nowrap; }
+.tr-note { max-width: 46ch; overflow-wrap: anywhere; }
+.tr-history td { vertical-align: top; }
+.tr-sum { overflow-wrap: anywhere; }
+.tr-open > td { background: var(--surface-2); }
+.tr-detail { display: grid; gap: 10px; padding: 4px 0; min-width: 0; }
+.tr-detail p { margin: 0; }
+.tr-compare h4 { margin: 0; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.tr-compare p { margin: 0; }
+.tr-more summary { cursor: pointer; }
+.tr-log { margin: 6px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius); }
+.tr-events { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.tr-chip { flex: none; align-self: center; text-decoration: none; white-space: nowrap; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.tr-chip svg { vertical-align: -2px; }
+.tr-last { margin: 6px 0 0; }
+.tr-serving { display: grid; gap: 6px; padding: 12px 14px; margin-bottom: 16px; border-left: 3px solid var(--heat); }
+.tr-serving h2 { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.tr-serving p { margin: 0; }
+.tr-serving-list { margin: 0; padding-left: 18px; display: grid; gap: 2px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .tr-checks td:first-child { white-space: normal; }
+  .tr-note { max-width: none; }
+  .tr-open > td { padding: 8px 10px !important; }
+}
+.lp-sec .notice + .lp-desc { margin-top: 10px; }
+.spin { animation: eu-spin 1s linear infinite; }
+@keyframes eu-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .engine-form-lead { margin: 0 0 6px; }
 .variants { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .variants li { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; }
@@ -482,6 +581,11 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .edit-plan { margin: 0 0 10px; font-size: 13.5px; }
 .edit-changes { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .edit-changes li { overflow-wrap: anywhere; }
+/* 1.5.2 (#95): the one-replica notice before a change that restarts the only replica. */
+.edit-outage p { margin: 0 0 6px; font-size: 13.5px; }
+.edit-outage ul { margin: 0; padding-left: 18px; font-size: 13.5px; display: grid; gap: 3px; }
+.edit-outage li { overflow-wrap: anywhere; }
+.dlg-title-text { min-width: 0; overflow-wrap: anywhere; }
 .rep-stuck { color: #8a1a12; }
 .notice .verdicts li { border-top-color: #f2c4c0; }
 

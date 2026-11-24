@@ -32,8 +32,9 @@ reader plainly with 你, never 您.
 | workload | workload | Kept in English (the guide does). |
 | app (deprecated) | 應用程式 | |
 | process (runtime) | 行程 | 程式 for a program. |
-| engine (recipe) | 引擎（配方） | The console says 引擎; the API and YAML say recipe = 配方. |
-| model library / catalog / sources | 模型庫 / 目錄 / 來源 | Models page tabs: 目錄, 引擎, 來源. |
+| engine (recipe) | 推論引擎（配方） | The software that runs a model (vLLM, llama.cpp, faster-whisper…). The console says 推論引擎, never a bare 引擎 (1.5.2: a bare 引擎 read as unclear); the API and YAML say recipe = 配方. See *Engine, image, program* below. |
+| container engine (Docker, Podman) | 容器引擎 | The one compound that keeps a bare 引擎: it is not the engine above. |
+| model library / catalog / sources | 模型庫 / 目錄 / 來源 | Models page tabs: 目錄, 推論引擎, 來源. |
 | model cache | 模型快取 | |
 | estimate | 估算 | |
 | gated (model) | 受限 | |
@@ -73,6 +74,17 @@ reader plainly with 你, never 您.
 | sign in / sign out | 登入 / 登出 | |
 | image (container) | 映像檔 | pull = 拉取, layer = 層. |
 | relay (through the server) | 經由伺服器 | |
+| try out (an engine: a trial run) / trial | 試跑 / 試跑紀錄 | 1.5.2: a temporary deployment that is checked, then removed. Not 試用 (*Try this version* = 試用這個版本, which makes a copy) and not 試試看 (a deployment's *Try it*, one request). |
+
+## Engine, image, program
+
+- 推論引擎 = the software: 推論引擎 llama-cpp, 加入自訂推論引擎, 沒有推論引擎能提供它.
+- 映像檔 = its Docker image: 推論引擎的映像檔 where the sentence must say whose, plain 映像檔 where the context already
+  says it (a variant's row, an engine's page). Not 引擎映像檔.
+- 程式 = a process variant's program (its release archive or installed command): 推論引擎的程式.
+- 容器引擎 = Docker or Podman on a machine; it keeps its name.
+- Where space is tight (a tab, a column header) 推論引擎 still fits: four characters, no shorter form.
+- `web/src/i18n/engineWording.test.ts` fails on a bare 引擎 in a zh-TW dictionary.
 
 ## Model kinds (the Serving sections and tasks)
 

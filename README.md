@@ -31,7 +31,16 @@ them where they fit, and every program calls them at `/v1` with an API key.
   and then can sleep when idle and give its memory back (1.5.0): the next request wakes it and waits for it.
 - **A page per model and per engine.** A catalog model's page shows which machines have it cached and
   where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
-  machines already have its image or program.
+  machines already have its image or program. An admin can check whether the built-in engines have newer
+  stable versions upstream (1.5.2): each newer version lists the variants that have an image of it, its
+  release notes, and the flags this engine passes that those notes mention. **Try this version** makes a
+  custom copy pinned to that version by digest (signatures verified where the project publishes them, such
+  as llama.cpp's), whose images come through the server and run offline like the built-in's; the built-in
+  engine itself does not change. A deployment moves to the copy, and back, from its Edit page, keeping its name,
+  keys and routes; **Download to…** on an engine's page fetches only its image or program to chosen machines
+  first. **Try it out** deploys a model with a version for a few minutes, isolated from keys and usage, checks that
+  it starts, its measured memory against the estimate, its answers and latency against the built-in engine, and
+  removes it again; the results stay on the engine's page.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed
@@ -72,6 +81,14 @@ browser's language the first time, and the account menu switches it
 ([how](docs/guide/how-to.md#use-the-console-in-traditional-chinese)). Only the server changes: the agents need
 no update.
 
+1.5.2 brings **engine updates**. An admin can check whether the built-in engines have newer stable versions
+upstream, and **Try this version** makes a copy of one pinned by digest, with its signatures verified where the
+project signs them (llama.cpp); the built-in engine stays as it is. **Try it out** runs a model on the copy for a
+few minutes, apart from keys and usage, and compares its start, memory and answers with the built-in engine's. A
+deployment's **Edit** page then moves it to the copy and back, keeping its name, keys and routes
+([how](docs/guide/how-to.md#try-a-newer-version-of-an-engine)). Back up before upgrading: the server's database
+changes. A server run from source installs with `uv sync --extra server`; the agents need no update.
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
@@ -103,7 +120,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.1
+  docker.io/tonyhuang1101/forgeyard:1.5.2
 sudo docker logs forgeyard
 ```
 
@@ -114,7 +131,7 @@ to build the web UI:
 git clone https://github.com/xianhong1208/forgeyard.git
 cd forgeyard
 cd web && npm ci && npm run build && cd ..
-uv sync
+uv sync --extra server
 HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 ```
 
@@ -149,7 +166,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:

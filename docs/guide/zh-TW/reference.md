@@ -21,7 +21,7 @@
 | `PORT` | `7860` | 連接埠，網頁介面、API、`/v1` 和 agent 都用這個 |
 | `PUBLIC_URL` | — | 使用者和 agent 使用的位址，例如 `https://192.168.1.20:7860`。加入指令、設定密碼的連結和閘道位址都會用到它；它的主機一律會被接受，也會包含在憑證裡。留空：使用每個瀏覽器開啟 Forgeyard 時的位址；如果那是 `127.0.0.1`，其他機器就無法使用 |
 | `DATA_DIR` | `data` | 資料庫（SQLite）、`secret.key`、`tls/` 和設定權杖（setup token）的位置。相對路徑是相對於伺服器啟動時所在的資料夾 |
-| `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra postgres`） |
+| `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra server --extra postgres`） |
 | `TLS` | `on` | `on`：以 Forgeyard 自己的 CA（建立在 `data/tls/`）或你的憑證提供 HTTPS。`off`：純 HTTP，只能用在處理 HTTPS 的代理後面 |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰：兩個都設或都不設（只設一個會停止啟動）。每 12 小時檢查一次，有變更就重新載入。`TLS=off` 時會被忽略 |
 | `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**信任這台伺服器** 也會提供它。沒有自己的憑證時會被忽略 |
@@ -72,14 +72,14 @@
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
 | `AGENT_OFFLINE_MOVE_SECONDS` | `600` | 離線這麼久的機器（從最後一次心跳起算，伺服器啟動得更晚時從伺服器啟動起算），它上面沒有固定機器的部署，副本會重新放到放得下的機器上；固定在它上面的部署會等它。`0`：副本永遠等原本的機器（[詳細說明](how-to.md#when-a-machine-stays-offline)） |
-| `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**引擎映像檔** → **上傳映像檔**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
+| `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**推論引擎的映像檔** → **上傳映像檔**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
 | `AGENT_IMAGE` | — | **加入機器** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
 ### 模型
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
+| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`）。檢查推論引擎新版本時也適用 |
 | `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **模型 → 來源** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
 | `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
@@ -175,7 +175,7 @@
 | `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | 行程的資源限制方式：systemd（有 CPU 和記憶體上限的 scope；需要在有 systemd 的主機上以 root 執行）、rlimit（沒有 systemd，例如在容器裡），或 auto。 |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | 每個副本保留的輸出量，單位 MB。 |
 | `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | 連續這麼多分鐘沒有收到新的位元組時，拉取映像檔就算失敗（解開各層時是三倍）。持續有進度的慢速拉取絕不會被中止。 |
-| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models`（以 root 執行時） | 下載並保存模型和引擎的位置。預設：以 root 執行時是 /srv/forgeyard-models，否則是 ~/.local/share/forgeyard-models。設成空白（""）：這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
+| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models`（以 root 執行時） | 下載並保存模型和推論引擎的位置。預設：以 root 執行時是 /srv/forgeyard-models，否則是 ~/.local/share/forgeyard-models。設成空白（""）：這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
 | `[models]` `local_dirs` | `FORGEYARD_MODEL_LOCAL_DIRS` | `--model-local-dir` | — | 這台機器上 local:// 模型可以使用的目錄。環境變數格式：以逗號分隔。 |
 | `[models]` `allow_private_hosts` | `FORGEYARD_ALLOW_PRIVATE_MODEL_HOSTS` | `--allow-private-model-hosts` | `false` | 允許從私有位址和純 http 下載模型（僅限區域網路內的鏡像站）。 |
 
@@ -212,7 +212,7 @@ local_dirs = ["/data/models"]
 |---|---|
 | `FORGEYARD_AGENT_CONFIG` | 設定檔，取代 `/etc/forgeyard/agent.toml`（等同 `--config PATH`） |
 | `FORGEYARD_JOIN_TOKEN` | 一次性的加入權杖（等同 `--join-token`） |
-| `DOCKER_HOST`、`DOCKER_CONFIG`、`CONTAINER_HOST`、`XDG_RUNTIME_DIR` | 傳給 `docker` 或 `podman` 指令，讓非預設的引擎 socket 或設定可以運作。agent 環境裡的其他東西都不會傳給引擎 |
+| `DOCKER_HOST`、`DOCKER_CONFIG`、`CONTAINER_HOST`、`XDG_RUNTIME_DIR` | 傳給 `docker` 或 `podman` 指令，讓非預設的容器引擎 socket 或設定可以運作。agent 環境裡的其他東西都不會傳給推論引擎 |
 | `ROCM_PATH`、`ROCM_HOME` | ROCm 不在 `/opt/rocm` 時的安裝位置（AMD 卡） |
 | `FORGEYARD_AGENT_SIMULATION` | 設為 `1` 才允許 `--simulate-inventory FIXTURE`：agent 回報錄好的硬體資料，而不是自己的硬體。僅供開發和測試；伺服器會把這種機器標示為模擬 |
 
@@ -259,18 +259,18 @@ local_dirs = ["/data/models"]
 - `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。文字轉語音則改成 `input` 的每個字元算一個 token（見[文字轉語音](#text-to-speech)）；圖片請求不計任何 token（見[圖片生成](#images)）。
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
 - 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
-- 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
+- 你關閉連線時，閘道會立刻關閉往上游的請求，推論引擎就會停止生成。
 
 ### 重試與等待第一個回應
 
-- **一個請求最多只執行一次。** 只有在請求確定沒有送到第一個副本時，閘道才會改試另一個副本（或供應商）：連線建立不起來（沒有程式在聽、被拒絕、`GATEWAY_CONNECT_TIMEOUT`）、沒有空出的連線，或副本的金鑰守門員回應它的引擎沒有在執行（503 帶 `X-Forgeyard-Not-Taken`，1.4.5 起的 agent）。請求送出之後才斷掉的連線（寫入請求時，或等待回應時）會回 502 `upstream_error`（供應商則為 `provider_error`），而且不會再送到別處：引擎可能已經開始處理，生成或付費的雲端請求會跑兩次。如果安全，請自己重試。1.4.5 之前的 agent 在引擎沒有執行時會直接關閉連線，現在會被當成這種斷線：請更新 agent，才能在 agent 回報引擎停止前的那幾秒內保有容錯移轉。
-- **串流的第一個回應。** 串流請求（`stream: true`，或帶 `stream_format` 的語音）寫入副本之後，副本有部署的 *等待首次回應*（`first_answer_timeout`，預設 **120 秒**，5 到 3,600）送出狀態列和串流的第一批位元組。超過時請求會被關閉，引擎跟著停止，回應是 504 `first_answer_timeout`；它絕不會送到另一個副本。串流開始之後，之後每一段最多可以等 `GATEWAY_READ_TIMEOUT`（600 秒）；設得比它長的等待，第一批位元組也會照設定等。**非串流的回答就是整個回答，所以這個等待不適用**：它維持 `GATEWAY_READ_TIMEOUT`（504 `upstream_timeout`），長的非串流生成和長錄音的轉錄不會被提早切斷。圖片請求維持部署自己的 *Timeout*；影片工作也是用自己的；這兩種部署不接受 `first_answer_timeout`。它在部署和修改表單的 **進階** 裡；修改它不會重新啟動任何東西。
+- **一個請求最多只執行一次。** 只有在請求確定沒有送到第一個副本時，閘道才會改試另一個副本（或供應商）：連線建立不起來（沒有程式在聽、被拒絕、`GATEWAY_CONNECT_TIMEOUT`）、沒有空出的連線，或副本的金鑰守門員回應它的推論引擎沒有在執行（503 帶 `X-Forgeyard-Not-Taken`，1.4.5 起的 agent）。請求送出之後才斷掉的連線（寫入請求時，或等待回應時）會回 502 `upstream_error`（供應商則為 `provider_error`），而且不會再送到別處：推論引擎可能已經開始處理，生成或付費的雲端請求會跑兩次。如果安全，請自己重試。1.4.5 之前的 agent 在推論引擎沒有執行時會直接關閉連線，現在會被當成這種斷線：請更新 agent，才能在 agent 回報推論引擎停止前的那幾秒內保有容錯移轉。
+- **串流的第一個回應。** 串流請求（`stream: true`，或帶 `stream_format` 的語音）寫入副本之後，副本有部署的 *等待首次回應*（`first_answer_timeout`，預設 **120 秒**，5 到 3,600）送出狀態列和串流的第一批位元組。超過時請求會被關閉，推論引擎跟著停止，回應是 504 `first_answer_timeout`；它絕不會送到另一個副本。串流開始之後，之後每一段最多可以等 `GATEWAY_READ_TIMEOUT`（600 秒）；設得比它長的等待，第一批位元組也會照設定等。**非串流的回答就是整個回答，所以這個等待不適用**：它維持 `GATEWAY_READ_TIMEOUT`（504 `upstream_timeout`），長的非串流生成和長錄音的轉錄不會被提早切斷。圖片請求維持部署自己的 *Timeout*；影片工作也是用自己的；這兩種部署不接受 `first_answer_timeout`。它在部署和修改表單的 **進階** 裡；修改它不會重新啟動任何東西。
 
 ### 對話中的圖片、音訊與影片
 
-`POST /v1/chat/completions` 接受 OpenAI 的內容區塊（content parts）。閘道接受什麼、轉送給引擎什麼：
+`POST /v1/chat/completions` 接受 OpenAI 的內容區塊（content parts）。閘道接受什麼、轉送給推論引擎什麼：
 
-| 區塊 | 接受的寫法 | 送給引擎的形式 |
+| 區塊 | 接受的寫法 | 送給推論引擎的形式 |
 |---|---|---|
 | 文字 | `text`、`input_text`、`refusal` | 不變 |
 | 圖片 | `image_url`（`{"url": …, "detail"}` 或單純字串）、`input_image` | 帶 `data:` URI 的 `image_url` |
@@ -278,10 +278,10 @@ local_dirs = ["/data/models"]
 | 影片 | `video_url`、`input_video` | 帶 `data:` URI 的 `video_url` |
 | 檔案（PDF） | `file`，`file_data` 為 `data:` URI | 不變，只送給能接受檔案的配方（內建配方都不能） |
 
-- 媒體網址可以是 `data:` URI（base64，且類型與區塊相符）或 `http(s)` 網址。**閘道會自己下載網址**，再以 `data:` URI 送給引擎：引擎從不自己抓任何東西。下載遵守 egress 規則：只連公開位址（開啟 `MEDIA_ALLOW_PRIVATE_HOSTS` 才允許私有位址；link-local 與 metadata 位址一律拒絕）、最多 3 次轉址且每次都重新檢查、每個項目最多 `MEDIA_FETCH_MAX_MB`、每個項目 20 秒，回應的類型也必須與區塊相符（圖片區塊要 `image/…`）。`file://` 與其他所有 scheme 回 400 `media_url_refused`。
+- 媒體網址可以是 `data:` URI（base64，且類型與區塊相符）或 `http(s)` 網址。**閘道會自己下載網址**，再以 `data:` URI 送給推論引擎：推論引擎從不自己抓任何東西。下載遵守 egress 規則：只連公開位址（開啟 `MEDIA_ALLOW_PRIVATE_HOSTS` 才允許私有位址；link-local 與 metadata 位址一律拒絕）、最多 3 次轉址且每次都重新檢查、每個項目最多 `MEDIA_FETCH_MAX_MB`、每個項目 20 秒，回應的類型也必須與區塊相符（圖片區塊要 `image/…`）。`file://` 與其他所有 scheme 回 400 `media_url_refused`。
 - 請求只會送到能處理其內容的部署：模型接受這種媒體（從模型的 `config.json` 判斷，GGUF 則看它的 projector 檔），配方也接受，而且數量在部署的 *Images per request*（圖片與音訊片段，預設 4）與 *Videos per request*（預設 0：影片預設關閉）之內。否則回 400 `media_not_supported` 或 `too_many_media_items`。
 - **1.3 中，帶媒體的請求絕不送往雲端供應商**（也不送往你網路內的供應商）。只由供應商提供的路由回 400 `media_local_only`；混合路由則不會溢出。
-- 用量會計算媒體項目數（`GET /api/usage` 的 `media_items`）。圖片的 token 依引擎回報，包含在 `prompt_tokens` 中。
+- 用量會計算媒體項目數（`GET /api/usage` 的 `media_items`）。圖片的 token 依推論引擎回報，包含在 `prompt_tokens` 中。
 
 部署參數，位於部署表單的 **進階**（配方 `vllm` 與 `llama-cpp`）：
 
@@ -297,20 +297,20 @@ local_dirs = ["/data/models"]
 
 ### 文字轉語音
 
-`POST /v1/audio/speech` 接受 OpenAI 的請求，回應的是音訊本身（不是 JSON），引擎一邊產生閘道就一邊轉送。三種引擎提供這項服務（配方 `vllm-omni-tts`、搭配 TTS GGUF 的 `llama-cpp`、`speaches-tts`）；只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/audio/speech` 接受 OpenAI 的請求，回應的是音訊本身（不是 JSON），推論引擎一邊產生閘道就一邊轉送。三種推論引擎提供這項服務（配方 `vllm-omni-tts`、搭配 TTS GGUF 的 `llama-cpp`、`speaches-tts`）；只由本機部署提供，絕不送往雲端供應商。
 
 | 欄位 | 閘道怎麼處理 |
 |---|---|
 | `model` | 語音模型的名稱，和平常一樣 |
 | `input` | 必填，最多為部署的 *Longest input*（`max_input_chars`；0 代表 vLLM-Omni 與 llama.cpp 取上下文長度的四分之一，預設即 1,024；speaches 為 4,096）。超過時回應 400 `input_too_long` |
-| `voice` | 模型的聲音之一（`GET /v1/audio/voices`），名稱或 `{"id": …}` 皆可。模型沒有的 OpenAI 聲音名稱（`alloy`、`nova` 等），或沒有指定聲音時，改用配方的預設聲音或引擎列出的第一個；回應以 `X-Forgeyard-Voice` 標出（模型沒有內建聲音、只用它自己的一種聲音時為 `default`） |
-| `response_format` | `mp3`、`opus`、`aac`、`flac`、`wav` 或 `pcm`，且必須是引擎能產生的；否則回應 400 `unsupported_response_format`。沒指定時用引擎的預設（vLLM-Omni 與 llama.cpp 為 `wav`，speaches 為 `mp3`），不是 OpenAI 的 `mp3` |
-| `stream_format` | `audio`：一邊產生一邊傳原始音訊（串流的 WAV 會宣告未知長度）。`sse`：OpenAI 的 `speech.audio.delta` / `speech.audio.done` 事件（僅 vLLM-Omni）。沒指定時傳回整個檔案。引擎不支援時回應 400 `stream_format_not_supported`。`stream: true` 等同 `stream_format: audio` |
+| `voice` | 模型的聲音之一（`GET /v1/audio/voices`），名稱或 `{"id": …}` 皆可。模型沒有的 OpenAI 聲音名稱（`alloy`、`nova` 等），或沒有指定聲音時，改用配方的預設聲音或推論引擎列出的第一個；回應以 `X-Forgeyard-Voice` 標出（模型沒有內建聲音、只用它自己的一種聲音時為 `default`） |
+| `response_format` | `mp3`、`opus`、`aac`、`flac`、`wav` 或 `pcm`，且必須是推論引擎能產生的；否則回應 400 `unsupported_response_format`。沒指定時用推論引擎的預設（vLLM-Omni 與 llama.cpp 為 `wav`，speaches 為 `mp3`），不是 OpenAI 的 `mp3` |
+| `stream_format` | `audio`：一邊產生一邊傳原始音訊（串流的 WAV 會宣告未知長度）。`sse`：OpenAI 的 `speech.audio.delta` / `speech.audio.done` 事件（僅 vLLM-Omni）。沒指定時傳回整個檔案。推論引擎不支援時回應 400 `stream_format_not_supported`。`stream: true` 等同 `stream_format: audio` |
 | `speed` | 0.25 到 4，原樣轉送（llama.cpp 只接受 1.0，speaches 的 Kokoro 為 0.5 到 2） |
-| `instructions` | 原樣轉送：vLLM-Omni 的 Qwen3-TTS 會用它（風格與情緒），其他引擎忽略 |
+| `instructions` | 原樣轉送：vLLM-Omni 的 Qwen3-TTS 會用它（風格與情緒），其他推論引擎忽略 |
 | `language`、`lang`、`sample_rate`、`seed` 等 | 原樣轉送。對 llama.cpp，若請求沒給，閘道會依文字的書寫系統設定 `lang`（`zh`、`ja`、`ko`），並設定 `n_predict`（每個字元十個音訊幀，至少 512，最多到上下文長度） |
 
-**1.3 不提供聲音複製。** 參考錄音（`ref_audio`、`ref_text`、`speaker_ref_b64`、`speaker_embedding` 等）、以音訊資料或連結當作聲音、Qwen3-TTS 的 `task_type: "Base"`，以及上傳或刪除聲音，都回應 400 `voice_cloning_not_supported`，任何內容都不會送到引擎。
+**1.3 不提供聲音複製。** 參考錄音（`ref_audio`、`ref_text`、`speaker_ref_b64`、`speaker_embedding` 等）、以音訊資料或連結當作聲音、Qwen3-TTS 的 `task_type: "Base"`，以及上傳或刪除聲音，都回應 400 `voice_cloning_not_supported`，任何內容都不會送到推論引擎。
 
 每個有回應的請求會計入（`GET /api/usage` 與 **用量** 頁面）：
 
@@ -318,22 +318,22 @@ local_dirs = ["/data/models"]
 |---|---|
 | `characters` | 輸入的字元數（Unicode 碼位），送出前就算好 |
 | `media_ms` | 音訊長度（毫秒），在轉送時讀出：`wav` 看檔頭（串流時算檔頭之後的位元組），`pcm` 依大小與回應標明的取樣率（`x-audio-sample-rate`，或類型裡的 `rate=`；否則用該聲音自己的取樣率），`flac` 看 STREAMINFO，`mp3` 與 `aac` 數音框，`opus` 看最後一個 Ogg 頁；SSE 依 `pcm` 片段的大小。其他回應不計 |
-| tokens | 只計引擎回報的：vLLM-Omni 的 `x-vllm-omni-input-tokens` 與 `-output-tokens`，或 `speech.audio.done` 的 usage |
+| tokens | 只計推論引擎回報的：vLLM-Omni 的 `x-vllm-omni-input-tokens` 與 `-output-tokens`，或 `speech.audio.done` 的 usage |
 
 **限制：** rpm 和所有請求一樣；**tpm 以 `input` 的每個字元算一個 token**，在請求到達時先預留（15 個字元的請求需要 15 個 token 的額度）。預算只管雲端花費，而語音從不送往雲端。金鑰的模型清單同樣適用於語音和聲音清單。
 
 `GET /v1/audio/voices?model=<model>` 回應
 `{"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", "formats",
-"default_format", "stream_formats", "max_input_chars"}`，向一個就緒的副本詢問，保留 5 分鐘。上傳到引擎的聲音一律不列出。
+"default_format", "stream_formats", "max_input_chars"}`，向一個就緒的副本詢問，保留 5 分鐘。上傳到推論引擎的聲音一律不列出。
 
 ### 圖片生成
 
-`POST /v1/images/generations` 接受 OpenAI 的請求，回應 OpenAI 的 JSON，圖片以 base64 傳回。兩種引擎提供這項服務（配方 `vllm-omni-image` 在 NVIDIA 上跑 diffusers pipeline，`sd-cpp` 在 AMD（Vulkan）、NVIDIA 和 CPU 上跑 stable-diffusion.cpp）；只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/images/generations` 接受 OpenAI 的請求，回應 OpenAI 的 JSON，圖片以 base64 傳回。兩種推論引擎提供這項服務（配方 `vllm-omni-image` 在 NVIDIA 上跑 diffusers pipeline，`sd-cpp` 在 AMD（Vulkan）、NVIDIA 和 CPU 上跑 stable-diffusion.cpp）；只由本機部署提供，絕不送往雲端供應商。
 
 | 欄位 | 閘道怎麼處理 |
 |---|---|
 | `model` | 圖片模型的名稱，和平常一樣 |
-| `prompt` | 必填，最多為部署的 *Longest prompt*（`max_prompt_chars`，4,000）。超過時回應 400 `prompt_too_long`。提示裡的引擎設定（`<sd_cpp_extra_args>`）會被拒絕：請改用下面的欄位 |
+| `prompt` | 必填，最多為部署的 *Longest prompt*（`max_prompt_chars`，4,000）。超過時回應 400 `prompt_too_long`。提示裡的推論引擎設定（`<sd_cpp_extra_args>`）會被拒絕：請改用下面的欄位 |
 | `n` | 1 到部署的 *Images per request*（`max_images`，預設 4）；超過時回應 400 `too_many_images`。沒指定時為 1 |
 | `size` | `WIDTHxHEIGHT`；`auto` 或沒指定時用部署的 *Default size*（模型自己的：Stable Diffusion 1.5 為 512x512，SDXL、Z-Image 與 FLUX 為 1024x1024）。每一邊最多 *Largest side*（`max_side`，0 = 模型自己的）；超過時回應 400 `image_too_large`。每一邊必須是 16 的倍數（diffusion transformer）或 64 的倍數（Stable Diffusion 的 UNet）；否則回應 400 `invalid_size` |
 | `response_format` | 不指定或 `b64_json`。**`url` 會被拒絕**，回應 400 `response_format_not_supported`：Forgeyard 不保留它產生的圖片，所以沒有網址可給。請解碼 `data[].b64_json` |
@@ -344,11 +344,11 @@ local_dirs = ["/data/models"]
 | `quality`、`style`、`background`、`moderation`、`user` | 接受但忽略 |
 | `stream` | 拒絕（400 `streaming_not_supported`）：圖片做好才會回應 |
 
-其他東西都不會送到引擎：引擎會接受、但 Forgeyard 不提供的欄位（vLLM-Omni 的 `lora`，它帶的是伺服器上的路徑；它的 `extra_params` 與系統提示）都會被拿掉。
+其他東西都不會送到推論引擎：推論引擎會接受、但 Forgeyard 不提供的欄位（vLLM-Omni 的 `lora`，它帶的是伺服器上的路徑；它的 `extra_params` 與系統提示）都會被拿掉。
 
-回應：`{"created", "data": [{"b64_json"}], "output_format", "size"}`。引擎自己附加的內容（stable-diffusion.cpp 帶著提示與設定的 `generation_info`、vLLM-Omni 的各階段耗時）不會轉送。引擎的錯誤會以 OpenAI 的格式傳回，帶著它的狀態碼和 `engine_error` 這個 code。
+回應：`{"created", "data": [{"b64_json"}], "output_format", "size"}`。推論引擎自己附加的內容（stable-diffusion.cpp 帶著提示與設定的 `generation_info`、vLLM-Omni 的各階段耗時）不會轉送。推論引擎的錯誤會以 OpenAI 的格式傳回，帶著它的狀態碼和 `engine_error` 這個 code。
 
-**佇列。** 部署的每個副本同時處理 *Requests at once*（`concurrency`，1）個請求；其他請求在閘道裡等待，先到先處理，最多 *Queue length*（`queue`，8）個。再多一個就回應 429 `queue_full` 並附上 `Retry-After`（依它最近的請求花了多久計算）。等待超過部署 *Timeout* 的請求回應 503 `queue_timeout`；副本接手之後，閘道最多等待這個 *Timeout*（`timeout`：vLLM-Omni 為 600 秒，stable-diffusion.cpp 為 1,800 秒）取得圖片，之後回應 504 `upstream_timeout`。在等待中放棄的用戶端會離開佇列；它的請求絕不會送到引擎。
+**佇列。** 部署的每個副本同時處理 *Requests at once*（`concurrency`，1）個請求；其他請求在閘道裡等待，先到先處理，最多 *Queue length*（`queue`，8）個。再多一個就回應 429 `queue_full` 並附上 `Retry-After`（依它最近的請求花了多久計算）。等待超過部署 *Timeout* 的請求回應 503 `queue_timeout`；副本接手之後，閘道最多等待這個 *Timeout*（`timeout`：vLLM-Omni 為 600 秒，stable-diffusion.cpp 為 1,800 秒）取得圖片，之後回應 504 `upstream_timeout`。在等待中放棄的用戶端會離開佇列；它的請求絕不會送到推論引擎。
 
 **不過濾提示。** 閘道只檢查請求的格式與部署的上限，不檢查提示要求畫什麼。如果部署需要安全過濾，請在它前面加一層。
 
@@ -363,7 +363,7 @@ local_dirs = ["/data/models"]
 
 ### 影片生成
 
-`POST /v1/videos` 接受 OpenAI 的 Videos 請求，並立刻回應一個**工作**；影片在一個副本上製作，也由它保存。輪詢 `GET /v1/videos/{id}` 直到 `status` 是 `completed` 或 `failed`，再取回 `GET /v1/videos/{id}/content`。由一種引擎提供（配方 `vllm-omni-video`，NVIDIA 上的 vLLM-Omni）；只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/videos` 接受 OpenAI 的 Videos 請求，並立刻回應一個**工作**；影片在一個副本上製作，也由它保存。輪詢 `GET /v1/videos/{id}` 直到 `status` 是 `completed` 或 `failed`，再取回 `GET /v1/videos/{id}/content`。由一種推論引擎提供（配方 `vllm-omni-video`，NVIDIA 上的 vLLM-Omni）；只由本機部署提供，絕不送往雲端供應商。
 
 | 欄位 | 閘道怎麼處理 |
 |---|---|
@@ -376,33 +376,33 @@ local_dirs = ["/data/models"]
 | `input_reference`（以及 vLLM-Omni 的 `image_reference`、`video_reference`、`audio_reference`） | 拒絕，回應 400 `input_reference_not_supported`：1.3 只支援文字轉影片 |
 | `quality`、`user` | 接受但忽略 |
 
-其他東西都不會送到引擎：閘道只送出提示、模型、尺寸、影格數、每秒影格數和上面的欄位（絕不送 vLLM-Omni 的 `lora`、`extra_params` 或影格插補的路徑）。
+其他東西都不會送到推論引擎：閘道只送出提示、模型、尺寸、影格數、每秒影格數和上面的欄位（絕不送 vLLM-Omni 的 `lora`、`extra_params` 或影格插補的路徑）。
 
 **工作**採用 OpenAI 的格式：`{"id", "object": "video", "model", "status", "progress", "created_at",
 "completed_at", "expires_at", "size", "seconds", "quality", "remixed_from_video_id", "error"}`。
 
-- `id` 是 Forgeyard 自己的（`video_` 加上 32 個隨機十六進位數字），絕不是引擎的。別的金鑰的 id 回應 404 `video_not_found`，和不存在的 id 完全一樣。
-- `status` 是 `queued`、`in_progress`、`completed` 或 `failed`。`progress` 是引擎回報的值：vLLM-Omni 在影片做好之前都是 0，做好後是 100。
+- `id` 是 Forgeyard 自己的（`video_` 加上 32 個隨機十六進位數字），絕不是推論引擎的。別的金鑰的 id 回應 404 `video_not_found`，和不存在的 id 完全一樣。
+- `status` 是 `queued`、`in_progress`、`completed` 或 `failed`。`progress` 是推論引擎回報的值：vLLM-Omni 在影片做好之前都是 0，做好後是 100。
 - `seconds` 是字串，和 OpenAI 的 API 一樣。`expires_at` 在工作結束時設定：部署的 *Keep results* 之後。
 - 工作 `failed` 時的 `error`（`{"code", "message"}`）：
 
 | `error.code` | 意思 |
 |---|---|
-| `generation_failed` | 引擎做影片失敗；後面附上它的訊息 |
+| `generation_failed` | 推論引擎做影片失敗；後面附上它的訊息 |
 | `timed_out` | 在部署的 *Longest job*（`timeout`）內沒有做完；閘道已在副本上取消它 |
-| `replica_restarted` | 副本的引擎重新啟動：它的工作（放在記憶體裡）也跟著不見了 |
+| `replica_restarted` | 副本的推論引擎重新啟動：它的工作（放在記憶體裡）也跟著不見了 |
 | `replica_gone` | 副本被停止、重新配置或刪除 |
-| `video_lost` | 副本已經不知道這個工作（它的引擎重新啟動過） |
+| `video_lost` | 副本已經不知道這個工作（它的推論引擎重新啟動過） |
 
 不保存提示。工作的資料列在結果過期一週後刪除。
 
-**內容。** `GET /v1/videos/{id}/content` 從製作它的副本串流 MP4，以 `video/mp4` 加上 `Content-Disposition: inline` 傳回。`variant=thumbnail` 和 `variant=spritesheet` 回應 400 `variant_not_supported`（引擎只做影片）。還沒做好的工作回應 409 `video_not_ready`，失敗的回應 409 `video_failed`，過期的回應 410 `video_expired`，副本後來重新啟動或被停止的回應 410 `video_lost`。
+**內容。** `GET /v1/videos/{id}/content` 從製作它的副本串流 MP4，以 `video/mp4` 加上 `Content-Disposition: inline` 傳回。`variant=thumbnail` 和 `variant=spritesheet` 回應 400 `variant_not_supported`（推論引擎只做影片）。還沒做好的工作回應 409 `video_not_ready`，失敗的回應 409 `video_failed`，過期的回應 410 `video_expired`，副本後來重新啟動或被停止的回應 410 `video_lost`。
 
 **刪除。** `DELETE /v1/videos/{id}` 在副本上取消製作中的工作，或刪除完成的影片，並移除這個工作：`{"id", "object": "video.deleted", "deleted": true}`。
 
 **同時的工作數。** 一個副本一次做一段影片；其他的在它上面等待。閘道把工作送到工作最少的就緒副本。一個部署最多同時有 *Jobs at once*（`queue`，8）個在等待或製作中的工作，其中來自同一把金鑰（或試用區裡同一個人）的最多 *Jobs per key*（`jobs_per_key`，2）個。再多一個就回應 429 `queue_full` 或 `too_many_jobs` 並附上 `Retry-After`（依它最近的影片花了多久計算）。金鑰的每分鐘請求數會計入每個要求的工作；輪詢、列出和下載都不算。
 
-**過期。** 結果在 *Keep results*（`keep_minutes`，1,440）內可以取回；之後伺服器會在副本上刪除它。引擎自己也會在那之後一小時刪除它的檔案（`VLLM_OMNI_SERVER_STORAGE__FILE_TTL`），而且檔案放在副本的容器裡，所以停止或重新啟動的副本不會留下任何檔案。
+**過期。** 結果在 *Keep results*（`keep_minutes`，1,440）內可以取回；之後伺服器會在副本上刪除它。推論引擎自己也會在那之後一小時刪除它的檔案（`VLLM_OMNI_SERVER_STORAGE__FILE_TTL`），而且檔案放在副本的容器裡，所以停止或重新啟動的副本不會留下任何檔案。
 
 部署參數（配方 `vllm-omni-video`）：
 
@@ -426,7 +426,7 @@ local_dirs = ["/data/models"]
 | 單位 | 怎麼算 |
 |---|---|
 | 請求數 | 每個工作一個。完成的算有回應；失敗的算一個錯誤，其他什麼都不算；製作中被刪除的算 499（不是錯誤）。被拒絕的請求（400、404、429）在被拒絕時計入 |
-| `media_ms` | 影片的長度（毫秒），用引擎回報的值（否則用影格數 / 每秒影格數） |
+| `media_ms` | 影片的長度（毫秒），用推論引擎回報的值（否則用影格數 / 每秒影格數） |
 | `busy_ms` | 從看到工作進入製作中到它做完的時間，乘以部署占用的 GPU 數：也就是 GPU 時間 |
 | tokens | 不計 |
 
@@ -464,13 +464,13 @@ local_dirs = ["/data/models"]
 
 ### 文字分類
 
-`POST /v1/classify`（1.4.4）把文字送給文字分類模型，以 vLLM 的格式回應。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）。引擎是 vLLM 的 pooling runner（配方 `vllm-pooling`）；閘道把請求送到副本的 `/classify`。只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/classify`（1.4.4）把文字送給文字分類模型，以 vLLM 的格式回應。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）。推論引擎是 vLLM 的 pooling runner（配方 `vllm-pooling`）；閘道把請求送到副本的 `/classify`。只由本機部署提供，絕不送往雲端供應商。
 
 | 欄位 | 說明 |
 |---|---|
 | `model` | 模型名稱 |
 | `input` | 一段文字，或 1 到 2,048 段文字；每段都不能是空的。不接受 token id |
-| `truncate_prompt_tokens` | 選用：把每段文字截到這麼多 token（至少 1），或 -1 代表模型的最大值。沒有它時，比部署的 context 長的文字會被引擎拒絕 |
+| `truncate_prompt_tokens` | 選用：把每段文字截到這麼多 token（至少 1），或 -1 代表模型的最大值。沒有它時，比部署的 context 長的文字會被推論引擎拒絕 |
 | `use_activation` | 選用，`true` 或 `false`：`false` 傳回原始分數（logits）而不是機率 |
 
 閘道只送出這些欄位（其他欄位會被丟掉）；`messages`（vLLM 的對話格式）回 400。其他種類的模型回 400 `wrong_endpoint`，並說出它的端點（對話模型還會說明怎麼用結構化輸出分類）。
@@ -479,7 +479,7 @@ local_dirs = ["/data/models"]
 
 | 單位 | 怎麼算 |
 |---|---|
-| tokens | 引擎回應裡的 `prompt_tokens`，和嵌入一樣。金鑰的每分鐘 token 數照常適用 |
+| tokens | 推論引擎回應裡的 `prompt_tokens`，和嵌入一樣。金鑰的每分鐘 token 數照常適用 |
 
 ### 標頭
 
@@ -491,7 +491,7 @@ local_dirs = ["/data/models"]
 | `X-Forgeyard-Replica` | 回應 | 本機回答時：`<model>#<replica>` |
 | `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
 | `X-Forgeyard-Voice` | 回應 | 文字轉語音：請求沒指定聲音、或指定了模型沒有的 OpenAI 聲音時，閘道所選的聲音；模型只有自己的一種聲音時為 `default` |
-| `X-Forgeyard-Dropped-Params` | 回應 | Forgeyard 在送往回答的供應商途中拿掉的請求參數（只有引擎才有的，例如 `top_k`、`chat_template_kwargs`；模型自己的拿掉清單），以逗號分隔。該供應商回錯誤時也會帶上。沒有拿掉任何參數時沒有這個標頭（[結構化輸出](cloud-providers.md#when-a-request-spills)永遠不會被拿掉：這種請求會略過那個供應商） |
+| `X-Forgeyard-Dropped-Params` | 回應 | Forgeyard 在送往回答的供應商途中拿掉的請求參數（只有推論引擎才有的，例如 `top_k`、`chat_template_kwargs`；模型自己的拿掉清單），以逗號分隔。該供應商回錯誤時也會帶上。沒有拿掉任何參數時沒有這個標頭（[結構化輸出](cloud-providers.md#when-a-request-spills)永遠不會被拿掉：這種請求會略過那個供應商） |
 | `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
 | `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`、503 `local_busy`（1），以及原樣轉回的副本或供應商自己的 429 或 503 |
 
@@ -520,8 +520,8 @@ local_dirs = ["/data/models"]
 | 400 | `file_input_not_supported` | 把 `file` 區塊（PDF）送給配方不接受檔案的模型；閘道不會轉換檔案 | 改送頁面圖片或文字 |
 | 400 | `media_local_only` | 把帶媒體的請求送給只由供應商提供的模型 | 改用本機模型 |
 | 400 | `input_too_long` | 文字轉語音：`input` 超過部署的 *Longest input* | 把文字拆開，或調高 `max_input_chars` |
-| 400 | `unsupported_response_format` | 文字轉語音：`response_format` 不是 OpenAI 的格式，或引擎不產生這種格式；訊息會列出它能產生的格式 | 改用其中一種 |
-| 400 | `stream_format_not_supported` | 文字轉語音：引擎不提供這種 `stream_format`（llama.cpp 或 speaches 的 `sse`） | 拿掉它，或用 `audio` |
+| 400 | `unsupported_response_format` | 文字轉語音：`response_format` 不是 OpenAI 的格式，或推論引擎不產生這種格式；訊息會列出它能產生的格式 | 改用其中一種 |
+| 400 | `stream_format_not_supported` | 文字轉語音：推論引擎不提供這種 `stream_format`（llama.cpp 或 speaches 的 `sse`） | 拿掉它，或用 `audio` |
 | 400 | `language_not_supported` | 文字轉語音：把中文、日文或韓文送給 speaches，它會把這些字刪掉 | 改用 Qwen3-TTS 部署 |
 | 400 | `voice_cloning_not_supported` | 文字轉語音：帶了參考錄音、以音訊或連結當聲音、`task_type: "Base"`，或上傳聲音。1.3 不提供 | 使用模型自己的聲音 |
 | 400 | `response_format_not_supported` | 圖片：`response_format: url`。圖片只以 base64 傳回 | 拿掉它，或要求 `b64_json` |
@@ -532,14 +532,14 @@ local_dirs = ["/data/models"]
 | 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request* | 少要幾張，或調高 `max_images` |
 | 400 | `image_too_large` | 圖片：某一邊超過部署的 *Largest side* | 要小一點的尺寸，或調高 `max_side` |
 | 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明）。影片：同上，每邊 64 到 2,048，16 或 32 的倍數 | 使用類似訊息建議的尺寸 |
-| 400 | `unsupported_output_format` | 圖片：`output_format` 不是 png、jpeg 或 webp，或是引擎不產生的格式 | 改要 png |
+| 400 | `unsupported_output_format` | 圖片：`output_format` 不是 png、jpeg 或 webp，或是推論引擎不產生的格式 | 改要 png |
 | 400 | `too_many_steps` | 圖片與影片：`num_inference_steps` 超過部署的 *Most steps* | 少一點步數，或調高 `max_steps` |
 | 400 | `prompt_too_long` | 圖片與影片：`prompt` 或 `negative_prompt` 超過部署的 *Longest prompt* | 縮短它，或調高 `max_prompt_chars` |
 | 400 | `video_too_long` | 影片：`seconds` 超過部署的 *Longest video* | 要短一點的秒數，或調高 `max_seconds` |
 | 400 | `video_too_large` | 影片：某一邊超過 *Largest side*，或每格像素比預設尺寸放大到該邊時還多 | 要小一點的尺寸，或調高 `max_side` |
 | 400 | `input_reference_not_supported` | 影片：帶了 `input_reference`（或 `image_reference`、`video_reference`、`audio_reference`）：1.3 只支援文字轉影片 | 改在提示裡描述 |
-| 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；引擎只做影片 | 改用 `variant=video` |
-| 4xx/5xx | `engine_error` | 圖片與影片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
+| 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；推論引擎只做影片 | 改用 `variant=video` |
+| 4xx/5xx | `engine_error` | 圖片與影片：推論引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
 | 400 | `structured_output_not_supported` | 請求要求結構化輸出（JSON 的 `response_format`、`structured_outputs`、`guided_*`、`grammar`、`json_schema`、strict 工具），但提供這個模型的每個供應商都會拿掉或忽略它。訊息會列出它們和參數 | 拿掉這個參數，或改用接受它的目標（OpenAI 相容伺服器、本機部署） |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **僅本機** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
@@ -565,7 +565,7 @@ local_dirs = ["/data/models"]
 | 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
 | 429 | `queue_full` | 圖片：每個副本都在忙，部署的佇列也滿了。影片：部署已經有 *Jobs at once* 個工作 | 等待 `Retry-After` 秒 |
 | 429 | `too_many_jobs` | 影片：這把金鑰（或這個人）在部署上已經有 *Jobs per key* 段影片在等待或製作中 | 等待 `Retry-After` 秒，或刪掉一段 |
-| 502 | `upstream_unreachable` | 連不上任何副本，或每個副本的引擎都沒有在執行 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
+| 502 | `upstream_unreachable` | 連不上任何副本，或每個副本的推論引擎都沒有在執行 | 通常是 agent 或推論引擎重新啟動了，會自己恢復。檢查部署 |
 | 502 | `upstream_error` | 請求送出之後，或回應傳送到一半時，和副本的連線斷了。不會送到另一個副本，以免跑兩次 | 安全的話再重試 |
 | 502 | `replica_refused_key` | 副本拒絕了閘道的內部金鑰 | 停止再啟動部署 |
 | 502 | `provider_auth_failed` | 供應商拒絕了 Forgeyard 給它的金鑰。絕不會以 401 轉給你，免得你懷疑自己的金鑰 | 由管理員修正供應商的金鑰 |
@@ -575,8 +575,8 @@ local_dirs = ["/data/models"]
 | 502 | `provider_error` | 供應商回應 5xx，或送往它的請求失敗 | 稍後重試 |
 | 503 | `no_ready_replica` | 模型存在，但沒有就緒的副本：下載中、啟動中、已停止，或它的機器離線。訊息會列出每個副本的狀態 | 等待，或啟動部署 |
 | 503 | `model_waking` | 1.5.0：模型的部署原本在休眠（*閒置時休眠*），請求喚醒了它，但它沒有在部署的 `wake_wait`（預設 5 分鐘）內就緒，或已經有太多請求（256 個）在等它。`Retry-After`：它上次啟動的時間減掉已經過去的時間 | 照給的時間後重試；給用戶端更長的逾時，或給路由一個雲端分層（[閒置時休眠](#sleep-when-idle)） |
-| 503 | `cannot_wake` | 1.5.0：模型原本在休眠，現在無法喚醒；訊息會說明原因：*Cannot be placed: …*（沒有機器還有空間）、*it is pinned to …, which is offline*，或引擎失敗（*replica 0 on …: backoff …*）。立刻回應，不會等完等待時間 | 釋出記憶體、讓機器恢復上線，或查看部署的事件；部署保持喚醒，能啟動時就會啟動 |
-| 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它。帶 `Retry-After: 1` | 等 `Retry-After` 秒後重試 |
+| 503 | `cannot_wake` | 1.5.0：模型原本在休眠，現在無法喚醒；訊息會說明原因：*Cannot be placed: …*（沒有機器還有空間）、*it is pinned to …, which is offline*，或推論引擎失敗（*replica 0 on …: backoff …*）。立刻回應，不會等完等待時間 | 釋出記憶體、讓機器恢復上線，或查看部署的事件；部署保持喚醒，能啟動時就會啟動 |
+| 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由推論引擎排隊處理，所以通常不會看到它。帶 `Retry-After: 1` | 等 `Retry-After` 秒後重試 |
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
 | 503 | `queue_timeout` | 圖片：請求等待空出副本的時間超過部署的 *Timeout* | 稍後重試，或加一個副本 |
@@ -586,7 +586,7 @@ local_dirs = ["/data/models"]
 
 另外兩種情況：
 
-- **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
+- **推論引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
 - **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
 
 ## 指標
@@ -607,7 +607,7 @@ local_dirs = ["/data/models"]
 | `forgeyard_gateway_requests_total` | counter | `endpoint`、`model`、`status`、`source`、`target` | 已結束的請求。`endpoint`：`chat/completions`、`embeddings`、`audio/speech`、`videos`、`x`（直通）… `status`：HTTP 狀態碼（499：用戶端離開了）。`source`：`api`（API 金鑰）或 `console`（試用區）。`target`：`local` 或 `provider` |
 | `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`、`model` | 從請求到達到結束；影片工作是從建立到結束 |
 | `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`、`model` | 從請求到達，到收到副本或供應商回應的第一批位元組：串流是第一個區塊，其他是它的狀態列。只計有收到回應的請求 |
-| `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
+| `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 推論引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
 | `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`waking`（1.5.0）、`refused`、`too_long`、`budget` |
 | `forgeyard_gateway_waiting` | gauge | `model` | 現在正在排隊等本機空位的請求（路由所有層加總） |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | 每個請求在隊伍裡等了多久，才拿到空位或繼續往下走 |
@@ -620,7 +620,7 @@ local_dirs = ["/data/models"]
 
 | 指標 | 類型 | 標籤 | 是什麼 |
 |---|---|---|---|
-| `forgeyard_replica_start_seconds` | histogram | `recipe`、`model` | 啟動花了多久：從 agent 開始啟動它（模型檔案、映像檔、引擎）到第一次健康檢查通過。agent 比 1.5.0 舊時只有引擎的部分（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)） |
+| `forgeyard_replica_start_seconds` | histogram | `recipe`、`model` | 啟動花了多久：從 agent 開始啟動它（模型檔案、映像檔、推論引擎）到第一次健康檢查通過。agent 比 1.5.0 舊時只有推論引擎的部分（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)） |
 
 每次收集時從資料庫讀取：
 
@@ -664,7 +664,7 @@ Deprecation: @1794787200
 Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 ```
 
-替代做法：把要跑的東西當成模型在 **服務中** 部署；內建引擎跑不了的模型，加一個自訂引擎（**模型 → 引擎**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[試用區的視覺模型](#vision)取代 1.3 的視覺範本。
+替代做法：把要跑的東西當成模型在 **服務中** 部署；內建推論引擎跑不了的模型，加一個自訂推論引擎（**模型 → 推論引擎**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[試用區的視覺模型](#vision)取代 1.3 的視覺範本。
 
 ## 直通（/x/）
 
@@ -768,7 +768,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `FORGEYARD_WORKLOAD` | 應用程式的名稱 |
 | `FORGEYARD_REPLICA` | 副本的 id |
 | `FORGEYARD_REPLICA_INDEX` | 副本的編號，從 0 開始 |
-| `PORT`、`PORT_<NAME>` | 每個宣告的連接埠：行程拿到它必須監聽的主機連接埠；容器拿到它自己的連接埠（引擎會把主機連接埠對應過去）。`PORT` 是第一個 |
+| `PORT`、`PORT_<NAME>` | 每個宣告的連接埠：行程拿到它必須監聽的主機連接埠；容器拿到它自己的連接埠（推論引擎會把主機連接埠對應過去）。`PORT` 是第一個 |
 | `CUDA_VISIBLE_DEVICES`、`NVIDIA_VISIBLE_DEVICES`、`CUDA_DEVICE_ORDER` | NVIDIA：只有它自己的卡的 UUID。沒有 GPU 的副本看不到任何卡 |
 | `ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES` | AMD：只有它自己的卡 |
 | `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及執行行程的帳號 |
@@ -786,8 +786,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
 | `dry_run` | `true`：只檢查。回應內容相同，但沒有 `deployment`，也不會儲存任何東西 |
+| `recipe` | （1.5.2）它的推論引擎的其他版本：它執行的、或被複製來源的內建配方，或是那個內建配方的複本（`based_on`），而且要用同樣的協定提供這個模型。名稱、對外的模型名稱、金鑰和路由都不變；會用它重新估算；它不接受的參數會被拿掉（`dropped`） |
 
-模型、recipe、名稱和對外的模型名稱都不能改（422）。回應：
+模型、名稱和對外的模型名稱都不能改（422）。回應：
 
 | 欄位 | 內容 |
 |---|---|
@@ -796,6 +797,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `changes` | 每個會改變的參數、`replicas` 和 `machine_id`：`{name: {before, after}}`；沒有任何改變時是 `{}` |
 | `restart` | `rolling`（一次一個副本）、`all`（唯一的副本重新啟動）、`none`、`on_start`（已停止：啟動時才套用），或（1.5.0）`on_wake`（休眠中：喚醒時才套用） |
 | `restart_text` | 用一句話說明同一件事 |
+| `recipe` | （1.5.2）它會執行的推論引擎 |
+| `dropped` | （1.5.2）它原本有、但這個推論引擎不接受的參數：會被拿掉 |
+| `outage` | （1.5.2）`restart` 為 `all`（唯一執行中的副本會重新啟動）時：`{seconds, source, first_start, image_missing, avoid, cloud, text}`。`seconds` 是模型大約多久不會回應，依據是 `source`：`last_start`（它自己的）、`engine`（同一個推論引擎其他部署最近幾次啟動時間的中間值）或 `typical`。`first_start`：推論引擎換了，新版本第一次啟動可能比較久。`image_missing`：副本所在、還沒有新推論引擎映像檔的機器。`avoid`：`add_replica`、`autoscale`（開啟自動副本數時是 `min_replicas`），路由有雲端層時再加上 `cloud`。其他情況是 `null` |
 | `deployment` | 儲存後的部署（dry run 時沒有） |
 
 | 狀態 | `code` | 什麼時候 |
@@ -804,12 +808,13 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 409 | `recipe_gone` | 它的 recipe 已經不存在 |
 | 422 | `invalid_params` | 有不認得的參數，或超出範圍 |
 | 422 | `cannot_estimate` | 無法為這個模型估算新參數 |
-| 404 | `not_found`、`machine_not_found` | 沒有這個部署，或沒有 `machine_id` 指定的機器 |
+| 422 | `engine_not_related`、`incompatible`、`engine_not_compatible` | （1.5.2）`recipe` 不是它的內建推論引擎或那個推論引擎的複本；不能提供這個模型；或是用別的協定提供它，路由會因此改變 |
+| 404 | `not_found`、`machine_not_found`、`recipe_not_found` | 沒有這個部署、沒有 `machine_id` 指定的機器，或沒有 `recipe` 指定的推論引擎 |
 | 403 | | 不是管理員或操作員 |
 
-每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
+每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式（1.5.2：換了推論引擎時，還有 `recipe: {from, to}`、`engine_versions: {from, to}` 和 `dropped`）。`GET /api/deployments/{id}` 另外提供（1.5.2）`engine`（`{name, title, version, builtin, based_on}`）和 `engines`（它可以換過去的版本，含 `current`）、 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
 
-（1.5.0）每個部署（列表裡和單獨查詢時）還有 `last_start`：最近一次啟動花了多久，`{seconds, phases, source, at, replica}`，取自它的事件。`phases` 是 agent 分得出來的各部分：`model`、`waiting`、`image` 和 `engine`，加起來就是 `seconds`；`source` 是 `agent`，或是 `server`（agent 比 1.5.0 舊，由伺服器只量了引擎的部分）。1.5.0 之後還沒有副本就緒過時是 `null`（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)）。
+（1.5.0）每個部署（列表裡和單獨查詢時）還有 `last_start`：最近一次啟動花了多久，`{seconds, phases, source, at, replica}`，取自它的事件。`phases` 是 agent 分得出來的各部分：`model`、`waiting`、`image` 和 `engine`，加起來就是 `seconds`；`source` 是 `agent`，或是 `server`（agent 比 1.5.0 舊，由伺服器只量了推論引擎的部分）。1.5.0 之後還沒有副本就緒過時是 `null`（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)）。
 
 ### 閒置時休眠
 
@@ -881,7 +886,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 請求 | 做什麼 |
 |---|---|
 | `GET /api/machines/{id}/cache` | 那台機器快取裡的模型，以它的 agent 最近一次的回報為準 |
-| `POST /api/machines/{id}/cache/remove`，內容 `{"key": "<key>"}` | 刪除一個項目：一個 revision、其中一個 GGUF 檔、一個 URL 模型或一個引擎 |
+| `POST /api/machines/{id}/cache/remove`，內容 `{"key": "<key>"}` | 刪除一個項目：一個 revision、其中一個 GGUF 檔、一個 URL 模型或一個推論引擎 |
 | `POST /api/machines/{id}/cache/remove-partial` | 刪除未完成的下載留下的檔案 |
 
 回應有 `free_bytes` 和 `total_bytes`（快取所在的磁碟）、`used_bytes`（快取在上面占了多少，共用的檔案只算一次）、`partial_bytes` 和 `partial_files`、`sizes`（早於 1.4 的 agent 為 false，它只列出 key），以及 `remove_note`（目前為什麼不能刪除，或 `null`）。`models` 列出每個項目：
@@ -896,7 +901,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `catalog` | 它對應的目錄模型 |
 | `used_by` | 那台機器上使用它的部署（或應用程式） |
 
-`engines` 列出引擎壓縮檔（`key` 為 `engine/<壓縮檔 SHA-256 的前 16 個十六進位數字>`、`name`、`bytes`、`used_by`）。刪除的回應有 `freed_bytes`（磁碟上釋出的空間）和刪除後的清單（`cache`）。
+`engines` 列出推論引擎的壓縮檔（`key` 為 `engine/<壓縮檔 SHA-256 的前 16 個十六進位數字>`、`name`、`bytes`、`used_by`）。刪除的回應有 `freed_bytes`（磁碟上釋出的空間）和刪除後的清單（`cache`）。
 
 | 狀態 | `code` | 什麼時候 |
 |---|---|---|
@@ -915,15 +920,17 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 | 請求 | 作用 |
 |---|---|
-| `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | 每台機器，以及它能不能下載這個模型（和配方的引擎） |
+| `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | 每台機器，以及它能不能下載這個模型（和配方的推論引擎） |
 | `POST /api/downloads` 加上 `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | 在每台能下載的機器上開始下載；`engine` 預設開啟，`recipe` 預設是第一個能跑這個模型的配方 |
-| `GET /api/downloads?model_id=<id>&machine_id=<id>` | 先列出進行中的下載，再列出已結束的（最近 100 筆） |
+| `GET /api/downloads/targets?recipe=<name>` | （1.5.2）不帶 `model_id`：每台機器，以及它能不能只下載這個推論引擎 |
+| `POST /api/downloads` 加上 `{"recipe": "<name>", "machine_ids": [<id>, …]}` | （1.5.2）不帶 `model_id`：只下載推論引擎（每台機器會執行的變體的映像檔或程式） |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>&engine=<name>` | 先列出進行中的下載，再列出已結束的（最近 100 筆）；`engine`：只列出單獨下載那個推論引擎的 |
 | `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
-| `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和引擎壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
+| `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和推論引擎的壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
 
-`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`），和 `from_machine`（1.4.1）：會經由伺服器把模型送過來的機器，沒有則為 null。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）、`revoked` 或（1.5.2，只下載推論引擎時）`no_engine`（它沒有能在那裡執行的變體），並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有推論引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`），和 `from_machine`（1.4.1）：會經由伺服器把模型送過來的機器，沒有則為 null。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
 
-一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`，模型經由伺服器從另一台機器的快取取得則是 `machine`，並帶 `source: {id, name}`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+一筆下載有 `id`、`model`（只下載推論引擎時為 null）、`engine_only`（1.5.2）、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`，模型經由伺服器從另一台機器的快取取得則是 `machine`，並帶 `source: {id, name}`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
 
 | 狀態碼 | `code` | 何時 |
 |---|---|---|
@@ -931,22 +938,25 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 409 | `download_finished` | 取消一個已經結束的下載 |
 | 422 | `local_model` | 本機模型是機器上的目錄：沒有東西要下載 |
 | 422 | `recipe_not_compatible`、`bad_fetch_via` | 配方不能跑這個模型；`fetch_via` 不是這三個之一 |
+| 422 | `model_or_engine` | （1.5.2）沒有指定模型也沒有指定推論引擎，或沒有模型卻送了 `engine: false` |
 | 404 | `not_found` | 沒有這個模型、機器或下載 |
 | 403 | | 不是 admin 或 operator（`fetch-via` 要 admin） |
 
-稽核事件：`model.download_requested`（每台機器一筆，含模型和引擎）、`model.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
+稽核事件：`model.download_requested`（每台機器一筆，含模型和推論引擎）、`model.download_cancelled`、（1.5.2）`engine.download_requested`（每台機器一筆，含 `recipe`、`version`、`variant` 和 `engine`，也就是映像檔或壓縮檔）和 `engine.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
 
 背後是 agent 協定的 feature `prefetch`（1.4 起的 agent 和伺服器）。伺服器把每筆排隊中或下載中的列放在 `desired.downloads`，與副本並列：`{id, model, engine?, image?, image_ids?}`（Hugging Face 模型的區塊會帶伺服器用於受限 repository 的 token，和副本一樣只存在記憶體）。agent 用副本下載的同一套程式抓取（相同的鎖、從部分檔案續傳、checksum 和取消；映像檔用 1.3.1 的 pull 進度），不啟動任何東西，同時最多跑兩個，並回報 `status.downloads`（`{id, state, reason, download}`）；下一份清單裡沒有的下載會被取消。Migration `0015` 新增資料表 `model_downloads` 和欄位 `nodes.fetch_via`（所有既有機器都是 `auto`）。
 
+（1.5.2）只下載推論引擎，就是一筆沒有模型的列：它在 `desired.downloads` 裡的項目沒有 `model` 區塊，只有 `engine` 壓縮檔（含 SHA-256）或 `image`（含 `image_ids`，機器經由伺服器取得映像檔時還有 `image_relay`；複本的映像檔依 `image_pins` 裡的 ID）。有 `prefetch` 的 agent 原本就能處理。推論引擎的頁面（`GET /api/recipes/{name}`）多了 `can_download`、`downloads`（這個推論引擎的下載，最新的在前）和每台機器的 `download`（那裡進行中的下載）；複本還有 `caught_up`：內建推論引擎現在已經是複本的版本或更新時為 `{builtin, title, version, same}`，否則為 `null`。Migration `0017_engine_downloads` 讓 `model_downloads.model_id` 可以是 null（既有的列都不變；在 SQLite 上會重建這個資料表，因為沒有其他資料表參照它，所以是安全的）；降版時會刪除只下載推論引擎的列，並把它改回 NOT NULL。
+
 ### 經由伺服器下載（轉送）
 
-agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出它的 agent，在 `fetch_via` 為 `auto` 或 `server` 的機器上，desired 副本或下載的每個模型區塊（Hugging Face 或 URL）和引擎壓縮檔區塊都會帶 `relay: {path, mode}`：`mode` 為 `server`（一律經由伺服器；設成這樣，或是 `auto` 且過去一小時內記得連不到那個主機）或 `auto`（先直接下載，遇到網路錯誤後改經由伺服器）。`server` 的模型區塊不帶 `token`。agent 之後向它自己的伺服器下載，絕不會連到伺服器指定的其他主機：
+agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出它的 agent，在 `fetch_via` 為 `auto` 或 `server` 的機器上，desired 副本或下載的每個模型區塊（Hugging Face 或 URL）和推論引擎的壓縮檔區塊都會帶 `relay: {path, mode}`：`mode` 為 `server`（一律經由伺服器；設成這樣，或是 `auto` 且過去一小時內記得連不到那個主機）或 `auto`（先直接下載，遇到網路錯誤後改經由伺服器）。`server` 的模型區塊不帶 `token`。agent 之後向它自己的伺服器下載，絕不會連到伺服器指定的其他主機：
 
 | 請求 | 回傳 |
 |---|---|
 | `GET /agent/v1/relay/{replica\|download}/{id}/model/{檔案路徑}` | Hugging Face 模型的一個檔案 |
 | `GET /agent/v1/relay/{replica\|download}/{id}/model` | URL 模型的檔案 |
-| `GET /agent/v1/relay/{replica\|download}/{id}/engine` | process 變體的引擎壓縮檔 |
+| `GET /agent/v1/relay/{replica\|download}/{id}/engine` | process 變體的推論引擎壓縮檔 |
 
 `{id}` 是 desired 清單裡副本或下載的 id。請求帶機器憑證（`Authorization: Bearer …`），以及最多一個 `Range: bytes=N-`（或 `N-M`），會轉給來源；回應是來源的 200 或 206，含 `Content-Length` 和 `Content-Range`，以串流傳送，不會存在任何地方。瀏覽器（帶 `Origin` 的請求）一律拒絕。
 
@@ -959,7 +969,7 @@ agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出�
 | 403 | `browser_refused` | 請求帶有 `Origin` |
 | 403 | `source_refused` | 來源拒絕存取（受限模型，而且沒有可用的權杖） |
 | 403 | `source_blocked` | 伺服器的規則不允許來源的位址 |
-| 404 | `relay_not_wanted` | 機器的 desired 狀態裡沒有那個 id、檔案或引擎 |
+| 404 | `relay_not_wanted` | 機器的 desired 狀態裡沒有那個 id、檔案或推論引擎 |
 | 416 | `bad_range`、`range_not_satisfiable` | 超過一個範圍，或超過結尾 |
 | 429 | `relay_busy` | 那台機器已經有兩個轉送，或全部已有四個；`Retry-After: 5` |
 | 502 | `source_unreachable`、`source_failed` | 伺服器連不到來源，或來源回了錯誤 |
@@ -988,7 +998,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 這時經由伺服器的進度會帶 `download.source`，也就是送出檔案的機器名稱（由伺服器填入，agent 不能設定）；下載的 `via` 會變成 `machine`，並帶 `source: {id, name}`。Download to… 的 targets 裡，`from_machine` 會寫出哪台機器會經由伺服器把模型送給這台機器。
 
-**引擎映像檔**（協定 feature `relay_images`，1.4 起的 agent 和伺服器）。對同時列出它的 agent，desired 裡的副本（在 `spec` 旁邊）或下載，如果引擎映像檔以 digest 釘選、並記錄在 `forgeyard/recipes/images.lock.json`，就會帶 `image_relay: {path, mode}`，模式相同；`path` 是 `/agent/v1/relay/{replica|download}/{id}/image`。只用 tag 指定的映像檔永遠不會有。
+**推論引擎的映像檔**（協定 feature `relay_images`，1.4 起的 agent 和伺服器）。對同時列出它的 agent，desired 裡的副本（在 `spec` 旁邊）或下載，如果推論引擎的映像檔以 digest 釘選、並記錄在 `forgeyard/recipes/images.lock.json`，就會帶 `image_relay: {path, mode}`，模式相同；`path` 是 `/agent/v1/relay/{replica|download}/{id}/image`。只用 tag 指定的映像檔永遠不會有。
 
 | 請求 | 回傳內容 |
 |---|---|
@@ -1011,39 +1021,39 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 | 狀態 | `code` | 何時 |
 |---|---|---|
-| 409 | `machine_offline`、`agent_cannot_load` | agent 沒有連線，或沒有 container 引擎、或比 1.4 舊 |
+| 409 | `machine_offline`、`agent_cannot_load` | agent 沒有連線，或沒有 容器引擎、或比 1.4 舊 |
 | 409 | `upload_busy` | 那台機器已經有上傳在進行（全部兩個時回 429） |
 | 400 | `upload_short`、`upload_broken` | 內容提早結束或中斷 |
 | 504 | `agent_no_fetch`、`agent_stalled` | agent 30 秒內沒有開始取得，或 2 分鐘都沒有再取 |
-| 422 | `image_load_failed` | 引擎無法載入（附 agent 的說明） |
+| 422 | `image_load_failed` | 容器引擎無法載入（附 agent 的說明） |
 
 稽核事件 `node.image_uploaded`（檔名、大小、`ok`、載入的映像檔或失敗原因）。
 
 ### 從另一台機器複製映像檔
 
-`GET /api/machines/{id}/images`（管理員）會向那台機器的 agent 詢問它引擎裡的映像檔（協定 feature `image_save`，1.4.1 起的 agent：`image_list {request_id}`，以 `image_listed {request_id, ok, reason, images}` 回答），回傳 `{machine_id, images: [{id, tags, content, size, created, os, architecture, matches}]}`，最多 256 個。
+`GET /api/machines/{id}/images`（管理員）會向那台機器的 agent 詢問它的容器引擎裡的映像檔（協定 feature `image_save`，1.4.1 起的 agent：`image_list {request_id}`，以 `image_listed {request_id, ok, reason, images}` 回答），回傳 `{machine_id, images: [{id, tags, content, size, created, os, architecture, matches}]}`，最多 256 個。
 
 `POST /api/machines/{id}/images/copy`，內容 `{"source_id": 2, "image": "sha256:…"}`（管理員），把其中一個複製到機器 `id`。伺服器傳給來源 `image_save {request_id, path, image}`；它的 agent 以自己的 tag 儲存 id 為 `image` 的映像檔（必須是它自己的：絕不使用伺服器給的名稱），用 `docker save`（Podman 有多個 tag 時用 `podman save --multi-image-archive`），再以 chunked 方式 POST 到 `/agent/v1/image-send/{ticket}`，帶它的憑證（只能一次；別台機器的憑證會得到 404，第二次 POST 是 409，瀏覽器是 403；每個回應都會關閉連線，所以傳送被提早結束的來源會立刻停止）。伺服器像上傳一樣把它轉進目標機器的 `image_load`（不帶 `size`；給目標機器的回應是 chunked，來源中斷時絕不會正常結束），來源再回 `image_saved {request_id, ok, reason, bytes, image}`。回應是 `{ok, bytes, images, source: {id, name}, saved}`，每個映像檔帶 `matches` 和 `same_as_source`（它的 content id，沒有則用 id，和來源的相同；沒有可比對的則為 null）。
 
 | 狀態 | `code` | 時機 |
 |---|---|---|
 | 422 | `bad_image`、`same_machine` | 映像檔不是用 id 指定；來源就是目標 |
-| 409 | `source_offline`、`source_cannot_save` | 來源沒有連線，或沒有 container 引擎、或比 1.4.1 舊 |
+| 409 | `source_offline`、`source_cannot_save` | 來源沒有連線，或沒有 容器引擎、或比 1.4.1 舊 |
 | 409 | `source_busy` | 來源已經在送一個映像檔 |
 | 409 | `machine_offline`、`agent_cannot_load`、`upload_busy` | 目標機器，同上傳（全部兩個時是 429） |
-| 409 | `image_save_failed` | 來源在送出任何位元組之前就無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
+| 409 | `image_save_failed` | 來源在送出任何位元組之前就無法儲存（它的說明）：不是它的映像檔，或它的推論引擎失敗 |
 | 504 | `source_no_send` | 來源 2 分鐘內沒有開始送 |
 | 400 | `upload_broken` | 來源送到一半停了，或伺服器停掉一個 2 分鐘都沒送資料的來源；什麼都沒有載入。來源自己的回覆說明了原因（`docker save failed: …`）時，訊息會包含它的說明（伺服器最多等 10 秒，#215） |
 | 413 | `upload_too_large` | 映像檔超過 `IMAGE_UPLOAD_MAX_GB` |
-| 422 | `image_load_failed` | 目標機器的引擎無法載入（agent 的說明） |
+| 422 | `image_load_failed` | 目標機器的容器引擎無法載入（agent 的說明） |
 
 稽核事件 `node.image_copied`（目標機器；`from_machine`、要求的映像檔、大小、`ok`、載入的映像檔和它們的 content id，或失敗原因）。在任何位元組送出前就被拒絕的不會記錄。
 
-### 透過 API 查看機器的引擎映像檔
+### 透過 API 查看機器的推論引擎映像檔
 
-`GET /api/machines/{id}/engine-images`（所有登入的人，1.4.2）會向那台機器的 agent 詢問它引擎裡的映像檔（`image_list`，同上），回傳 `{machine_id, listed, note, images, others, free_bytes, total_bytes, can_remove, remove_note}`。`images` 只包含 recipe 指定的映像檔，由大到小，每個是列出的內容再加上 `matches`、`used_by`（那台機器上副本正在執行它的部署：`[{name, kind, id}]`）、`agent`（agent 從它執行）和 `remove_note`（目前為什麼不能刪除，或 null）。`others` 是引擎裡其他映像檔的數量。`free_bytes` / `total_bytes`：引擎存放映像檔的位置，agent 看得到那個目錄時才有，否則為 null。agent 離線、不能列出（沒有 container 引擎、比 1.4.1 舊）或失敗時，`listed` 為 false 並帶 `note`。
+`GET /api/machines/{id}/engine-images`（所有登入的人，1.4.2）會向那台機器的 agent 詢問它的容器引擎裡的映像檔（`image_list`，同上），回傳 `{machine_id, listed, note, images, others, free_bytes, total_bytes, can_remove, remove_note}`。`images` 只包含 recipe 指定的映像檔，由大到小，每個是列出的內容再加上 `matches`、`used_by`（那台機器上副本正在執行它的部署：`[{name, kind, id}]`）、`agent`（agent 從它執行）和 `remove_note`（目前為什麼不能刪除，或 null）。`others` 是容器引擎裡其他映像檔的數量。`free_bytes` / `total_bytes`：容器引擎存放映像檔的位置，agent 看得到那個目錄時才有，否則為 null。agent 離線、不能列出（沒有 容器引擎、比 1.4.1 舊）或失敗時，`listed` 為 false 並帶 `note`。
 
-`POST /api/machines/{id}/engine-images/remove`，內容 `{"image": "sha256:…"}`（管理員），刪除其中一個。伺服器會再列一次那台機器的映像檔，在詢問 agent 之前先做檢查；接著傳送 `image_remove {request_id, image}`（協定 feature `image_remove`，1.4.2 起的 agent）。agent 只刪除它自己清單裡的映像檔，絕不刪除它本身執行的映像檔、它的副本使用的映像檔，或引擎裡任何 container 使用的映像檔；它執行 `docker rmi` / `podman rmi`，不加 `-f`（映像檔有好幾個 tag 時以那些 tag 刪除），並回答 `image_removed {request_id, ok, code, reason, in_use, image, freed_bytes, free_bytes, total_bytes}`。1.4.2 的 agent 的 `image_listed` 還會帶 `agent_image`（它執行的映像檔的 id）和 `free_bytes` / `total_bytes`。回應是 `{ok, image, freed_bytes, free_bytes, total_bytes}`：`freed_bytes` 是映像檔的大小（最多釋出這麼多：其他映像檔共用的 layer 會保留）；`free_bytes` / `total_bytes` 是之後的可用空間，agent 看得到時才有。
+`POST /api/machines/{id}/engine-images/remove`，內容 `{"image": "sha256:…"}`（管理員），刪除其中一個。伺服器會再列一次那台機器的映像檔，在詢問 agent 之前先做檢查；接著傳送 `image_remove {request_id, image}`（協定 feature `image_remove`，1.4.2 起的 agent）。agent 只刪除它自己清單裡的映像檔，絕不刪除它本身執行的映像檔、它的副本使用的映像檔，或容器引擎裡任何 container 使用的映像檔；它執行 `docker rmi` / `podman rmi`，不加 `-f`（映像檔有好幾個 tag 時以那些 tag 刪除），並回答 `image_removed {request_id, ok, code, reason, in_use, image, freed_bytes, free_bytes, total_bytes}`。1.4.2 的 agent 的 `image_listed` 還會帶 `agent_image`（它執行的映像檔的 id）和 `free_bytes` / `total_bytes`。回應是 `{ok, image, freed_bytes, free_bytes, total_bytes}`：`freed_bytes` 是映像檔的大小（最多釋出這麼多：其他映像檔共用的 layer 會保留）；`free_bytes` / `total_bytes` 是之後的可用空間，agent 看得到時才有。
 
 | 狀態 | `code` | 時機 |
 |---|---|---|
@@ -1052,8 +1062,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | 404 | `image_not_found` | 那台機器（已經）沒有列出這個 id |
 | 409 | `not_an_engine_image` | 沒有 recipe 指定這個映像檔：它不屬於 Forgeyard，不能刪除 |
 | 409 | `agent_image` | agent 從這個映像檔執行 |
-| 409 | `image_in_use` | 那台機器上有部署正在使用它（`in_use` 列出它們），或引擎裡有 container 正在使用它（agent 的說明） |
-| 409 | `image_remove_failed` | 引擎沒有刪除它（它的說明） |
+| 409 | `image_in_use` | 那台機器上有部署正在使用它（`in_use` 列出它們），或容器引擎裡有 container 正在使用它（agent 的說明） |
+| 409 | `image_remove_failed` | 容器引擎沒有刪除它（它的說明） |
 | 504 | `agent_no_answer` | agent 5 分鐘內沒有回答 |
 
 稽核事件 `node.image_removed`（映像檔、它的 tag、指定它的 recipe、`ok`、釋出的位元組，或 agent 的 `code` 和原因），每次要求 agent 刪除都會記錄；在那之前就被拒絕的不會記錄。
@@ -1096,7 +1106,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
 | `deployment-idle-awake` | 說明 | 1.5.0：關閉 *閒置時休眠* 的執行中部署 3 天沒有請求（用量的最後一天、伺服器啟動後看到的請求，或從部署、啟動或修改起算），而且佔著 GPU 記憶體：要讓它閒置時休眠嗎？ |
 | `deployment-wakes-often` | 說明 | 1.5.0：開啟 *閒置時休眠* 的部署在過去 24 小時被喚醒超過 10 次，而且上次啟動超過一分鐘：把閒置時間調長 |
-| `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
+| `extra-args-override` | 警告 | 部署的額外推論引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
 | `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |
 | `cloud-model-unpriced` | 錯誤 | 已經有預算存在時，某條路由的雲端模型沒有輸入或輸出價格：它的請求會回應 402 `budget_unpriced` |
@@ -1197,11 +1207,11 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda`（torch +cu130） |
 | | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.4rc1`（linux/amd64 與 arm64） |
 
-`vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`：vLLM 的編譯快取會在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，所以重新啟動或被喚醒時會載入第一次啟動編譯好的結果（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts)）。自訂配方可以用 `enabled: false` 關閉它，或用 `enabled: true` 為其他引擎開啟它（只限容器 variant）。
+`vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`：vLLM 的編譯快取會在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，所以重新啟動或被喚醒時會載入第一次啟動編譯好的結果（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts)）。自訂配方可以用 `enabled: false` 關閉它，或用 `enabled: true` 為其他推論引擎開啟它（只限容器 variant）。
 
 `vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型（任務 `classify`，1.4.4）：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤。語言模型型的 reranker（Qwen3-Reranker）不受影響。
 
-當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
+當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 推論引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
 
 部署沒有指定 context 時，如果模型本身的最大長度比配方的預設短，就從模型的最大值開始（1.4.4）：512 個 token 的 BERT 分類模型會得到 `--max-model-len 512`，而不是 8192。RoBERTa 和 XLM-RoBERTa 模型的位置從 padding index 之後開始算，所以 514 個位置嵌入只放得下 512 個 token（BGE-M3：8192）。
 
@@ -1223,11 +1233,115 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
 `scripts/pin_images.py` 會在 `forgeyard/recipes/images.lock.json` 記錄每個映像檔的正確副本可能顯示的 id（index、manifest 和 config 的 digest，以及每個平台的內容 id），所以在連不到 registry 的機器上用 `docker load` 載入的副本會被檢查並使用：[離線機器](how-to.md#offline-machines)。
 
-Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
+Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的推論引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
-`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。零樣本（開放詞彙）偵測模型，也就是用 `model_type` 或架構認出的 transformers 零樣本偵測模型（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OmDet-Turbo、OWL-ViT、OWLv2），是標上 `zero_shot` 的 detect 模型（1.4.4，#142；1.4.3 會拒絕它們，1.4.3 之前加入的靠目錄存下的 config 認出，不需要遷移）。OmDet-Turbo 和用 timm backbone 的 DETR 一樣被拒絕：它的 transformers 版本經由 timm 載入 backbone（加入時，或部署 1.4.3 之前加入的時候，回 422 `not_a_vision_model`）。圖片分類器（1.4.4，#141，任務 `image-classify`）是 `config.json` 寫的是 `…ForImageClassification` 架構（固定類別：ViT、ConvNeXt V2、DINOv2…；timm 權重 `timm_wrapper` 會被拒絕）或 CLIP 類架構（標上 `zero_shot`：CLIP、SigLIP、SigLIP 2、ALIGN、AltCLIP、Chinese-CLIP、MetaCLIP 2）的模型，以 `vision-classify` 提供。零樣本偵測模型和圖片分類器需要 1.4.4 起的視覺映像檔：配方的 `forgeyard-vision` 映像檔比較舊時，部署或估算會回 422 `vision_image_too_old`，寫出兩個版本（`1.4.4rc1` 這類預先發布版算作它之後的正式版，也就是 1.4.4）；其他名稱的映像檔（本機建置）照原樣接受。CLIP 儲存庫裡 transformers 權重旁邊的 OpenCLIP 權重（`open_clip_*`）不會被讀取，也不會下載。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）；Grounding DINO 和 MM-Grounding-DINO 再加 512 MiB（文字編碼器和 800 像素的特徵：0.64 GiB 的檔案在 CPU 上峰值 2.24 GiB，1.4.4）。
+`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他推論引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。零樣本（開放詞彙）偵測模型，也就是用 `model_type` 或架構認出的 transformers 零樣本偵測模型（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OmDet-Turbo、OWL-ViT、OWLv2），是標上 `zero_shot` 的 detect 模型（1.4.4，#142；1.4.3 會拒絕它們，1.4.3 之前加入的靠目錄存下的 config 認出，不需要遷移）。OmDet-Turbo 和用 timm backbone 的 DETR 一樣被拒絕：它的 transformers 版本經由 timm 載入 backbone（加入時，或部署 1.4.3 之前加入的時候，回 422 `not_a_vision_model`）。圖片分類器（1.4.4，#141，任務 `image-classify`）是 `config.json` 寫的是 `…ForImageClassification` 架構（固定類別：ViT、ConvNeXt V2、DINOv2…；timm 權重 `timm_wrapper` 會被拒絕）或 CLIP 類架構（標上 `zero_shot`：CLIP、SigLIP、SigLIP 2、ALIGN、AltCLIP、Chinese-CLIP、MetaCLIP 2）的模型，以 `vision-classify` 提供。零樣本偵測模型和圖片分類器需要 1.4.4 起的視覺映像檔：配方的 `forgeyard-vision` 映像檔比較舊時，部署或估算會回 422 `vision_image_too_old`，寫出兩個版本（`1.4.4rc1` 這類預先發布版算作它之後的正式版，也就是 1.4.4）；其他名稱的映像檔（本機建置）照原樣接受。CLIP 儲存庫裡 transformers 權重旁邊的 OpenCLIP 權重（`open_clip_*`）不會被讀取，也不會下載。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）；Grounding DINO 和 MM-Grounding-DINO 再加 512 MiB（文字編碼器和 800 像素的特徵：0.64 GiB 的檔案在 CPU 上峰值 2.24 GiB，1.4.4）。
 
-影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
+影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：推論引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
+
+### 內建配方的新版本
+
+1.5.2（#95）。`POST /api/engine-updates/check`（管理員）會立刻向每個內建配方自己的映像檔儲存庫查詢（`GET /v2/<repo>/tags/list`，並跟著 `Link: rel="next"` 往下讀：GHCR 每頁回 1,000 個標籤；對候選標籤用 `HEAD` 取得 digest，Docker Hub 不把它算成一次拉取），以及 GitHub 的發布版本（匿名：每個位址每小時 60 次；一次檢查大約用 5 次）。它走伺服器的模型來源規則（https 和公開位址；`MODEL_ALLOW_PRIVATE_HOSTS`），每個請求最多 20 秒、整體最多 90 秒，每個儲存庫最多讀 30 頁標籤。就算某個 registry 失敗，它也會回 200 和結果（那個推論引擎標成 `could_not_check`）；另一個檢查正在進行時回 409 `check_running`。`vision` 配方不檢查。
+
+`GET /api/engine-updates`（所有登入的人）回傳 `{"result": …, "can_check": bool}`，第一次檢查之前 `result` 是 null。結果存在一筆 `server_settings`（`engine_updates`，不需要資料庫遷移），每次檢查都會以 `recipe.updates_checked` 記進稽核紀錄，附上每個配方找到的新版本。
+
+```json
+{"checked_at": "…", "checked_by": "admin", "seconds": 21.4, "github_requests": 5,
+ "engines": {"vllm": {"recipe": "vllm", "version": "0.32.0", "kind": "release", "status": "newer",
+   "newest": "0.34.0", "errors": [], "candidates": [
+     {"version": "0.34.0", "kind": "release",
+      "release": {"tag": "v0.34.0", "url": "https://github.com/vllm-project/vllm/releases/tag/v0.34.0", "published_at": "…"},
+      "variants": [
+        {"name": "cuda", "available": true, "tag": "v0.34.0", "digest": "sha256:…", "image": "vllm/vllm-openai:v0.34.0@sha256:…"},
+        {"name": "cuda-12.9", "available": false, "why": {"code": "no_image", "tag": "v0.34.0-cu129", "last": "0.32.0", "text": "…"}}],
+      "mentions": [{"flag": "--gpu-memory-utilization", "lines": 5, "excerpts": ["…"]}]}]}}}
+```
+
+| 欄位 | 值 |
+|---|---|
+| `status` | `newer`、`newer_build`（會移動的標籤指向較新的映像檔）、`up_to_date`、`partly_checked`、`could_not_check`、`not_checked`（視覺映像檔） |
+| `kind` | `release`（標籤帶版本號）、`rolling`（只有會移動的標籤：stable-diffusion.cpp）、`own` |
+| `candidates` | 最新的在前，最多 8 個：比配方的 `version` 大的穩定版本，以各變體的標籤形式找到（內建標籤把版本號換掉；llama.cpp 的 `-b<build>-<commit>` 可有可無）。候選版本、每日建置和其他標籤都不會符合 |
+| `variants[].why.code` | `no_image`、`tag_unversioned`、`registry_error`、`digest_failed`；行程變體：`installed_command`、`not_github`、`release_unknown`、`no_release`、`no_archive`、`no_sha256`、`github_error`；會移動的標籤：`not_moved`、`not_newer`、`other_build` |
+| `mentions` | 版本說明提到的、配方的 `--參數`（兩個字以上的也比對 `snake_case` 寫法）和環境變數，每個最多三行；讀不到說明時改成 `notes`（`no_notes`、`github_error`） |
+| `upstream` | `release_without_image`：GitHub 上有較新的穩定版本，但映像檔還沒發布 |
+
+`GET /api/engine-updates` 也會回傳 `signatures`：每個內建配方的推論引擎專案提供什麼簽章（`{"signed": true, "kind": "github-attestation", "repository": "ggml-org/llama.cpp"}`，或 `{"signed": false, "text": …}`）。
+
+#### 試用版本：推論引擎的複本
+
+`POST /api/recipes/{name}/try {"version": "0.34.0", "name": "vllm-0-34-0"}`（管理員；`name` 可省略）會以內建配方 `{name}` 為基礎，為上次檢查找到的版本建立一個自訂配方，回傳 201，附上新配方、未包含的變體和簽章。它只接受版本，不接受映像檔：每個變體的標籤取自儲存的檢查結果，並再次比對內建變體自己的標籤形式；registry 和儲存庫一律取自內建變體的映像檔。每個包含的映像檔都會重新查詢 digest（檢查之後標籤移動了就回 409 `digest_moved`），用 digest 從 registry 讀取它的 ID，做法和 `scripts/pin_images.py` 為 lock 檔案做的一樣（`forgeyard/workloads/pinning.py`），專案有提供簽章時也會驗證。行程壓縮檔的 SHA-256 會再向 GitHub 讀一次。
+
+| 回應 | 代碼 | 什麼時候 |
+|---|---|---|
+| 409 | `check_again` | 沒有那個版本的檢查結果、檢查之後內建配方變了，或儲存的結果無法使用 |
+| 409 | `name_taken`、`builtin_name`、`not_builtin`、`try_running`、`digest_moved` | 代碼本身就說明了原因（`digest_moved` 會附上 `variant`） |
+| 422 | `invalid_name`、`nothing_to_pin`、`signature_failed`、`signature_missing` | 簽章驗證不過，或是會簽章的專案沒有那個 digest 的建置證明 |
+| 502 | `cannot_verify`、`registry_error`、`github_error` | 連不到 GitHub、Sigstore 的信任根或 registry，或（`cannot_verify`）這台伺服器沒有安裝 sigstore：什麼都不會建立。`cannot_verify` 會附上 `can_override` |
+
+加上 `"allow_unverified": true` 時，即使簽章無法檢查也會建立複本（只限 `cannot_verify`，而且 `can_override` 為 true 時）：每個有簽章的映像檔和壓縮檔都會記下 `{"status": "not_verified", "reason", "overridden_by", "at"}`，主控台會標示為 *未驗證*，`recipe.created` 也會附上 `"unverified_override": true` 和那些變體（`not_verified`）。簽章驗證不過，或是會簽章的專案找不到簽章時，一律不能略過。
+
+複本就是內建配方的 YAML 文字，加上開頭的註解，換掉 `name`、`title`（`vLLM 0.34.0`）、`version`、新的映像檔（`repo:tag@sha256:…`）和壓縮檔，刪掉未包含的變體，再加上兩個欄位（只用於自訂配方）：
+
+| 欄位 | 意思 |
+|---|---|
+| `based_on` | 它來自哪個內建配方（`engine` 必須相同）。目錄模型為那個配方設定的 `engine_args` 也會套用到複本，除非模型有以複本名稱設定的項目 |
+| `copy` | `from_version`、`kind`（`release` 或 `build`）、`made_at`、`made_by`、`left_out`（`variant`、`code`、`text`、`params`）、`archives`（`variant`、`release`、`signature`） |
+
+會以 `recipe.created` 記進稽核紀錄，附上 `based_on`、`from_version`、`version`、`images`、`left_out` 和 `signatures`。複本的修改和刪除，和其他自訂配方一樣。
+
+**`image_pins`**（資料庫遷移 `0016_image_pins`，只新增）：每個釘選的映像檔參照一筆（`ref` 是主鍵），指名同一個映像檔的複本共用：`entry`（`{"index", "platforms": {"linux/amd64": {"manifest", "config", "content"}}}`，和 `forgeyard/recipes/images.lock.json` 的格式相同）、`signature`、`recorded_by`、`recorded_at`。所有讀取記錄 ID 的地方都會先讀 lock 檔案，再讀這個資料表（`images.entry_for`）：經由伺服器轉送、隨副本或下載送出的 ID（給用 `docker load` 載入的映像檔用）、機器的推論引擎映像檔和移除、推論引擎頁面上的「已在機器上」。伺服器把這些資料列放在記憶體裡（啟動時載入，每次變更後重新載入）；配方修改或刪除時，沒有任何自訂配方再指名的資料列會被移除。降回 0015 會刪掉這個資料表：之後複本會直接以 digest 拉取映像檔。`GET /api/recipes/{name}` 會多回傳 `pins`：每個變體對應資料列的 `signature`、`recorded_at` 和 `recorded_by`。
+
+**簽章。** 只在伺服器上驗證（agent 執行的是伺服器釘選的 digest），使用 [sigstore-python](https://github.com/sigstore/sigstore-python)（Apache-2.0）。它是伺服器專用的 extra（`uv sync --extra server`；伺服器映像檔已包含）：agent 的 wheel 和映像檔都不帶它，沒有安裝它的伺服器無法檢查簽章（`cannot_verify`）。
+
+| 推論引擎 | 提供的內容 | 檢查的方式 |
+|---|---|---|
+| llama.cpp | 映像檔和發布壓縮檔的 GitHub 建置證明（Sigstore bundle 裡的 SLSA provenance） | 從 `GET https://api.github.com/repos/ggml-org/llama.cpp/attestations/sha256:<hex>`（匿名）取得 bundle：憑證鏈到 Fulcio，而且在 Rekor 記錄這筆資料時有效（inclusion proof 和 checkpoint）、DSSE 簽章、OIDC 簽發者是 `https://token.actions.githubusercontent.com`、來源儲存庫正確、簽章的是同一個儲存庫裡的 workflow 檔案、內容是 SLSA provenance v1，而且對象就是那個 digest |
+| vLLM、vLLM-Omni、speaches | 沒有 | 記成 `{"status": "unsigned", "note": …}` |
+| stable-diffusion.cpp | 沒有簽章的 BuildKit provenance | 記成未簽章 |
+
+驗證通過的映像檔或壓縮檔會記下 `{"status": "verified", "repository", "workflow", "ref", "commit", "run", "predicate", "issuer", "log_index", "signed_at"}`。信任根（Fulcio 的憑證、Rekor 和 CT log 的公鑰）來自 Sigstore 的 TUF 儲存庫 `https://tuf-repo-cdn.sigstore.dev`，經由同樣的網路規則更新（保留 5 分鐘，metadata 存在 `DATA_DIR/sigstore/`）；第一次更新從 sigstore-python 內附的根開始。更新失敗就是 `cannot_verify`。只連得到自己 registry 的伺服器（使用鏡像站的隔離環境）無法驗證有簽章的推論引擎的新版本：管理員仍可以選擇照樣建立複本，它會一直標示為 *未驗證*。
+
+### 透過 API 試跑
+
+1.5.2（#95）。試跑會在一台機器上用一個推論引擎暫時部署一個目錄中的模型，大約幾分鐘，檢查完再移除（[操作指南](how-to.md#try-out-a-new-engine-version-before-switching)）。
+
+| 請求 | 誰可以 | 內容 |
+|---|---|---|
+| `POST /api/recipes/{name}/trials {"model", "machine_id", "params"?, "timeout_minutes"?, "dry_run"?}` | 管理員、操作員 | 回傳 201 `{"trial": …}`。沒有給 `params` 時，沿用這個模型在內建推論引擎上的部署的參數（`params_from`），沒有的話用推論引擎的預設值；`gpus` 依機器上的變體決定。休眠、自動調整副本數和 `first_answer_timeout` 會被拿掉。`timeout_minutes` 是啟動的時限（預設 30，可以設 5 到 180）；量測和送出請求另外有 15 分鐘。`dry_run`：回傳 200，內容是 `estimate`、`placement`、`params`、`params_from`、`engine_on`（機器上有沒有它的映像檔）、`running` 和 `limit`，不會建立任何東西 |
+| `GET /api/recipes/{name}/trials` | 所有登入的人 | 最近 50 次，最新的在前面，以及 `can_run`；配方刪除之後也還查得到 |
+| `GET /api/engine-trials/{id}` | 所有登入的人 | 單一次試跑，包含 `events`（暫時部署最後 15 筆事件）、`log_tail`（副本最後的輸出）、`requests` 和 `memory`（每一次讀數） |
+| `POST /api/engine-trials/{id}/cancel` | 管理員、操作員 | 移除它的部署；試跑結束後回傳 409 `not_running` |
+
+拒絕的情況：404 `not_found`、`model_not_found`、`machine_not_found`；422 `incompatible`（推論引擎無法提供這個模型）、`invalid_params`；409 `machine_offline`、`does_not_fit`（附上 `machines` 和 `estimate`，和部署時一樣）、`trial_running`（每個推論引擎一個）、`too_many_trials`（一台伺服器四個）。試跑進行期間，`DELETE` 它的配方或模型會回傳 409 `trial_running`。
+
+```json
+{"trial": {"id": 7, "recipe": "vllm-0-34-0", "builtin": "vllm", "engine_version": "0.34.0",
+  "model": {"id": 1, "name": "qwen3-0.6b", "task": "chat"}, "machine": {"id": 2, "name": "gpu-01"},
+  "gpus": [{"key": "nvidia:GPU-…", "index": 4, "model": "NVIDIA A100 80GB PCIe"}],
+  "params": {"context": 4096, "concurrency": 4, "gpus": 1, "share": "vram"}, "params_from": "chat",
+  "estimate": 5948108800, "reserved": 5948108800, "state": "passed", "phase": null,
+  "start": {"seconds": 95.2, "phases": {"image": 2.1, "engine": 93.1}, "source": "agent"},
+  "measured": 5551245721, "p50_ms": 120, "p95_ms": 180, "first_answer": "A GPU is a processor …",
+  "checks": [{"id": "memory", "label": "Memory", "value": 5551245721, "expected": "at most 5.54 GiB (reserved; estimate 5.54 GiB)",
+              "ok": true, "note": "Approximate: …", "codes": [{"code": "approximate"}]}],
+  "why": null, "summary": "Passed: ready in 95 s, 6/6 answers, p50 120 ms, +5.17 GiB of 5.54 GiB reserved.",
+  "comparison": {"builtin": "vllm", "deployment": {"id": 3, "name": "chat", "reserved": 5948108800, "start_seconds": 112.0,
+                                                    "same_machine": true}, "trial": null}}}
+```
+
+| 欄位 | 值 |
+|---|---|
+| `state` | `running`、`passed`（沒有檢查未通過）、`failed`、`cancelled` |
+| `phase` | 進行中時：`starting`、`measuring`（就緒後讀取記憶體用量）、`asking`、`settling`（回應之後再讀一次） |
+| `checks[].id` | `started`、`memory`、`answers`、`latency`、`same_answer`；`ok` 是 `true`、`false` 或 `null`（未檢查，說明會寫原因） |
+| `checks[].codes` | 說明的內容代碼，供主控台翻譯：`slower`、`log`、`timeout_reason`、`not_run`、`approximate`、`approximate_ram`、`cards`、`after_answers`、`over`、`not_measured`、`went_down`、`went_down_ram`、`first_answer`、`error`、`not_asked`（`why`：`video`、`none`）、`no_address`、`no_answer`、`same`、`different` |
+| `memory_unmeasured` | 記憶體沒有數值的原因：`went_down`（試跑期間卡上其他工作釋放了記憶體，差值會是負的）、`went_down_ram`（機器 RAM 的同樣情況）、`no_readings`；這時 `measured` 是 null，摘要會用文字說明，不會顯示數字 |
+| `why` | 未通過或提早結束的原因：`start_failed`、`unplaced`、`timeout`（`phase`、`minutes`）、`gone`、`error`、`restarted`、`stopped`、`not_ready`、`checks`（`checks`：未通過的檢查）、`cancelled`（`who`） |
+
+記憶體檢查會取機器對副本那張卡（或 RAM）的讀數：推論引擎啟動前和就緒後，來得及的話各取三次（agent 會隨心跳送出讀數）。如果最大的差值（包含回應之後的那一次讀數）比副本預留的量多出 5% 以上，就算未通過。如果那張卡也有其他工作在使用（啟動前已經用了超過 512 MiB，或上面還有其他 Forgeyard 副本），量測結果只能當作參考。
+
+**資料。** 資料表 `engine_trials`（migration `0018_engine_trials`，只有新增：降版時會刪除這個資料表，所以請先讓試跑結束或取消）：每次試跑一列，包含配方和它的內建推論引擎（`builtin`）、`engine`、`engine_version`、`model_id` 和 `model_name`、`task`、`node_id` 和 `machine_name`（模型和機器刪除後名稱仍會保留）、`gpus`、`params`、`estimate`、`reserved`、`deployment_id`（暫時部署存在期間）、`requested_by`、`created_at`、`ready_at`、`finished_at`、`deadline_at`、`state`、`phase`、`checks`、`comparison`、`measurements` 和 `summary`。暫時部署是一般的 `deployments` 資料列，只是沒有閘道路由，名稱是 `trial-<id>-<4 個十六進位字元>`，並固定在那台機器上；所有不該看到它的清單、背景迴圈和檢查，都會排除 `engine_trials` 指到的部署。伺服器啟動時如果還有 `running` 的試跑，會把它標示為 `failed`（`why.code` 是 `restarted`）並移除它的部署。稽核紀錄的動作是 `engine_trial.started`、`engine_trial.finished`（`state`、未通過的 `failed` 檢查）和 `engine_trial.cancelled`。
 
 ## 容器映像檔
 
@@ -1238,7 +1352,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.5.1`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.5.2`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**加入機器** 會說明怎麼建置。
@@ -1263,7 +1377,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `/etc/forgeyard/agent.toml` | agent 的設定 |
 | `/var/lib/forgeyard-agent/` | 憑據（`credential.json`，0600）、釘選的 CA（`server-ca.pem`）、副本的資料與紀錄 |
 | `/var/lib/forgeyard-agent-work/` | 每個行程副本各一個工作目錄 |
-| `/srv/forgeyard-models/` | 模型快取；（1.5.0）其中的 `engine-cache/` 存放保留編譯快取的配方的引擎編譯快取 |
+| `/srv/forgeyard-models/` | 模型快取；（1.5.0）其中的 `engine-cache/` 存放保留編譯快取的配方的推論引擎編譯快取 |
 | `/opt/forgeyard/` | agent 程式：它的 Python 環境和下載下來的 wheel |
 | `/usr/local/bin/forgeyard` | `forgeyard` 指令 |
 | `/etc/systemd/system/forgeyard-agent.service` | 服務（`KillMode=process`、`Restart=always`） |

@@ -265,9 +265,9 @@ export default {
   "cloud.route.targetLocal": "本機 {name}",
   "cloud.spill.localOnly": "永遠不會離開你的網路（僅本機）。",
   "cloud.spill.oneTier": "只有一層：沒有地方可以溢出。",
-  "cloud.spill.rules": "沒有就緒的本機副本、每個副本都在忙、或引擎回傳 429 或 503 時，移到下一層{wait}。回答一旦開始就不會再移。",
+  "cloud.spill.rules": "沒有就緒的本機副本、每個副本都在忙、或推論引擎回傳 429 或 503 時，移到下一層{wait}。回答一旦開始就不會再移。",
   "cloud.spill.rulesLong":
-    "沒有就緒的本機副本、每個副本都在忙、引擎回傳 429 或 503、或提示詞超過本機的上下文長度時，移到下一層{wait}。回答一旦開始就不會再移。",
+    "沒有就緒的本機副本、每個副本都在忙、推論引擎回傳 429 或 503、或提示詞超過本機的上下文長度時，移到下一層{wait}。回答一旦開始就不會再移。",
   "cloud.spill.wait": "（最多先等 {ms} 毫秒，看有沒有空出來的位置）",
 
   "cloud.models.page.title": "雲端模型",

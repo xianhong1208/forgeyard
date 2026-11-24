@@ -20,6 +20,7 @@ from forgeyard.api import (
     budgets,
     deployments,
     downloads,
+    engine_updates,
     gateway,
     guide,
     install,
@@ -34,6 +35,7 @@ from forgeyard.api import (
     routing,
     secret_key as secret_key_api,
     tls as tls_api,
+    trials as trials_api,
     users,
     workloads,
 )
@@ -49,7 +51,8 @@ from forgeyard.machines.protocol import CLOSE_RESTART
 from forgeyard.migrate import upgrade
 from forgeyard.security import crypto, tls
 from forgeyard.security.middleware import GuardMiddleware, WebSocketHostGuard
-from forgeyard.workloads import autoscale, sleep
+from forgeyard.models import trials
+from forgeyard.workloads import autoscale, pins, sleep
 
 STATIC = Path(__file__).with_name("static")
 log = logging.getLogger("forgeyard")
@@ -87,6 +90,8 @@ async def lifespan(_app: FastAPI):
         liveness.mark_all_offline(db)  # no agent is connected to a server that just started
     finally:
         db.close()
+    pins.load_at_start()  # 1.5.2 (#95): the recorded ids of engine copies' images, beside the committed lock file
+    trials.sweep_at_start()  # 1.5.2 (#95): a trial that ran when the server stopped is over; its deployment goes
     sweeper = asyncio.create_task(liveness.run_forever())
     usage_writer = asyncio.create_task(usage_recorder.run_forever(USAGE_FLUSH_SECONDS))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
@@ -95,11 +100,12 @@ async def lifespan(_app: FastAPI):
     sleep.idle.server_started()  # 1.5.0 (#37): idle times count from this start at the earliest
     sleeper = asyncio.create_task(sleep.run_forever())  # puts deployments nobody uses to sleep, when asked to
     scaler = asyncio.create_task(autoscale.run_forever())  # 1.5.0: automatic replicas follow the gateway's load
+    trial_runs = asyncio.create_task(trials.run_forever())  # 1.5.2 (#95): engine trials move on
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        for task in (sweeper, usage_writer, renewer, alerts, videos, sleeper, scaler):
+        for task in (sweeper, usage_writer, renewer, alerts, videos, sleeper, scaler, trial_runs):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -144,6 +150,8 @@ def create_app() -> FastAPI:
     app.include_router(machines.router)
     app.include_router(workloads.router)
     app.include_router(models.router)
+    app.include_router(engine_updates.router)
+    app.include_router(trials_api.router)
     app.include_router(deployments.router)
     app.include_router(downloads.router)
     app.include_router(keys.router)

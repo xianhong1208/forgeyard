@@ -3,7 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { TrialCardChip } from "../components/EngineTrials";
 import { DownloadDialog, DownloadList } from "../components/DownloadTo";
+import { CheckBar, UpdateBadge } from "../components/EngineUpdates";
+import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { useT } from "../i18n/react";
@@ -13,10 +16,11 @@ import { isActive, recentDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { HARDWARE_LABEL, engineDescription, engineHardware, freeName, renameRecipe } from "../lib/engines";
+import { HARDWARE_LABEL, engineDescription, engineHardware, engineRuns, freeName, renameRecipe } from "../lib/engines";
 import { engineHref, modelHref } from "../lib/pages";
 import { TASK_LABEL, mediaText, params, shortSource, taskLabel } from "../lib/models";
-import type { CatalogModel, CatalogResponse, DownloadsResponse, ModelDownload, ModelSources, Recipe, RecipeVariant } from "../lib/types";
+import type { CatalogModel, CatalogResponse, DownloadsResponse, EngineUpdate, EngineUpdatesResponse, ModelDownload, ModelSources, Recipe,
+  RecipeVariant } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 // 1.4 (#92): Models is the model library: what can be deployed (Catalog), how each kind of model
@@ -135,7 +139,16 @@ function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }
   const t = useT();
   const [form, setForm] = useState<EngineFormFor | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // 1.5.2 (#95): the last check for newer versions (everyone reads it; admins check again).
+  const updates = useApi<EngineUpdatesResponse>("/engine-updates");
+  const [checked, setChecked] = useState<EngineUpdatesResponse | null>(null);
+  const upd = checked ?? updates.data;
   const done = (text: string) => { setForm(null); setNote(text); reload(); };
+  const onChecked = (r: NonNullable<EngineUpdatesResponse["result"]>) => {
+    setChecked({ result: r, can_check: true });
+    const newer = Object.values(r.engines).filter((e) => e.candidates.length > 0).length;
+    setNote(newer ? t("engineupdates.checked", { count: String(newer) }) : t("engineupdates.checkedNone"));
+  };
   return (
     <>
       {note && <Notice tone="ok">{note}</Notice>}
@@ -150,8 +163,9 @@ function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }
         recipes={data.recipes} onDone={done} onCancel={() => setForm(null)} />}
       <section className="panel" aria-labelledby="engines-title">
         <div className="panel-head"><h2 id="engines-title">{t("library.tab.engines")}</h2><span className="muted small">{t("library.engines.lead")}</span></div>
+        <CheckBar data={upd} onChecked={onChecked} />
         <div className="recipes">{data.recipes.map((r) => (
-          <EngineCard key={r.name} r={r} canManage={data.can_manage}
+          <EngineCard key={r.name} r={r} canManage={data.can_manage} update={r.builtin ? upd?.result?.engines[r.name] : undefined}
             onEdit={() => { setNote(null); setForm({ mode: "edit", name: r.name }); }} onDeleted={done} />
         ))}</div>
       </section>
@@ -235,7 +249,9 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
 
 // 1.4 (#92): a short card (name, version, what it is, the hardware it runs on, what it serves); the
 // variants, their images and requirements, and the offline commands are behind Details.
-function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage: boolean; onEdit: () => void; onDeleted: (text: string) => void }) {
+function EngineCard({ r, canManage, update, onEdit, onDeleted }: {
+  r: Recipe; canManage: boolean; update?: EngineUpdate; onEdit: () => void; onDeleted: (text: string) => void;
+}) {
   const t = useT();
   const [error, setError] = useState<string | null>(null);
   const desc = engineDescription(r);
@@ -257,6 +273,8 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
         <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
         {!r.builtin && <span className="chip chip-tone-run engine-custom">{t("library.custom")}</span>}
       </header>
+      {/* 1.5.2 (#189): the image it runs (or its program), one line on every card so they keep one height. */}
+      <p className="engine-image-line"><EngineImage runs={engineRuns(r.variants)} /></p>
       <p className="small engine-desc" title={desc}>{desc}</p>
       <div className="engine-facts" aria-label={t("library.runsOn", { list: engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ") })}>
         {engineHardware(r).map((h) => (
@@ -280,6 +298,8 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
           </ul>
           <OfflineImages name={r.name} variants={r.variants} />
         </details>
+        <UpdateBadge u={update} />
+        <TrialCardChip last={r.last_trial} running={r.trial_running} recipe={r.name} />
         {canManage && !r.builtin && (
           <div className="engine-actions">
             <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>{t("library.edit")}</button>

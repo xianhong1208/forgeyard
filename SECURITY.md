@@ -49,6 +49,8 @@ face the internet on its own; put it behind a VPN or a reverse proxy you trust (
   Hugging Face tokens, workload environment values, the server's keys.
 - A workload getting GPUs, environment or host access it was not given.
 - Data sent to a cloud provider for a key, route or request that does not allow it.
+- An engine copy made with **Try this version** (1.5.2) running an image or program other than the one it pinned,
+  or made without its signatures verified when the project signs them, unless an admin chose to (audited).
 
 ## Known limits (not vulnerabilities)
 

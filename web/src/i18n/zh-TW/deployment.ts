@@ -81,9 +81,9 @@ export default {
   "deployment.gw.on": "，在 {machine}",
   "deployment.gw.served": "{count} 個請求",
   "deployment.gw.inFlight": " · {count} 個進行中",
-  "deployment.gw.guardedTitle": "agent 的金鑰守門員占用這個連接埠：每個路徑都需要副本的內部金鑰，只有閘道有。引擎本身只在迴路位址上監聽。",
-  "deployment.gw.protectedTitle": "引擎在 /v1 路由上要求副本的內部金鑰；其他路由是開放的（那台機器的 agent 還沒有金鑰守門員）。",
-  "deployment.gw.openTitle": "引擎在沒有金鑰的情況下執行：任何連得到它連接埠的人都能使用。",
+  "deployment.gw.guardedTitle": "agent 的金鑰守門員占用這個連接埠：每個路徑都需要副本的內部金鑰，只有閘道有。推論引擎本身只在迴路位址上監聽。",
+  "deployment.gw.protectedTitle": "推論引擎在 /v1 路由上要求副本的內部金鑰；其他路由是開放的（那台機器的 agent 還沒有金鑰守門員）。",
+  "deployment.gw.openTitle": "推論引擎在沒有金鑰的情況下執行：任何連得到它連接埠的人都能使用。",
   "deployment.gw.guarded": "金鑰守門員",
   "deployment.gw.protected": "內部金鑰",
   "deployment.gw.open": "沒有金鑰",
@@ -148,4 +148,5 @@ export default {
   "deployment.scale.drainFinish.other": "{count} 個進行中的請求完成後",
   "deployment.scale.paused": "目前不調整：{reason}。",
   "deployment.scale.last": "上次：{text}",
+  "deployment.runsCopy": "執行的是複本：{engine}（以 {builtin} 為基礎）。",
 } satisfies Record<keyof typeof en, string>;

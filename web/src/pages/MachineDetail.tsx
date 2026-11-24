@@ -166,7 +166,7 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
                   <span className="runlist-k"><HolderIcon h={h} size={16} /></span>
                   <span className="runlist-name">
                     {h.href ? <Link to={h.href}>{h.name}</Link> : <span className="strong" title={appTitle(h.name)}>{h.name}</span>}
-                    <small>{h.kind === "workload" ? t("machine.appLine", { kind: String(h.workload.kind), runtime: String(h.workload.runtime) }) : h.deployment?.model.name}</small>
+                    <small>{h.trial ? h.trial.model : h.kind === "workload" ? t("machine.appLine", { kind: String(h.workload.kind), runtime: String(h.workload.runtime) }) : h.deployment?.model.name}</small>
                   </span>
                   <span className="runlist-where">{all.map((x) => whereOnMachine(x.replica)).join(" ")}</span>
                 </li>

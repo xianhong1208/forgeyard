@@ -321,6 +321,8 @@ export type Recipe = {
   name: string; title: string; description: string; engine: string; version: string; tasks: Task[]; formats: string[];
   api: Record<string, string>; share: "exclusive" | "vram"; builtin: boolean; estimate: string;
   params: Record<string, RecipeParam>; devices: ("gpu" | "cpu")[]; variants: RecipeVariant[]; yaml?: string;
+  // 1.5.2 (#95, PR 4): in the catalog's list (GET /api/models), its latest finished trial and whether one runs now.
+  last_trial?: TrialBrief | null; trial_running?: boolean;
   media?: { inputs: Medium[]; files: boolean } | null;
   // 1.3, text to speech: the formats the engine makes, how it streams, its default voice.
   tts?: { formats: string[]; default_format: string; stream_formats: string[]; voices: string | null; default_voice: string | null; cjk: boolean } | null;
@@ -328,6 +330,29 @@ export type Recipe = {
   image?: { request: "fields" | "sd-cpp"; output_formats: string[]; max_n: number } | null;
   // 1.3, video generation: how the gateway asks the engine, and the frame counts it makes (k x step + 1).
   video?: { request: "vllm-omni"; frames_step: number } | null;
+  // 1.5.2 (#95): a copy of a built-in engine ("Try this version"): the built-in it came from, and what the copy did.
+  based_on?: string | null;
+  copy?: RecipeCopy | null;
+};
+
+// 1.5.2 (#95): what the server verified about an image or archive of a copy (forgeyard/models/signatures.py).
+export type EngineSignature = {
+  status: "verified" | "unsigned" | "not_verified"; note?: string | null; source?: string; repository?: string; workflow?: string;
+  // not_verified (an admin's override when signatures could not be checked): why, who, when.
+  reason?: string; overridden_by?: string; at?: string;
+  ref?: string | null; commit?: string | null; run?: string | null; predicate?: string; issuer?: string;
+  log_index?: number | null; signed_at?: string | null;
+};
+export type RecipeCopy = {
+  from_version: string; kind: "release" | "build"; made_at: string; made_by: string;
+  left_out: { variant: string; code: string; text: string; params: Record<string, string> }[];
+  archives: { variant: string; release: string | null; signature: EngineSignature | Record<string, never> }[];
+};
+export type EnginePin = { signature: EngineSignature | null; recorded_at: string | null; recorded_by: string };
+// What a built-in engine's project signs (GET /api/engine-updates: signatures).
+export type EngineSigned = { signed: true; kind: string; repository: string } | { signed: false; text: string };
+export type EngineTryResponse = {
+  recipe: Recipe; left_out: RecipeCopy["left_out"]; signatures: Record<string, EngineSignature>;
 };
 
 export type CatalogModel = {
@@ -451,6 +476,61 @@ export type Deployment = {
   last_start?: StartTime | null;
   // 1.5.0 (#37): automatic replicas: the bounds, the load and the last decision.
   autoscale?: DeploymentAutoscale;
+  // 1.5.2 (#95, detail only): the engine it runs (a copy names its built-in), and the versions Edit offers.
+  engine?: DeploymentEngine | null;
+  engines?: (DeploymentEngine & { current: boolean })[];
+};
+
+export type DeploymentEngine = {
+  name: string; title: string; version: string; builtin: boolean; based_on: string | null;
+  // 1.5.2 (#95, PR 4): its latest finished trial run (with the deployment's model first), never a gate.
+  last_trial?: TrialBrief | null;
+};
+
+// 1.5.2 (#95, PR 4): a trial run of an engine (POST /api/recipes/{name}/trials): a temporary, isolated deployment,
+// a few checks, then removed. ok: true passed, false failed, null not checked (the note says why).
+export type TrialState = "running" | "passed" | "failed" | "cancelled";
+export type TrialPhase = "starting" | "measuring" | "asking" | "settling";
+// codes / why: what a note or a result says, as {code, …specifics}, for the console's own sentence in each language.
+export type TrialCode = { code: string } & Record<string, unknown>;
+export type TrialCheck = { id: string; label: string; value: unknown; expected: unknown; ok: boolean | null; note: string | null; codes?: TrialCode[] };
+export type TrialBrief = {
+  id: number; recipe: string; model: string; machine: string; machine_id: number | null; state: TrialState;
+  phase: TrialPhase | null; created_at: string; finished_at: string | null; summary: string | null; why?: TrialCode | null;
+  deployment_id: number | null; task: string; workload: string | null;
+};
+export type TrialComparison = {
+  builtin: string;
+  deployment: { id: number; name: string; reserved: number | null; start_seconds: number | null; same_machine: boolean } | null;
+  trial: { id: number; machine: string; finished_at: string | null; start_seconds: number | null; measured: number | null;
+    memory_unmeasured?: string | null;
+    reserved: number | null; p50_ms: number | null; p95_ms: number | null } | null;
+};
+export type EngineTrial = {
+  id: number; recipe: string; builtin: string | null; engine: string; engine_version: string;
+  model: { id: number | null; name: string; task: string }; machine: { id: number | null; name: string };
+  gpus: { key: string; index: number; model: string }[]; params: Record<string, unknown>;
+  estimate: number | null; device: "gpu" | "cpu" | null; reserved: number | null; requested_by: string;
+  created_at: string; ready_at: string | null; finished_at: string | null; deadline_at: string;
+  state: TrialState; phase: TrialPhase | null; summary: string | null; why?: TrialCode | null; params_from: string | null;
+  start: { seconds: number; phases: Record<string, number>; source: string } | null;
+  measured: number | null; measured_peak: number | null; p50_ms: number | null; p95_ms: number | null;
+  // Why the memory has no number (other work changed its use, no readings): never a negative or made-up figure.
+  memory_unmeasured?: "went_down" | "went_down_ram" | "no_readings" | null;
+  first_answer: string | null; checks: TrialCheck[]; comparison: TrialComparison | null;
+  events?: { at: string | null; kind: string; message: string }[]; log_tail?: string | null;
+};
+export type TrialsResponse = { trials: EngineTrial[]; can_run: boolean; limit: number };
+export type TrialDryRun = {
+  estimate: Estimate; placement: { fits: boolean; summary?: string; machines?: MachineVerdict[]; placed?: { gpus: number[]; variant: string }[] };
+  params: Record<string, unknown>; params_from: string | null; engine_on: EngineOn; online: boolean; running: number; limit: number;
+};
+
+// 1.5.2 (#95): a change that restarts the only running replica: about how long the model does not answer, and how
+// to avoid it. source: its own last start, the other deployments of the engine, or a typical figure.
+export type EditOutage = {
+  seconds: number; source: "last_start" | "engine" | "typical"; first_start: boolean; image_missing: string[];
+  avoid: ("add_replica" | "autoscale" | "min_replicas" | "cloud")[]; cloud: boolean; text: string;
 };
 
 export type StartTime = {
@@ -488,10 +568,16 @@ export type RestartMode = "none" | "on_start" | "on_wake" | "rolling" | "all";
 export type EditResponse = {
   estimate: Estimate; placement: Placement; params: Record<string, unknown>;
   changes: Record<string, { before: unknown; after: unknown }>; restart: RestartMode; restart_text: string;
+  // 1.5.2 (#95): the engine it would run, the parameters that engine does not know (dropped), the one-replica notice.
+  recipe?: string; dropped?: string[]; outage?: EditOutage | null;
   deployment?: Deployment;
 };
 
-export type DeploymentsResponse = { deployments: Deployment[]; server_time: string; can_manage: boolean };
+export type DeploymentsResponse = {
+  deployments: Deployment[]; server_time: string; can_manage: boolean;
+  // 1.5.2 (#95, PR 4): engine trials that run now (their temporary deployments are not listed as deployments).
+  trials?: TrialBrief[];
+};
 
 export type DeploymentResponse = { deployment: Deployment; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
 
@@ -634,6 +720,8 @@ export type DownloadProgress = {
 export type ModelDownload = {
   id: number;
   model: { id: number; name: string; title: string | null } | null;
+  // 1.5.2 (#95): the engine alone (its recipe), no model.
+  engine_only?: boolean;
   machine: { id: number; name: string; connected: boolean } | null;
   file: string | null;
   recipe: string | null;
@@ -652,7 +740,9 @@ export type ModelDownload = {
 
 export type DownloadsResponse = { downloads: ModelDownload[]; can_download: boolean };
 
-export type DownloadTargetState = "ok" | "cached" | "downloading" | "too_old" | "no_cache" | "offline" | "no_space" | "revoked";
+export type DownloadTargetState = "ok" | "cached" | "downloading" | "too_old" | "no_cache" | "offline" | "no_space" | "revoked"
+  // 1.5.2 (#95): an engine alone, and no variant of it runs on that machine.
+  | "no_engine";
 
 export type DownloadTarget = {
   machine_id: number; name: string; status: string; connected: boolean; state: DownloadTargetState; note: string;
@@ -668,7 +758,9 @@ export type DownloadTarget = {
 };
 
 export type DownloadTargets = {
-  model: { id: number; name: string; title: string | null; size_bytes: number; kind: string; file: string | null };
+  // null (1.5.2, #95): the engine alone, named in `engine`.
+  model: { id: number; name: string; title: string | null; size_bytes: number; kind: string; file: string | null } | null;
+  engine?: DeploymentEngine;
   recipes: string[];
   recipe: string | null;
   machines: DownloadTarget[];
@@ -732,10 +824,47 @@ export type ModelPage = {
   deployments: { id: number; name: string; recipe: string }[];
 };
 
-export type EnginePageMachine = EngineOn & { machine_id: number; name: string; status: string; connected: boolean; can_list: boolean };
+export type EnginePageMachine = EngineOn & { machine_id: number; name: string; status: string; connected: boolean; can_list: boolean;
+  // 1.5.2 (#95): a download of this engine alone under way there.
+  download?: ModelDownload | null };
 
 export type EnginePage = {
   recipe: Recipe; can_manage: boolean; machines: EnginePageMachine[];
   deployments: { id: number; name: string; model_id: number }[];
   models: { id: number; name: string; title: string | null }[];
+  // 1.5.2 (#95): per variant, what the server recorded for its pinned image (a copy's).
+  pins?: Record<string, EnginePin>;
+  // 1.5.2 (#95): Download to… for the engine alone (operators and admins), its downloads, and for a copy whose
+  // built-in engine has moved to its version or past it, that built-in.
+  can_download?: boolean;
+  downloads?: ModelDownload[];
+  caught_up?: { builtin: string; title: string; version: string; same: boolean } | null;
+  // 1.5.2 (#95, PR 4): its trial running now, and its latest finished one.
+  trial_running?: TrialBrief | null;
+  last_trial?: TrialBrief | null;
 };
+
+// 1.5.2 (#95): newer versions of the built-in engines, as the last check found them (GET /api/engine-updates).
+export type EngineUpdateWhy = { code: string; text: string } & Record<string, string | string[] | number | null | undefined>;
+export type EngineUpdateVariant = {
+  name: string; runtime: "container" | "process"; vendor: string; available: boolean;
+  tag?: string; digest?: string; image?: string; url?: string; sha256?: string; archive?: string; release?: string;
+  why?: EngineUpdateWhy;
+};
+export type EngineUpdateCandidate = {
+  version: string; kind: "release" | "build"; revision?: string | null; created?: string | null;
+  release?: { tag: string; name: string | null; url: string | null; published_at: string | null };
+  variants: EngineUpdateVariant[];
+  mentions?: { flag: string; lines: number; excerpts: string[] }[];
+  notes?: EngineUpdateWhy;
+};
+export type EngineUpdateStatus = "newer" | "newer_build" | "up_to_date" | "partly_checked" | "could_not_check" | "not_checked";
+export type EngineUpdate = {
+  recipe: string; title: string; engine: string; version: string; kind: "release" | "rolling" | "own";
+  status: EngineUpdateStatus; newest?: string | null; candidates: EngineUpdateCandidate[];
+  errors: { where: string; text: string }[]; upstream?: EngineUpdateWhy; why?: EngineUpdateWhy;
+};
+export type EngineUpdatesResult = {
+  checked_at: string; checked_by: string; seconds: number; github_requests: number; engines: Record<string, EngineUpdate>;
+};
+export type EngineUpdatesResponse = { result: EngineUpdatesResult | null; can_check: boolean; signatures?: Record<string, EngineSigned> };

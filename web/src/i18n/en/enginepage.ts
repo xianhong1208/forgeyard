@@ -97,4 +97,13 @@ export default {
   "enginepage.col.range": "Range",
   "enginepage.col.does": "What it does",
   "enginepage.advancedTag": " · advanced",
+  "enginepage.dl.button": "Download to…",
+  "enginepage.dl.buttonTitle": "Fetch this engine's image or program to machines ahead of time, without a model",
+  "enginepage.dl.title": "Download {what} to…",
+  "enginepage.dl.lead": "Only the engine is fetched: the image or program of the variant each machine would run (a copy's image is checked by the ids recorded when it was pinned, so it can also come through the server). Nothing is started.",
+  "enginepage.dl.started": "Downloading {recipe} to {names}.{skipped}",
+  "enginepage.dl.listTitle": "Downloads of this engine",
+  "enginepage.dl.under": "downloading",
+  "enginepage.caughtUp.same": "The built-in {builtin} now runs {version}, the same version as this copy: deployments on this copy can switch back to it in Edit, and then this copy can be deleted.",
+  "enginepage.caughtUp.newer": "The built-in {builtin} now runs {version}, newer than this copy: deployments on this copy can switch back to it in Edit.",
 } as const;

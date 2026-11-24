@@ -50,6 +50,14 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
                                      directory per replica on its machine, which the agent mounts
                                      writable into the container and names in `env`. Off unless
                                      enabled (container variants only)
+    based_on: vllm                   1.5.2, custom recipes only: the built-in recipe (same engine) this one was
+                                     copied from ("Try this version" writes it). The catalog's engine
+                                     arguments for the built-in (Qwen3-Reranker's --hf-overrides for
+                                     vllm-pooling) also apply to it
+    copy: {from_version, kind, made_at, made_by, left_out: [{variant, code, text}], archives: [...]}
+                                     1.5.2: what "Try this version" did, for the engine's page (written by
+                                     the server; informational: the images' signatures are recorded in
+                                     the image_pins table)
     variants:                        tried in order; the first that fits a machine is used
       - name: cuda
         when: {vendor: nvidia, compute_capability: ">=8.0", driver: ">=580"}
@@ -134,6 +142,8 @@ MODEL_FEATURES = ("mmproj", "image_pixels") + MEDIA_KINDS + ("image_single", "im
 # Parameters every recipe has, handled by Forgeyard itself.
 COMMON_PARAMS = ("gpus", "share", "vram", "extra_args", "first_answer_timeout")
 MAX_RECIPE_BYTES = 64 * 1024
+# An image line pinned by digest, anywhere in a recipe's text (forgeyard/workloads/pins.py: which pins a recipe names).
+IMAGE_LINE_RE = re.compile(r"^\s*(?:-\s*)?image:\s*[\"']?([^\"'\s#]+@sha256:[0-9a-f]{64})[\"']?\s*(?:#.*)?$", re.M)
 
 
 class RecipeError(Exception):
@@ -462,6 +472,31 @@ class EngineCache(_M):
         return v
 
 
+class CopyLeftOut(_M):
+    """A variant of the built-in a copy left out, and why (1.5.2: no image of the new version)."""
+    variant: str = Field(max_length=40)
+    code: str = Field(default="", max_length=40)
+    text: str = Field(max_length=400)
+    params: dict[str, Annotated[str, Field(max_length=200)]] = Field(default_factory=dict, max_length=8)
+
+
+class CopyArchive(_M):
+    """A process variant's archive a copy pinned (1.5.2), and what the server verified about it."""
+    variant: str = Field(max_length=40)
+    release: Optional[str] = Field(default=None, max_length=120)
+    signature: dict[str, Union[str, int, None]] = Field(default_factory=dict, max_length=16)
+
+
+class CopyInfo(_M):
+    """What "Try this version" did (1.5.2, #95): shown on the copy's page."""
+    from_version: str = Field(max_length=40)
+    kind: Literal["release", "build"] = "release"
+    made_at: str = Field(max_length=40)
+    made_by: str = Field(max_length=64)
+    left_out: list[CopyLeftOut] = Field(default_factory=list, max_length=16)
+    archives: list[CopyArchive] = Field(default_factory=list, max_length=16)
+
+
 class Recipe(_M):
     name: str
     title: str = Field(max_length=80)
@@ -490,7 +525,12 @@ class Recipe(_M):
     # 1.5.0: the engine's compile cache kept between starts (EngineCache); off unless `enabled`.
     engine_cache: Optional[EngineCache] = None
     variants: list[Variant] = Field(min_length=1, max_length=16)
+    # 1.5.2 (#95): a custom recipe copied from a built-in one (same engine), and what the copy did.
+    based_on: Optional[str] = Field(default=None, max_length=40)
+    copy_of: Optional[CopyInfo] = Field(default=None, alias="copy")
     builtin: bool = False
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     @field_validator("name")
     @classmethod
@@ -576,6 +616,16 @@ class Recipe(_M):
             raise ValueError("api: classify is served as classify")
         if "video" in self.tasks and len(self.tasks) > 1:
             raise ValueError("tasks: a video recipe serves only the video task (its jobs have their own API)")
+        if self.copy_of is not None and self.based_on is None:
+            raise ValueError("copy: only for a recipe with based_on")
+        if self.based_on is not None:
+            if self.builtin:
+                raise ValueError("based_on: only custom recipes are based on a built-in one")
+            base = builtin_recipes().get(self.based_on)
+            if base is None:
+                raise ValueError(f"based_on: {self.based_on} is not a built-in recipe")
+            if base[0].engine != self.engine:
+                raise ValueError(f"based_on: {self.based_on} runs {base[0].engine}, this recipe {self.engine}")
         return self
 
     @property
@@ -632,6 +682,16 @@ def builtin_recipes() -> dict[str, tuple[Recipe, str]]:
             out[recipe.name] = (recipe, text)
         _builtin_cache = dict(sorted(out.items()))
     return _builtin_cache
+
+
+def engine_args_for(engine_args: Optional[dict], recipe: Recipe) -> list[str]:
+    """A catalog model's extra engine arguments for this recipe (CatalogModel.engine_args, keyed by recipe name): its
+    own entry, else, for a copy of a built-in recipe (1.5.2, `based_on`), the built-in's: a vllm-pooling-0-34-0 copy
+    still passes Qwen3-Reranker's --hf-overrides. An entry of its own, even an empty one, wins."""
+    found = (engine_args or {}).get(recipe.name)
+    if found is None and recipe.based_on:
+        found = (engine_args or {}).get(recipe.based_on)
+    return [str(a) for a in found or []]
 
 
 # ------------------------------------------------------------------ matching hardware

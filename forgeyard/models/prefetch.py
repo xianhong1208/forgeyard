@@ -20,6 +20,10 @@ chosen machines' model caches before anything is deployed there, with progress.
   the model and engine blocks carry `relay`; the row's `via` says how the bytes came last ("server" once the
   agent reports progress through the server).
 - Finished rows are history: kept KEEP_DAYS days, at most KEEP_PER_MACHINE per machine.
+- **An engine alone** (1.5.2, #95, migration 0017): a row without a model fetches only the image or program of the
+  recipe's variant for that machine (from an engine's page: a built-in engine or a copy made by "Try this version").
+  A copy's image comes through the server like a built-in's, by the ids recorded when it was pinned (image_pins).
+  Agents with "prefetch" already take a download without a model block: no agent change.
 """
 
 from __future__ import annotations
@@ -113,12 +117,16 @@ def model_cached(node: Node, model: CatalogModel) -> bool:
     return key in ((node.model_cache or {}).get("cached") or [])
 
 
-def active_rows(db: DbSession, *, node_id: Optional[int] = None, model_id: Optional[int] = None) -> list[ModelDownload]:
+def active_rows(db: DbSession, *, node_id: Optional[int] = None, model_id: Optional[int] = None,
+                engine_only: Optional[str] = None) -> list[ModelDownload]:
+    """The downloads queued or under way; `engine_only`: only those of that recipe's engine alone (no model)."""
     q = select(ModelDownload).where(ModelDownload.state.in_(ACTIVE)).order_by(ModelDownload.id)
     if node_id is not None:
         q = q.where(ModelDownload.node_id == node_id)
     if model_id is not None:
         q = q.where(ModelDownload.model_id == model_id)
+    if engine_only is not None:
+        q = q.where(ModelDownload.model_id.is_(None), ModelDownload.recipe == engine_only)
     return list(db.scalars(q).all())
 
 
@@ -198,6 +206,97 @@ def targets(db: DbSession, model: CatalogModel, recipe: Optional[Recipe]) -> lis
             if n.revoked_at is None and n.status != "revoked"]
 
 
+# ------------------------------------------------------------------ an engine alone (1.5.2, #95)
+def _engine_via(node: Node, eng: dict) -> str:
+    """How this machine would fetch the engine: "server", "auto" or "direct" (as `_via` for a model)."""
+    from forgeyard.machines import relay
+
+    if eng.get("image"):
+        image = eng["image"]
+        if not (relay.can_relay_images(node) and relay.relayable_image(image)):
+            return "direct"
+        return relay.mode(node, reach.registry(image)) or "direct"
+    if eng.get("engine"):
+        return relay.mode(node, reach.engine_host(eng["engine"])) or "direct"
+    return "direct"
+
+
+def engine_target(db: DbSession, node: Node, recipe: Recipe, active: Optional[ModelDownload] = None) -> dict:
+    """What the engine's dialog shows for one machine: the variant it would run and whether its image or program can
+    be fetched there now. A machine no variant of the engine runs on is refused, saying why."""
+    from forgeyard.machines.hub import hub
+
+    feats = node.features or []
+    connected = hub.connected(node.id)
+    mc = node.model_cache or {}
+    eng = engine_of(node, recipe)
+    out = {"machine_id": node.id, "name": node.name, "status": node.status, "connected": connected,
+           "model_cached": False, "need_bytes": 0, "free_bytes": mc.get("free_bytes"), "variant": eng["variant"],
+           "engine": ({"kind": "archive", "name": eng["engine"]["name"], "cached": eng["cached"]} if eng["engine"]
+                      else {"kind": "image", "name": eng["image"], "cached": eng["cached"]} if eng["image"] else None),
+           "engine_note": eng["note"], "download": None, "via": _engine_via(node, eng), "from_machine": None}
+    if node.revoked_at is not None or node.status == "revoked":
+        state, note = "revoked", f"{node.name} was revoked."
+    elif eng["variant"] is None:
+        state, note = "no_engine", f"No variant of {recipe.name} runs on {node.name}: {eng['note']}"
+    elif FEATURE_MODELS not in feats:
+        state, note = "no_cache", "Its agent serves no models (start it with --model-cache)."
+    elif FEATURE_PREFETCH not in feats:
+        state, note = "too_old", f"{node.name}'s agent cannot download ahead: update the agent."
+    elif active is not None:
+        state, note = "downloading", "A download of this engine is already under way here."
+        out["download"] = row_out(active, connected)
+    elif not connected:
+        state, note = "offline", f"{node.name} is offline."
+    elif eng["engine"] is None and eng["image"] is None:
+        state, note = "cached", "Its program is installed on the machine: there is nothing to download."
+    elif eng["cached"] is True:
+        state, note = "cached", "Already here."
+    else:
+        state, note = "ok", ""
+    out["state"], out["note"] = state, note
+    return out
+
+
+def engine_targets(db: DbSession, recipe: Recipe) -> list[dict]:
+    from forgeyard.models.scheduler import candidates
+
+    active = {r.node_id: r for r in active_rows(db, engine_only=recipe.name)}
+    return [engine_target(db, n, recipe, active.get(n.id)) for n in candidates(db, None)
+            if n.revoked_at is None and n.status != "revoked"]
+
+
+def start_engine(db: DbSession, recipe: Recipe, nodes: list[Node], by: str, *, actor=None,
+                 ip: Optional[str] = None) -> tuple[list[ModelDownload], list[dict]]:
+    """A download of the engine alone per machine that can take it; the others with why not. Does not commit."""
+    active = {r.node_id: r for r in active_rows(db, engine_only=recipe.name)}
+    created, skipped = [], []
+    for node in nodes:
+        t = engine_target(db, node, recipe, active.get(node.id))
+        if t["state"] != "ok":
+            skipped.append({"machine_id": node.id, "name": node.name, "state": t["state"], "reason": t["note"]})
+            continue
+        row = ModelDownload(model_id=None, node_id=node.id, file=None, recipe=recipe.name, state="queued",
+                            via="direct", requested_by=by[:64], created_at=utcnow())
+        db.add(row)
+        db.flush()
+        audit.record(db, "engine.download_requested", actor=actor, actor_name=None if actor else by, target=node.name,
+                     ip=ip, machine_id=node.id, recipe=recipe.name, version=recipe.version, variant=t["variant"],
+                     engine=(t["engine"] or {}).get("name"), download_id=row.id)
+        created.append(row)
+    prune(db)
+    return created, skipped
+
+
+def end_engine(db: DbSession, recipe: str, why: str) -> list[int]:
+    """The recipe was deleted: its engine-only downloads under way end, saying why; the machines to tell."""
+    nodes = []
+    for row in active_rows(db, engine_only=recipe):
+        row.state, row.download, row.reason, row.finished_at = "failed", None, why[:400], utcnow()
+        nodes.append(row.node_id)
+    return nodes
+
+
 # ------------------------------------------------------------------ asking, cancelling, history
 def start(db: DbSession, model: CatalogModel, nodes: list[Node], recipe: Optional[Recipe], by: str,
           *, actor=None, ip: Optional[str] = None) -> tuple[list[ModelDownload], list[dict]]:
@@ -225,6 +324,11 @@ def start(db: DbSession, model: CatalogModel, nodes: list[Node], recipe: Optiona
 def cancel(db: DbSession, row: ModelDownload, by: str, *, actor=None, ip: Optional[str] = None) -> None:
     row.state, row.download, row.finished_at = "cancelled", None, utcnow()
     row.reason = f"cancelled by {by}"[:400]
+    if row.model_id is None:   # 1.5.2: an engine alone
+        audit.record(db, "engine.download_cancelled", actor=actor, actor_name=None if actor else by,
+                     target=row.node.name if row.node else None, ip=ip, machine_id=row.node_id, recipe=row.recipe,
+                     download_id=row.id)
+        return
     audit.record(db, "model.download_cancelled", actor=actor, actor_name=None if actor else by,
                  target=row.node.name if row.node else None, ip=ip, machine_id=row.node_id,
                  model=row.model.name if row.model else None, download_id=row.id)
@@ -277,6 +381,21 @@ def desired(db: DbSession, node: Node) -> list[dict]:
     out = []
     for row in rows:
         model = row.model
+        if model is None:
+            # 1.5.2: an engine alone. Nothing to fetch any more (its recipe was deleted, or no variant runs here now):
+            # left out, so the agent is not asked for nothing.
+            item = {"id": row.uid}
+            eng = engine_of(node, get_recipe(db, row.recipe)) if row.recipe else {}
+            if eng.get("engine") is not None:
+                item["engine"] = eng["engine"]
+            if eng.get("image"):
+                item["image"] = eng["image"]
+                check = images.check_for(eng["image"]) if FEATURE_IMAGE_IDS in (node.features or []) else None
+                if check is not None:
+                    item["image_ids"] = check
+            if len(item) > 1:
+                out.append(relay.attach(item, node, "download", row.uid))
+            continue
         try:
             block = _block(model)
         except (KeyError, TypeError):
@@ -392,6 +511,8 @@ def row_out(row: ModelDownload, connected: Optional[bool] = None) -> dict:
     node, model = row.node, row.model
     online = hub.connected(row.node_id) if connected is None else connected
     out = {"id": row.id, "model": {"id": model.id, "name": model.name, "title": model.title} if model else None,
+           # 1.5.2 (#95): the engine alone (its recipe), no model.
+           "engine_only": row.model_id is None,
            "machine": {"id": node.id, "name": node.name, "connected": online} if node else None,
            "file": row.file, "recipe": row.recipe, "state": row.state, "via": row.via, "download": row.download,
            "reason": row.reason, "requested_by": row.requested_by, "created_at": row.created_at,

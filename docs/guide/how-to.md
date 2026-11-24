@@ -166,7 +166,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -208,7 +208,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -223,7 +223,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2 inventory
 ```
 
 ### CPU only
@@ -237,7 +237,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 ### Why these options
@@ -270,8 +270,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -290,18 +290,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.1 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.2 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.5.1`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.5.2`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -315,7 +315,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -442,8 +442,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -1011,9 +1011,11 @@ On the deployment's page, choose **Edit** (admins and operators). You can change
 - **Replicas**: more are added without touching the running ones; fewer remove the
   highest-numbered ones;
 - **Machine**: *Automatic* (Forgeyard chooses) or *Pinned to* one machine. Pinning it to another
-  machine moves its replicas there; going back to *Automatic* moves nothing.
+  machine moves its replicas there; going back to *Automatic* moves nothing;
+- (1.5.2) **Engine version**: the built-in engine or a copy of it made with **Try this version**
+  ([Move a deployment to another engine version](#move-a-deployment-to-another-engine-version)).
 
-The model, the recipe and the names stay: deploy a new one to change them. Before you save, the page
+The model and the names stay: deploy a new one to change them. Before you save, the page
 shows the new estimate, where each replica would go and what saving does. A change that does not fit
 is refused like a deploy ([A deployment does not fit](troubleshooting.md#a-deployment-does-not-fit)).
 A stopped deployment is only saved: the new settings apply when it starts.
@@ -1023,9 +1025,11 @@ Saving restarts the replicas on the new settings:
 - **several replicas** restart one at a time: the next one only once the one before it is ready on
   the new settings, so the model keeps answering. The page shows *updating: 1 of 2 on the new
   settings* until all are done;
-- **one replica** stops and starts again: the model does not answer until the new one is ready. To
-  avoid that, raise **Replicas** to 2 in the same change: the new replica starts first, then the old
-  one restarts, and you can lower it again afterwards;
+- **one replica** stops and starts again: the model does not answer until the new one is ready. Before
+  you save, the page says about how long (1.5.2; its last start, else the other deployments of its
+  engine, else a typical start) and how to avoid it. To avoid it, raise **Replicas** to 2 in the same
+  change when there is room for two: the new replica starts first, then the old one restarts, and you
+  can lower it again afterwards;
 - changing only the number of replicas, or going back to *Automatic*, restarts nothing.
 
 A replica that restarts (after an edit, or **Stop** then **Start**) goes back to the machine it ran on
@@ -1334,7 +1338,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.1
+  docker.io/tonyhuang1101/forgeyard:1.5.2
 sudo docker logs forgeyard
 ```
 
@@ -1368,7 +1372,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.2 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1377,7 +1381,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.2 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1402,7 +1406,7 @@ right after it ([how](#upgrade-the-server-and-the-agents)).
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.1
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.2
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1410,7 +1414,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.1 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.2 .`
 
 ## Run the server as a service
 
@@ -1451,7 +1455,7 @@ the journal: `journalctl -u forgeyard -f`.
    ```bash
    git pull
    cd web && npm ci && npm run build && cd ..
-   uv sync
+   uv sync --extra server
    ```
 
    Then restart it (`sudo systemctl restart forgeyard`). Database changes run by themselves on
@@ -1500,7 +1504,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1519,7 +1523,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
    ```
 
    On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
@@ -1890,6 +1894,186 @@ it. A connected machine lists its images again when the page opens and its last 
 minutes; **List again** asks now. An offline machine shows its last listing. An admin **edits** or
 **deletes** a custom engine there, and **copies** a built-in one as a custom engine (for example to try a
 newer image).
+
+## See whether an engine has a newer version
+
+Forgeyard pins each built-in engine to one version (vLLM 0.32.0, llama.cpp 1.0.0, …) and moves it only with
+its own releases, after testing. To see whether upstream has published something newer meanwhile, an admin
+opens **Models → Engines** and clicks **Check for newer versions**. Nothing runs on a timer and nothing
+changes: the check only reads.
+
+The server asks, through its own [network rules](reference.md#models) (https and public addresses only;
+`MODEL_ALLOW_PRIVATE_HOSTS` for a mirror on your network), each built-in variant's **own** image repository
+on Docker Hub or GHCR for its tags, and GitHub for the release notes of what it finds. It takes about half a
+minute (at most a minute and a half). The result is kept until the next check, with when it ran and who ran
+it, and everyone signed in sees it; the check is in the audit log.
+
+- **The cards** get a badge: *0.34.0 available*, *Newer build*, *Up to date* or *Could not check* (when a
+  registry or GitHub could not be reached; the badge's tooltip says why, and the other engines are still
+  checked). The badge opens the engine's page.
+- **An engine's page** has a **Newer versions** section, one block per newer version, newest first:
+  - which variants have an image of that version, with its tag and the digest it has now, and why the others
+    do not (for example *No v0.34.0-cu129 image in docker.io/vllm/vllm-openai; this variant's images stop at
+    0.32.0*: vLLM stopped publishing CUDA 12.9 images). A process variant (`cpu-process`) is included only
+    when the release publishes the same archive with its SHA-256;
+  - a link to the release notes, and the flags and settings this engine passes that the notes mention (for
+    vLLM 0.34.0: `--gpu-memory-utilization`, whose default and meaning changed). Read those first: a newer
+    version can change defaults and memory use, and Forgeyard's estimates were measured on the pinned one.
+
+What counts as newer: a **stable** release published as an image, in the same form as the built-in's tag
+(`v0.34.0-cu129` for a `v0.32.0-cu129` variant). Release candidates, nightly builds and model-specific images
+are never offered, and a GitHub release whose images are not out yet is only mentioned. Every newer version
+is listed, so you can take the smaller step. An engine published only under moving tags (stable-diffusion.cpp's
+`master-cuda`) shows a **newer build** when its tag points at a later image. Forgeyard's own vision image is
+not checked: it moves with Forgeyard.
+
+## Try a newer version of an engine
+
+When a check found a newer version, an admin can try it without touching the built-in engine. On the engine's page,
+each version in **Newer versions** has **Try this version**. It makes a **custom engine**: a copy of the built-in
+with that version's images, named `<engine>-x-y-z` (`vllm-0-34-0`; you can change the name). Nothing else changes:
+the built-in stays as it is, and no deployment moves to the copy until you choose it.
+
+The dialog says, before anything is made:
+
+- **which variants the copy has**: those with an image of the new version. A variant without one is left out with
+  the reason (vLLM 0.34.0 has no CUDA 12.9 image); machines that need it keep using the built-in. A process
+  variant (`cpu-process`) is included when the release publishes the same archive with its SHA-256.
+- **signatures**: llama.cpp signs its images and release archives (GitHub artifact attestations). Forgeyard checks
+  each signature while it makes the copy, and makes no copy when one does not verify or is missing. When the
+  signatures cannot be checked at all (GitHub or Sigstore cannot be reached from the server), the dialog says why
+  and offers **Create it without verification**: the copy is then marked *Not verified* wherever its signatures are
+  shown, and the audit log says who chose it. vLLM, vLLM-Omni and speaches publish no signatures, and stable-diffusion.cpp only an unsigned build
+  record: their copies are pinned by digest only, and the dialog and the page say so.
+- **what to read first**: a new version can change flags, defaults and memory use. The copy keeps the built-in's
+  arguments as they are, and Forgeyard's estimates were measured on the built-in's version. The flags its release
+  notes mention are listed again, with a link to the notes.
+
+**Make the copy** resolves every image's tag again. If a tag points at another image than when you checked, nothing
+is made: check again, then try. Each image is pinned by its digest, and the ids Forgeyard needs to recognise it are
+recorded (the same ids the built-in images have). So a copy's image **comes through the server** to a machine that
+cannot reach the registry, **runs offline** after `docker load`, and is listed on machine pages and removable with
+**Remove** like a built-in's. The copy is in the audit log as `recipe.created`, with where it came from.
+
+The copy's page says where it came from, when it was made and by whom, each variant's pinned digest and what was
+verified about it (the signing workflow and the build, or *unsigned upstream*), and what was left out. The catalog's
+engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its copies too.
+
+To use the copy, [try it out](#try-out-a-new-engine-version-before-switching) first, then move a deployment to it on the
+deployment's **Edit** page ([Move a deployment to another engine version](#move-a-deployment-to-another-engine-version)),
+or deploy a model with it (pick it as the engine on the deploy page), and compare it with the built-in before you move
+other deployments. **Download to…** on the copy's page fetches its image to the machines first
+([Download an engine ahead of time](#download-an-engine-ahead-of-time)). Delete the copy when you are done with it: it cannot be deleted while a
+deployment uses it. Remove its image from the machines first (their pages, **Engine images**): once the copy is
+deleted, Forgeyard no longer counts that image as one of its own.
+
+## Try out a new engine version before switching
+
+Before you move deployments to a new version of an engine, **try it out**: Forgeyard deploys one model with it on one
+machine for a few minutes, checks it and removes it again. It is usually done on a copy made with
+[Try this version](#try-a-newer-version-of-an-engine), but works on any engine; a trial of the built-in engine gives
+the numbers its copies are compared with. Admins and operators can start and cancel trials; everyone signed in sees
+the results.
+
+1. Open the engine's page (**Models**, the **Engines** tab, then the engine) and click **Try it out**.
+2. Pick a **model** this engine serves and a **machine** (the machines a variant of the engine runs on; an offline one
+   cannot be picked). The **parameters** are those of a deployment of that model on the built-in engine when there is
+   one, so the trial runs it as it is served now; else the engine's defaults. Change them in the dialog if you like
+   (context, concurrency, **Exclusive** or **Share VRAM** on a GPU). The advanced ones keep their values.
+3. The dialog shows the estimate and whether it fits on that machine now, refused with the usual reasons when it does
+   not, and says when the engine's image is not on the machine yet: the trial then pulls it first, which can take many
+   minutes (a vLLM image is about 9 GiB); **Download to…** on the same page fetches it ahead.
+4. **Time to start** bounds the start, downloads included (30 minutes by default, 5 to 180). Click **Start the trial**.
+
+The trial's deployment is **isolated**: it has no route, so it is not in `/v1/models`, no API key and no Playground
+can call it, and the gateway counts no usage or cost for it. It never sleeps and is never scaled, Serving names it
+only as a trial in progress, and a machine's page shows the card it holds as *Trial of* the engine. While it runs,
+neither the engine nor the model can be deleted. At most four trials run on a server at once, and one per engine.
+
+Forgeyard then checks, straight against the replica with its internal key (as **Try it** does):
+
+| Check | What it is | Fails when |
+|---|---|---|
+| **Starts** | How long it took to become ready, part by part (model, image, engine), against the built-in engine's last start of the same model | It cannot be placed, its start fails (its last output is kept), or it is not ready within the time limit |
+| **Memory** | What it uses on its GPU (or of the machine's RAM): the machine's readings after it was ready minus those before the engine started, a few each, against what the replica reserved | It uses more than it reserved (5% allowed for readings on a busy card) |
+| **Answers** | One request to warm it up, then five more of its model's kind: chat (a fixed question, temperature 0, at most 128 tokens), embeddings, rerank (the Paris sentence must come first), text classification, speech to text (the test clip's words), text to speech, images (one), vision | An answer is not one of that kind, or is an error |
+| **Latency** | p50 and p95 of those five, and the first one | — (it is shown, not judged) |
+| **Same answer** | When a deployment of the same model on the built-in engine is ready, the same request once to it, and whether the answers match | — (a new version may answer differently: read both) |
+
+Video is not asked (a video takes minutes): only its start and memory are checked. On a card other work shares, the
+memory is approximate, and the check says so. When other work released memory meanwhile, or the machine sent no
+readings in time, the memory is **not measured**: the check and the result say why in words, never with a number. The trial **passes** when no check fails; then, or when a check fails,
+when you **Cancel the trial**, when it runs out of time, or when the server restarts during it, its deployment is
+removed. A trial is in the audit log as `engine_trial.started`, then `engine_trial.finished` or
+`engine_trial.cancelled`.
+
+The engine's page keeps every trial under **Trials**, newest first: the model, the machine, who ran it and the
+result. **Checks** opens a trial's table (measured, against what, a note) with how it compares with the built-in
+engine: a deployment of the same model there (its last start and what it reserves) and the built-in's own latest
+passed trial (its start, its memory and its latency). An engine's card in **Engines** shows its last result, and
+**Edit** on a deployment says how the chosen version's last trial went (*Last tried out on gpu-01 with qwen3-0.6b:
+Passed*) or that it was never tried. That is information only: you can move a deployment to a version that was never
+tried.
+
+From a script: `POST /api/recipes/{name}/trials` ([reference](reference.md#trial-runs-through-the-api)).
+
+## Move a deployment to another engine version
+
+A deployment can move between a built-in engine and its copies made with [Try this version](#try-a-newer-version-of-an-engine),
+for example from `vllm` (vLLM 0.32.0) to `vllm-0-34-0` and back. Its name, served model name, API keys and routes stay,
+so clients see only the restart.
+
+1. On the deployment's page choose **Edit** (admins and operators).
+2. Under **Engine**, pick the version in **Engine version**: the built-in one and each copy of it that serves the model
+   the same way. An engine without copies shows only itself, with a link to its page, where you can check for newer
+   versions.
+3. The form shows the new version's parameters. **What saving does** lists the engine change, the parameters the new
+   version does not take (they are dropped), how the replicas restart, and on the right the new estimate (a copy can
+   count memory differently). A version that does not fit now is refused like any other change.
+4. **Save and restart**.
+
+The replicas restart as for any change: with several, one at a time, so the model keeps answering. With one running
+replica the model does not answer until the new one is ready, and the form says so before you save:
+
+- about how long: its last start, from its events; else the middle value of the latest starts of the other
+  deployments of this engine on this server; else a typical start for the engine (vLLM about two minutes on an A100,
+  llama.cpp a few seconds);
+- that a new engine version can take longer on its first start (it may compile first), and, when its image is not on
+  the machine yet, that it is downloaded first ([download it ahead](#download-an-engine-ahead-of-time));
+- how to avoid the gap: raise **Replicas** to 2 in the same change when there is room for two (the new replica
+  starts first), or turn on automatic replicas; and, when the deployment's route has a cloud tier, that keys allowed
+  to use the cloud are answered there meanwhile.
+
+It only says so: saving does what it always did. Starting the new version beside the old one needs room for both on
+the card, which a shared GPU often does not have, so Forgeyard does not do it for you.
+
+To go back, choose the built-in engine again. The change is in the audit log as `deployment.changed`, with `recipe`
+(from and to), both versions and the dropped parameters, and the deployment's events say *engine vllm →
+vllm-0-34-0*. A deployment's page says when it runs a copy (*Runs a copy: vLLM 0.34.0 (based on vllm)*). When a
+later Forgeyard release moves the built-in engine to the copy's version or past it, the copy's page says so: move the
+deployments back, then delete the copy. Nothing moves by itself.
+
+From a script: `PATCH /api/deployments/{id}` with `"recipe"` ([reference](reference.md#change-a-deployment-through-the-api)).
+
+## Download an engine ahead of time
+
+**Download to…** on an engine's page (a built-in engine or a copy) fetches only the engine to the machines you
+choose: the image of the variant each machine would run, by its pinned digest, or its process program, checked
+against its SHA-256. No model, and nothing is started. Admins and operators can do it. Use it to put a 9 GiB vLLM
+image on a machine before you move a deployment there.
+
+1. Open the engine's page (**Models**, the **Engines** tab, then the engine) and click **Download to…**.
+2. Tick the machines. Each line says the variant it would get and whether it can: **fits**, **already here**,
+   **downloading**, **offline**, **update the agent**, or **No variant**, with why, on a machine no variant of this
+   engine runs on (vLLM on a machine without a supported card, for example).
+3. Click **Download to N machines**.
+
+The progress shows on the engine's page (in its machines table and under **Downloads of this engine**) and on each
+machine's page, with **Cancel**. A machine set to fetch through the server gets the image that way
+([Give an offline machine models through the server](#give-an-offline-machine-models-through-the-server)): a copy's
+image comes through the server like a built-in's, by the ids recorded when it was made. Each request and cancel is in
+the audit log (`engine.download_requested`, `engine.download_cancelled`), and deleting the engine ends its downloads
+under way. The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
 
 ## Download a model before deploying it
 

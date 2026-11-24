@@ -43,7 +43,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）和擁有它的群組，不會拿到 `/dev/kfd`。它的記憶體和 ROCm 一樣，用同一個記憶體池檢查：APU 取 carve-out 和 GTT 中較大的那個。部署的事件會寫出它用哪個 variant（`… (vulkan; reserves …)`）。
 
-部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂引擎（**模型 → 引擎 → 加入自訂引擎**，*從內建引擎開始* 選 `llama-cpp`）：複本會換一個名字；`variants` 底下只留你要的那個，再儲存。自訂引擎的卡片上有 **編輯** 和 **刪除**（有部署在用時，刪除會被拒絕）。
+部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂推論引擎（**模型 → 推論引擎 → 加入自訂推論引擎**，*從內建推論引擎開始* 選 `llama-cpp`）：複本會換一個名字；`variants` 底下只留你要的那個，再儲存。自訂推論引擎的卡片上有 **編輯** 和 **刪除**（有部署在用時，刪除會被拒絕）。
 
 **從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
 
@@ -77,7 +77,7 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
 - **那台機器上的模型目錄**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **機器名稱**（選填）：這台機器在 **機器** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
 - **伺服器位址（那台機器連過來用的）**（預設是這台伺服器的 `PUBLIC_URL`；`PUBLIC_URL` 空白時，則是你開啟這個頁面時使用的位址）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
-- **進階 → 連接埠範圍**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。應用程式每公開一個連接埠就佔用範圍內的一個連接埠；模型副本（或公開在 `/x/` 的應用程式）佔用兩個：一個給 agent 的金鑰守門員，一個給守門員後面的引擎。Forgeyard 會計算這些連接埠，所以 3 個連接埠的範圍只放得下一個模型：範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
+- **進階 → 連接埠範圍**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。應用程式每公開一個連接埠就佔用範圍內的一個連接埠；模型副本（或公開在 `/x/` 的應用程式）佔用兩個：一個給 agent 的金鑰守門員，一個給守門員後面的推論引擎。Forgeyard 會計算這些連接埠，所以 3 個連接埠的範圍只放得下一個模型：範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
 
 欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的 tag 就是伺服器自己的版本，所以 agent 和伺服器的版本永遠一致。管理員可以用 [`AGENT_IMAGE`](reference.md#machines) 讓指令改用鏡像站、私有 registry 或指定的 digest。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
 
@@ -98,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 `$(for d in …)` 那一行會再用 `--device` 傳入主機上每個 NVIDIA 裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm`、`/dev/nvidia-uvm-tools`、`/dev/nvidia-modeset` 和每個 `/dev/nvidiaN`），主機沒有的會跳過。Docker 可以同時接受它們和 `--gpus all`，而且這很重要：`--gpus` 給的裝置是在 Docker 和 systemd 不知道的情況下設定的，主機下一次執行 `systemctl daemon-reload` 時，容器裡的新行程就會失去它們；用 `--device` 給的則會留著（[機器上的新行程打不開它的 GPU](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)）。如果還沒有 `/dev/nvidia-uvm`（主機開機後還沒跑過 CUDA 程式），先執行 `sudo nvidia-modprobe -u -c=0`。設定好 CDI（`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）的話，可以改用 `--device nvidia.com/gpu=all` 取代這兩者：CDI 會宣告這些裝置，所以它們也會留著。
@@ -132,7 +132,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -143,7 +143,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2 inventory
 ```
 
 ### 純 CPU
@@ -157,17 +157,17 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 ### 為什麼要用這些選項
 
 - **`--network host`**：模型副本在主機的 `127.0.0.1` 上監聽，前面擋著 agent 的金鑰守門員，守門員則監聽副本對外公開的連接埠。只有 agent 和主機共用網路，這兩者才能運作。這也讓 agent 可以在機器自己的位址上公開連接埠。
-- **模型快取在容器內外使用相同路徑**（`-v /srv/forgeyard-models:/srv/forgeyard-models`）：agent 把模型下載到這裡，再請主機的 Docker 啟動引擎容器，並以*主機上的路徑*掛載模型。路徑不同的話，什麼都掛載不到。
+- **模型快取在容器內外使用相同路徑**（`-v /srv/forgeyard-models:/srv/forgeyard-models`）：agent 把模型下載到這裡，再請主機的 Docker 啟動推論引擎容器，並以*主機上的路徑*掛載模型。路徑不同的話，什麼都掛載不到。
 - **`/var/run/docker.sock`**：模型和容器類應用程式是在主機的 Docker 上以容器執行，和 agent 並列，而不是在 agent 裡面。這個 socket 等於完全掌控主機的 Docker，所以 agent 的容器要像 agent 本身一樣被信任。
 - **`forgeyard-agent` volume** 保存機器的憑據和釘選的 CA。請保留它：在重新啟動、升級或 `docker rm` 之後執行同一個 `docker run`，就會帶回同一台機器，而且不會再使用加入權杖（紀錄裡會寫明）。沒有它的話，機器就得重新加入。
 - 使用 **`FORGEYARD_*` 變數**而不是旗標：它們和 [agent.toml](reference.md#agent-settings) 裡的設定相同。你也可以掛載一個檔案：`-v /etc/forgeyard/agent.toml:/etc/forgeyard/agent.toml:ro`。
-- agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程時切換到無特權帳號 `forgeyard-run`。應用程式和引擎絕不會以 root 執行。
+- agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程時切換到無特權帳號 `forgeyard-run`。應用程式和推論引擎絕不會以 root 執行。
 - 容器裡沒有 systemd，所以行程用 rlimit 限制資源（映像檔已設定 `FORGEYARD_LIMITS=rlimit`）。行程在 agent 的容器裡執行，會隨容器一起停止；模型和容器類應用程式則會繼續在主機上執行。
 
 ### 離線機器，或自己建置映像檔
@@ -175,8 +175,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **進階／離線** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -190,16 +190,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.1 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.2 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.1`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.2`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類應用程式和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -210,7 +210,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -219,9 +219,9 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
 ## 讓沒有網路的機器執行模型
 
-自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），執行模型的方式和其他機器一樣：它只需要連得到伺服器。模型、引擎壓縮檔和引擎映像檔都經由伺服器送過去，或來自已經有它們的另一台機器，agent 也會像直接下載一樣檢查每個檔案。本節從加入機器到部署好模型，依序走過一遍，細節請看各段連結的章節。範例中，`amd-01` 沒有網路，`gpu-01` 有。
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），執行模型的方式和其他機器一樣：它只需要連得到伺服器。模型、推論引擎的壓縮檔和推論引擎的映像檔都經由伺服器送過去，或來自已經有它們的另一台機器，agent 也會像直接下載一樣檢查每個檔案。本節從加入機器到部署好模型，依序走過一遍，細節請看各段連結的章節。範例中，`amd-01` 沒有網路，`gpu-01` 有。
 
-請讓它跑和伺服器同版本的 agent。經由伺服器下載需要 1.4；把檔案送給其他機器需要 1.4.1；更新指令、計算空的連接埠和移除引擎映像檔需要 1.4.2。agent 太舊而做不到某件事時，機器的頁面會告訴你。
+請讓它跑和伺服器同版本的 agent。經由伺服器下載需要 1.4；把檔案送給其他機器需要 1.4.1；更新指令、計算空的連接埠和移除推論引擎的映像檔需要 1.4.2。agent 太舊而做不到某件事時，機器的頁面會告訴你。
 
 ### 加入機器
 
@@ -237,13 +237,13 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
    接著加入機器時，把 **伺服器位址（那台機器連過來用的）** 設成 `https://127.0.0.1:7860`，**進階 → 連接埠範圍** 設成 `33000-33002`（[表單說明](#run-the-agent-in-docker)）。
 
-排程會計算範圍內空的連接埠。一個模型副本佔用兩個（agent 的金鑰守門員和守門員後面的引擎），所以三個連接埠放得下一個模型；範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
+排程會計算範圍內空的連接埠。一個模型副本佔用兩個（agent 的金鑰守門員和守門員後面的推論引擎），所以三個連接埠放得下一個模型；範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
 
 ### 選擇它的網路存取方式
 
 在機器的頁面（admin）的 **快取中的模型** 底下，設定 **下載時的網路連線**（[細節](#give-an-offline-machine-models-through-the-server)）：
 
-- **一律經由伺服器**：給完全沒有網路的機器，例如 `amd-01`。每個模型檔、引擎壓縮檔和有釘選的引擎映像檔都經由伺服器取得。agent 不會先試來源，所以不用先等一次失敗，這台機器也完全不會收到 Hugging Face 權杖。
+- **一律經由伺服器**：給完全沒有網路的機器，例如 `amd-01`。每個模型檔、推論引擎的壓縮檔和有釘選的推論引擎映像檔都經由伺服器取得。agent 不會先試來源，所以不用先等一次失敗，這台機器也完全不會收到 Hugging Face 權杖。
 - **自動**（預設）：給平常連得到網路的機器。它先直接下載；一旦這台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機或 registry 的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
 - **只直接下載**：永遠不經由伺服器。這種機器連不到來源時，一小時內排程會把它排在最後（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。
 
@@ -251,7 +251,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
 ### 把模型送到機器上
 
-照常部署，或用 **下載到…** 預先把模型放進機器的模型快取，預設也會一起抓引擎（[部署之前先下載模型](#download-a-model-before-deploying-it)）。不論哪一種，每個檔案都經由伺服器，來自以下兩個地方之一：
+照常部署，或用 **下載到…** 預先把模型放進機器的模型快取，預設也會一起抓推論引擎（[部署之前先下載模型](#download-a-model-before-deploying-it)）。不論哪一種，每個檔案都經由伺服器，來自以下兩個地方之一：
 
 - **另一台機器的快取**：agent 是 1.4.1 以後的機器（`gpu-01`）快取裡有這個模型時，它把檔案送給伺服器，伺服器再轉過去。那台機器同樣只往外連，不開任何 port。只有在沒有機器能送這個檔案時，才會用到網際網路（[從另一台機器](#give-an-offline-machine-models-through-the-server)）。
 - **網際網路**：伺服器從 Hugging Face 或模型的 URL 下載檔案，再轉過去。受限模型需要伺服器的 Hugging Face 權杖（**模型 → 來源**）或部署自己的權杖。
@@ -263,15 +263,15 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 - 下載的 API：`via` 是 `direct`、`server` 或 `machine`，送出的機器在 `source` 裡（[參考資料](reference.md#download-a-model-ahead-through-the-api)）；
 - 伺服器的 log，每個檔案一行：*Relayed … to amd-01: …*，或 *… from gpu-01 to amd-01: …*。
 
-引擎壓縮檔（例如 CPU 機器上 llama.cpp 的 process 變體）一律經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
+推論引擎的壓縮檔（例如 CPU 機器上 llama.cpp 的 process 變體）一律經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
 
-### 把引擎映像檔送到機器上
+### 把推論引擎的映像檔送到機器上
 
 - **有釘選的映像檔會自動經由伺服器送過去。** 每個內建 recipe 都用 digest 釘選它的映像檔，Forgeyard 自己的 vision 映像檔也是（1.4.1 起）。伺服器從 registry 讀取適合那台機器平台的映像檔，把各層轉過去；agent 逐一檢查、載入映像檔，只有在符合記錄的 id 時才執行。進度會顯示 *經由伺服器拉取映像檔：…/…，…/… 層*（[細節](#give-an-offline-machine-models-through-the-server)）。所以 vision 模型（[部署物件偵測模型](#deploy-an-object-detection-model)）在這種機器上的部署方式和在其他地方一樣。
-- **只用 tag 指定的映像檔**（自訂 recipe 的，或你自己建置的）沒有記錄的 digest 可以比對，所以不能經由伺服器。請從機器的頁面 → **引擎映像檔** 放上去：
-  - **上傳映像檔**：從你的電腦上傳 `docker save` 存成的檔案（[把引擎映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）；
-  - **從其他機器複製**：複製 `gpu-01` 的容器引擎裡已經有的映像檔，不需要檔案（[從另一台機器複製引擎映像檔](#copy-an-engine-image-from-another-machine)）。
-- recipe 換成較新的映像檔後，在同一頁**移除舊的映像檔**：那台機器上沒有部署在用的映像檔才能 **移除**（[引擎映像檔](#engine-images)）。
+- **只用 tag 指定的映像檔**（自訂 recipe 的，或你自己建置的）沒有記錄的 digest 可以比對，所以不能經由伺服器。請從機器的頁面 → **推論引擎的映像檔** 放上去：
+  - **上傳映像檔**：從你的電腦上傳 `docker save` 存成的檔案（[把推論引擎的映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）；
+  - **從其他機器複製**：複製 `gpu-01` 的容器引擎裡已經有的映像檔，不需要檔案（[從另一台機器複製推論引擎的映像檔](#copy-an-engine-image-from-another-machine)）。
+- recipe 換成較新的映像檔後，在同一頁**移除舊的映像檔**：那台機器上沒有部署在用的映像檔才能 **移除**（[推論引擎的映像檔](#engine-images)）。
 - 1.4 之前的 agent 都做不到這些：請用檔案把映像檔帶過去，再用 `docker load` 載入（[離線機器](#offline-machines)）。
 
 ### 更新它的 agent
@@ -279,8 +279,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 伺服器升級後，機器的頁面會在 **更新 agent** 顯示完整的指令（[更新 agent](#update-an-agent)）。設成 **一律經由伺服器** 的機器，指令會改為搬運 agent 映像檔，而不是拉取。在連得到 Docker Hub 的機器上執行第一步（把 `USER` 換掉；如果你用別的名稱連到那台機器，主機名稱也要換）：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 再到 `amd-01` 上執行第二步：`docker rm -f`，然後用載入的映像檔執行同樣的 `docker run`。沒有 `ssh` 連得到那台機器？把映像檔存成檔案帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。1.4.2 之前的 agent 不會回報它的執行方式：請先用這種方式手動更新一次，之後它的頁面就會顯示指令。
@@ -298,11 +298,11 @@ sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip | ssh USER
 從加入這種機器到部署好模型的完整流程，請看[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)。
 
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
-引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
+推論引擎的映像檔用檔案帶過去就好。recipe 和部署都不用改。
 
-1.4 起，用 1.4 的 agent 有兩個更簡單的做法：內建 recipe 的映像檔（全部都有釘選）會自動**經由伺服器**一層一層送過去（[經由伺服器把模型送到離線機器](#give-an-offline-machine-models-through-the-server)），任何映像檔也都可以從機器的頁面**上傳**（[把引擎映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）。以下步驟仍然可用，適合較舊的 agent 或不經過伺服器的情況。
+1.4 起，用 1.4 的 agent 有兩個更簡單的做法：內建 recipe 的映像檔（全部都有釘選）會自動**經由伺服器**一層一層送過去（[經由伺服器把模型送到離線機器](#give-an-offline-machine-models-through-the-server)），任何映像檔也都可以從機器的頁面**上傳**（[把推論引擎的映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）。以下步驟仍然可用，適合較舊的 agent 或不經過伺服器的情況。
 
-1. **找出映像檔。** 在 **模型 → 引擎**，打開引擎上的 **無法連到映像檔 registry 的機器：載入映像檔**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
+1. **找出映像檔。** 在 **模型 → 推論引擎**，打開推論引擎上的 **無法連到映像檔 registry 的機器：載入映像檔**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
    上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
 2. **在連得到 registry 的機器上**，用 digest 拉映像檔、加上它的 tag，再存成檔案。以 llama.cpp 的 Vulkan variant
@@ -393,7 +393,7 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 回應：`detections`（標籤、分數、方框）、`masks`（每個有分數、面積、方框和一張 1 位元 PNG，最好的在前）或 `depth_png`（附 `min` 和 `max`）；都附圖片的 `width` 和 `height`。它們接受的所有選項見[參考資料](reference.md#vision)。用量每個請求計一張圖片和它的千像素數；金鑰的模型清單和每分鐘請求數照常適用。
 
-連不到 Docker Hub 的機器，會和其他固定的引擎映像檔一樣經由伺服器取得視覺映像檔（[離線機器](#offline-machines)）；也可以在那台機器上載入（**模型 → 引擎** → `vision` → *無法連到映像檔 registry 的機器：載入映像檔* 會給出指令）。
+連不到 Docker Hub 的機器，會和其他固定的推論引擎映像檔一樣經由伺服器取得視覺映像檔（[離線機器](#offline-machines)）；也可以在那台機器上載入（**模型 → 推論引擎** → `vision` → *無法連到映像檔 registry 的機器：載入映像檔* 會給出指令）。
 
 ## 圖片分類
 
@@ -451,7 +451,7 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
    `https://` 網址由閘道下載（只連公開位址，每張圖片最多 `MEDIA_FETCH_MAX_MB`），再以資料形式轉送。區網內的圖片伺服器需要在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true`。
 4. **在試用區試用：** 訊息框旁的圖片按鈕可以附上圖片。
 
-**影片：** 在 **進階** 把 *Videos per request* 設成 1 以上，再送 `video_url` 區塊。在 vLLM 上，這會讓引擎啟動時為一段長影片預留記憶體，KV cache 能用的就變少：啟動不了的話就調低上下文長度。在 llama.cpp 上，請把部署的上下文長度設成 8,192 以上：Qwen3-VL 用它自己的每秒 2 格讀影片（*Video frames per second* 只對其他模型有效），一段 6 秒的影片用了 5,345 個 token。
+**影片：** 在 **進階** 把 *Videos per request* 設成 1 以上，再送 `video_url` 區塊。在 vLLM 上，這會讓推論引擎啟動時為一段長影片預留記憶體，KV cache 能用的就變少：啟動不了的話就調低上下文長度。在 llama.cpp 上，請把部署的上下文長度設成 8,192 以上：Qwen3-VL 用它自己的每秒 2 格讀影片（*Video frames per second* 只對其他模型有效），一段 6 秒的影片用了 5,345 個 token。
 
 **自訂的 llama.cpp 配方**（例如另一個 build）只要傳入 projector 並宣告它接受什麼，就能讀圖片：
 
@@ -483,7 +483,7 @@ media: {inputs: [image, audio, video], files: false}
    `GET /v1/audio/voices?model=qwen3-tts-1-7b` 會列出聲音與模型能產生的格式。要一邊產生一邊收音訊，加上 `extra_body={"stream_format": "audio"}`，並使用 `pcm` 或 `wav`。
 4. **在試用區試試看：** 語音模型會有一個 **朗讀** 區塊，可以選聲音、格式，並附播放器。
 
-**要用哪種格式：** vLLM-Omni 產生 wav、pcm、flac、mp3 與 opus；llama.cpp 產生 wav 與 pcm；speaches 產生 mp3、flac、wav 與 pcm。沒指定 `response_format` 時得到的是引擎的預設（wav，speaches 為 mp3），不是 OpenAI 的 mp3。`pcm` 是 16 位元單聲道，取樣率見回應（`x-audio-sample-rate`，或 `Content-Type` 裡的 `rate=`）。
+**要用哪種格式：** vLLM-Omni 產生 wav、pcm、flac、mp3 與 opus；llama.cpp 產生 wav 與 pcm；speaches 產生 mp3、flac、wav 與 pcm。沒指定 `response_format` 時得到的是推論引擎的預設（wav，speaches 為 mp3），不是 OpenAI 的 mp3。`pcm` 是 16 位元單聲道，取樣率見回應（`x-audio-sample-rate`，或 `Content-Type` 裡的 `rate=`）。
 
 **在 AMD APU（Vulkan）上：** 開啟 llama.cpp 的 cooperative matrices 時，Qwen3-TTS 對同一個請求可能產生略有不同的音訊（ggml-org/llama.cpp#32050）。如果在那裡聽起來不對，新增一個自訂配方，在它的 vulkan variant 的 `env` 設定 `GGML_VK_DISABLE_COOPMAT: "1"`。
 
@@ -513,7 +513,7 @@ media: {inputs: [image, audio, video], files: false}
 
 **要多久：** 在 A100 上每張幾秒；在 CPU 上要幾分鐘。在一台忙碌的 x86-64 機器上用 16 到 32 個核心量測：Stable Diffusion 1.5、512x512、20 步大約 100 秒；Z-Image-Turbo（Q4_0）8 步在 512x512 大約 2 分鐘，1024x1024 大約 8.5 分鐘。機器較慢或尺寸較大時，在 **進階** 調高 *Timeout*。
 
-**模型自己的設定**（Z-Image-Turbo 需要 CFG 1 與 8 步）對 stable-diffusion.cpp 來說放在目錄項目的引擎參數裡（`--cfg-scale 1 --steps 8`）；推薦的項目都已經帶上了。vLLM-Omni 則從模型本身讀取。
+**模型自己的設定**（Z-Image-Turbo 需要 CFG 1 與 8 步）對 stable-diffusion.cpp 來說放在目錄項目的推論引擎參數裡（`--cfg-scale 1 --steps 8`）；推薦的項目都已經帶上了。vLLM-Omni 則從模型本身讀取。
 
 **在離線的 AMD 機器上：** 用 1.4 的 agent 時，`sd-cpp` 配方的 Vulkan 映像檔（有釘選）和模型都會經由伺服器送過去，有機器的快取裡已經有這個模型時就從那台機器取得（[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)）。用較舊的 agent 時，用 `docker load` 載入映像檔（見[離線機器](#offline-machines)）；模型則先在一台連得到 Hugging Face 的機器上部署一次，再把它在那台機器模型快取裡的目錄（`hub/models--<org>--<name>`，用 `tar` 或 `rsync -a`：裡面用的是相對連結）複製到離線機器快取裡的相同位置。那裡的部署會發現已經快取好，什麼都不用下載。
 
@@ -557,7 +557,7 @@ media: {inputs: [image, audio, video], files: false}
 文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。它在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡。
 
 1. **模型 → 加入模型 → 推薦**：*文字分類* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **文字分類** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
-2. **部署**。模型本身的最大長度比引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
+2. **部署**。模型本身的最大長度比推論引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
 3. 它會出現在 **服務中 → 文字分類**。部署頁面的 **試試看** 會送一句話；**試用區** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
 
 用 API 金鑰呼叫 `/v1/classify`（Forgeyard 自己的 API，格式和 vLLM 一樣；OpenAI SDK 沒有）：
@@ -608,7 +608,7 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
        "structured_outputs": {"choice": ["billing", "shipping", "technical", "other"]}}'
 ```
 
-回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型（請求裡帶你的標籤的 NLI 模型，也能在 CPU 上執行）會在 1.5 和 transformers 引擎一起推出（#144）。
+回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型（請求裡帶你的標籤的 NLI 模型，也能在 CPU 上執行）會在 1.5 和 transformers 推論引擎一起推出（#144）。
 
 ## 使用受限（gated）的 Hugging Face 模型
 
@@ -663,19 +663,20 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 在部署的頁面選擇 **編輯**（管理員和操作員）。可以修改：
 
 - **GPU 共用**：*獨占* 讓每張卡只給一個副本；*共用 VRAM* 只保留估算的記憶體量，卡上其餘的空間可以放其他模型，彼此共用算力（[GPU 共用](concepts.md#gpu-sharing)）；
-- **每個副本的 GPU 數**、**Context length**、**Concurrent requests** 和 recipe 的其他參數、記憶體覆寫值，以及額外的引擎參數；
+- **每個副本的 GPU 數**、**Context length**、**Concurrent requests** 和 recipe 的其他參數、記憶體覆寫值，以及額外的推論引擎參數；
 - **副本**：增加的副本會直接加上，不影響正在執行的；減少時移除編號最大的；
-- **機器**：*自動*（由 Forgeyard 選擇），或 *固定在* 某一台機器。固定到另一台機器時，副本會搬過去；改回 *自動* 則什麼都不會搬。
+- **機器**：*自動*（由 Forgeyard 選擇），或 *固定在* 某一台機器。固定到另一台機器時，副本會搬過去；改回 *自動* 則什麼都不會搬；
+- （1.5.2）**推論引擎版本**：內建推論引擎，或用 **試用這個版本** 建立的複本（[把部署換到推論引擎的其他版本](#move-a-deployment-to-another-engine-version)）。
 
-模型、recipe 和名稱不能改：要改就部署一個新的。儲存之前，頁面會顯示新的估算、每個副本會放在哪裡，以及儲存後會發生什麼事。放不下的修改會像部署一樣被拒絕（[部署放不下](troubleshooting.md#a-deployment-does-not-fit)）。已停止的部署只會儲存設定：下次啟動時才套用。
+模型和名稱不能改：要改就部署一個新的。儲存之前，頁面會顯示新的估算、每個副本會放在哪裡，以及儲存後會發生什麼事。放不下的修改會像部署一樣被拒絕（[部署放不下](troubleshooting.md#a-deployment-does-not-fit)）。已停止的部署只會儲存設定：下次啟動時才套用。
 
 儲存後，副本會以新設定重新啟動：
 
 - **多個副本**一次重新啟動一個：前一個以新設定就緒之後，才換下一個，所以模型會持續回應。全部完成之前，頁面會顯示 *updating: 1 of 2 on the new settings*；
-- **只有一個副本**時，它會停止再啟動：新的就緒之前，模型不會回應。要避免這樣，可以在同一次修改裡把 **副本** 調成 2：新副本會先啟動，舊的再重新啟動，之後再調回來即可；
+- **只有一個副本**時，它會停止再啟動：新的就緒之前，模型不會回應。儲存之前，頁面會說明大約多久（1.5.2；依它上次啟動的時間，沒有的話依同一個推論引擎其他部署的啟動時間，再沒有就用一般的啟動時間），以及怎麼避免。要避免這樣，可以在機器放得下兩個副本時，在同一次修改裡把 **副本** 調成 2：新副本會先啟動，舊的再重新啟動，之後再調回來即可；
 - 只改副本數量，或改回 *自動*，不會重新啟動任何東西。
 
-重新啟動的副本（修改之後，或先 **停止** 再 **啟動**）只要原本那台機器還放得下，就會回到原本的機器，而不是改放到別處最剛好的地方：那台機器已經有模型和引擎了。如果那台機器沒有空間了，或已離線，副本就放到放得下的地方。伺服器把這件事記在記憶體裡：伺服器重新啟動時還在等空間的副本，會照一般規則放置。
+重新啟動的副本（修改之後，或先 **停止** 再 **啟動**）只要原本那台機器還放得下，就會回到原本的機器，而不是改放到別處最剛好的地方：那台機器已經有模型和推論引擎了。如果那台機器沒有空間了，或已離線，副本就放到放得下的地方。伺服器把這件事記在記憶體裡：伺服器重新啟動時還在等空間的副本，會照一般規則放置。
 
 用程式修改：`PATCH /api/deployments/{id}`（[參考](reference.md#change-a-deployment-through-the-api)）。
 
@@ -683,12 +684,12 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 部署的副本每次就緒時，部署的事件都會寫出這次啟動花了多久、時間花在哪裡，例如 *Replica 0 on gpu-01: ready in 74.2 s (model 0.3 s, image 0.1 s, engine 73.8 s)*：
 
-- `model`：在機器的模型快取裡檢查模型檔案，或下載它們（以及行程引擎的封存檔）；
+- `model`：在機器的模型快取裡檢查模型檔案，或下載它們（以及行程推論引擎的封存檔）；
 - `waiting`：等共用同一張 GPU 的另一個副本載入完成；
-- `image`：檢查引擎的映像檔，或拉取它；
-- `engine`：從啟動引擎到它第一次健康檢查通過。
+- `image`：檢查推論引擎的映像檔，或拉取它；
+- `engine`：從啟動推論引擎到它第一次健康檢查通過。
 
-各部分加起來就是總時間。同一次啟動也是 `GET /api/deployments/{id}` 和列表裡的 `last_start`（[參考](reference.md#change-a-deployment-through-the-api)），以及 `/metrics` 裡的 `forgeyard_replica_start_seconds`（[指標](reference.md#metrics)）。agent 比 1.5.0 舊時，伺服器只能量到引擎的部分，事件會寫 *measured by the server*：[更新 agent](#update-an-agent) 就能看到其他部分。
+各部分加起來就是總時間。同一次啟動也是 `GET /api/deployments/{id}` 和列表裡的 `last_start`（[參考](reference.md#change-a-deployment-through-the-api)），以及 `/metrics` 裡的 `forgeyard_replica_start_seconds`（[指標](reference.md#metrics)）。agent 比 1.5.0 舊時，伺服器只能量到推論引擎的部分，事件會寫 *measured by the server*：[更新 agent](#update-an-agent) 就能看到其他部分。
 
 副本啟動期間，1.5.0 的 agent 每秒檢查一次它的健康狀態，而不是照配方的 *interval*（vLLM 是 10 秒），所以模型一就緒，一秒內就會開始使用，而不是最多晚 10 秒。只在配方的 start period 內這樣做（這段時間裡檢查失敗不算數），而且只到第一次通過為止；之後照配方的 interval 檢查，和以前一樣，所以副本絕不會比以前更早被判定為 unhealthy。
 
@@ -696,7 +697,7 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton 編譯它的 kernel），寫到容器裡的一個目錄，容器沒了它就會跟著沒了。從 1.5.0 起，`vllm` 和 `vllm-pooling` 配方會把這個目錄保留在機器上（`engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`），所以只有副本的第一次啟動需要編譯；之後的啟動（包括[休眠](#let-a-deployment-sleep-when-nobody-uses-it)後被喚醒）都會載入編譯好的結果。在 A100 上用 Qwen3-0.6B 量過：第一次啟動兩者都是 118 秒；重新啟動沒有快取要 114 秒，有快取只要 57 秒，兩者的回答相同；目錄大小 44 MiB。在部署的事件裡可以看到：重新啟動後 *ready in …* 的 `engine` 部分。
 
-使用它不需要做任何事。如果要不用它啟動（例如追查問題時想先排除它），在 **模型 → 引擎** 選 **加入自訂引擎**，從內建的 `vllm` 開始，取個名字（例如 `vllm-nocache`），把它的 `engine_cache` 那一行改成 `enabled: false`，再用它部署。開啟或關閉都不會重新啟動正在執行的副本：從副本的下一次啟動開始生效。
+使用它不需要做任何事。如果要不用它啟動（例如追查問題時想先排除它），在 **模型 → 推論引擎** 選 **加入自訂推論引擎**，從內建的 `vllm` 開始，取個名字（例如 `vllm-nocache`），把它的 `engine_cache` 那一行改成 `enabled: false`，再用它部署。開啟或關閉都不會重新啟動正在執行的副本：從副本的下一次啟動開始生效。
 
 每個副本在它的機器上都有自己的目錄 `<model cache>/engine-cache/<key>`，以可寫入的方式掛載在 `/forgeyard/engine-cache`，`VLLM_CACHE_ROOT` 指向它；其他部署或副本都不會用到。vLLM 依模型、會改變計算圖的設定、它自己的程式碼和編譯器的雜湊值保存編譯結果，所以改了參數就會重新編譯，不會載入錯的計算圖。刪除部署（或它的配方不再保留快取）時目錄會被移除；副本以新的映像檔（新的配方版本）啟動時，它較舊的目錄也會被移除。需要有模型快取和容器引擎的 1.5.0 agent；行程 variant，以及較舊 agent 上的副本，啟動方式和以前一樣。不以 root 執行的映像檔無法寫入這個目錄。
 
@@ -704,10 +705,10 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 偶爾才用的模型（晚上才試一下的、每週跑一次工作的大模型），可以在沒人呼叫時把 GPU 記憶體還回來（[閒置時休眠](concepts.md#sleep-when-idle)）。除非你開啟它，否則它是關閉的，每個部署分開設定。
 
-1. 在表單裡開啟它：**服務中 → 部署模型**，或部署頁面上的 **編輯**。在 *沒有使用時* 底下勾選 **閒置時休眠**，保留或修改 **閒置分鐘數**（預設 30，1 到 1,440）；**進階** 裡的 **喚醒等待** 是請求等它醒來的最長時間（預設 300 秒，10 到 1,800）。設定旁邊會寫上次啟動花了多久（在部署表單上是同一個模型和引擎的另一個部署上次啟動的時間），休眠後的第一個請求大約就要等這麼久。只改這些設定不會重新啟動任何東西。用腳本：對 `PATCH /api/deployments/{id}` 送 `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}`（管理員和操作員；不送 `idle_minutes` 就是 30 分鐘；加上 `"wake_wait": 120`，請求最多等 2 分鐘而不是 5 分鐘）；部署時也接受這些參數。
+1. 在表單裡開啟它：**服務中 → 部署模型**，或部署頁面上的 **編輯**。在 *沒有使用時* 底下勾選 **閒置時休眠**，保留或修改 **閒置分鐘數**（預設 30，1 到 1,440）；**進階** 裡的 **喚醒等待** 是請求等它醒來的最長時間（預設 300 秒，10 到 1,800）。設定旁邊會寫上次啟動花了多久（在部署表單上是同一個模型和推論引擎的另一個部署上次啟動的時間），休眠後的第一個請求大約就要等這麼久。只改這些設定不會重新啟動任何東西。用腳本：對 `PATCH /api/deployments/{id}` 送 `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}`（管理員和操作員；不送 `idle_minutes` 就是 30 分鐘；加上 `"wake_wait": 120`，請求最多等 2 分鐘而不是 5 分鐘）；部署時也接受這些參數。
 2. 部署頁面上有 *沒有使用時* 卡片：設定、它現在的狀況（*清醒中；如果沒有請求，18 分鐘後休眠*，或讓它保持清醒的原因：有請求正在處理、有副本正在啟動……）、最後一個請求、上次啟動的時間，以及過去 24 小時被喚醒了幾次。
-3. 在閒置時間內沒有請求，它的副本就會停止。**服務中** 會顯示 **休眠中**（月亮圖示），寫著 *不佔用任何資源* 和它會在哪台機器上醒來；它的頁面會寫從什麼時候開始休眠，事件裡會有 *Asleep: no requests for 30 min; frees …*。**機器** 會在它會執行的那台機器底下列出它（*qwen3-4b asleep here (14.4 GiB on GPU #4 when awake)*）：這段期間那些記憶體可以給別人用。模型仍然列在 `/v1/models` 裡；機器保留模型檔案和引擎映像檔。
-4. 下一個請求會喚醒它：請求最多等到 *喚醒等待* 的時間，模型就緒後就得到回應（可以使用路由雲端分層的金鑰，等待期間由雲端服務）。事件裡會有 *Woken by a request (key …)*。也可以在它的頁面或 **試用區** 按 **立即喚醒** 自己喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在試用區的選單裡，它啟動期間到達的請求會等它。在就緒之前 Serving 會顯示 **喚醒中** 和喚醒後經過的時間；試用區直接送出你的訊息，等待時會顯示 *正在喚醒模型（約 74 秒）…*。如果無法喚醒（沒有空間、機器離線、引擎失敗），請求會得到 503 `cannot_wake` 和原因。
+3. 在閒置時間內沒有請求，它的副本就會停止。**服務中** 會顯示 **休眠中**（月亮圖示），寫著 *不佔用任何資源* 和它會在哪台機器上醒來；它的頁面會寫從什麼時候開始休眠，事件裡會有 *Asleep: no requests for 30 min; frees …*。**機器** 會在它會執行的那台機器底下列出它（*qwen3-4b asleep here (14.4 GiB on GPU #4 when awake)*）：這段期間那些記憶體可以給別人用。模型仍然列在 `/v1/models` 裡；機器保留模型檔案和推論引擎的映像檔。
+4. 下一個請求會喚醒它：請求最多等到 *喚醒等待* 的時間，模型就緒後就得到回應（可以使用路由雲端分層的金鑰，等待期間由雲端服務）。事件裡會有 *Woken by a request (key …)*。也可以在它的頁面或 **試用區** 按 **立即喚醒** 自己喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在試用區的選單裡，它啟動期間到達的請求會等它。在就緒之前 Serving 會顯示 **喚醒中** 和喚醒後經過的時間；試用區直接送出你的訊息，等待時會顯示 *正在喚醒模型（約 74 秒）…*。如果無法喚醒（沒有空間、機器離線、推論引擎失敗），請求會得到 503 `cannot_wake` 和原因。
 5. 對休眠中的部署按 **停止** 會真正停止它：在有人啟動它之前，它不會出現在 `/v1/models`。
 
 設定健康檢查兩個方向都會提醒：佔著沒人用的 GPU 記憶體的部署會出現 *had no requests for 3 days: let it sleep when idle?*；在收到的請求之間一直休眠、而且啟動要超過一分鐘的部署會出現 *woke 11 times in a day: raise its idle time*（[Setup health](reference.md#setup-health-checks)）。
@@ -720,11 +721,11 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 超過 30 秒（`AGENT_OFFLINE_SECONDS`）沒有收到機器的任何訊息，它就是 *offline*。從這時起：
 
-1. **立刻：**閘道不再把請求送到它的副本。在其他機器上也有副本的部署，繼續由那些副本回應；沒有其他就緒副本的部署回應 503 `no_ready_replica`，並說明 *the machine is offline*（或轉到它的雲端備援）。只有在伺服器自己剛啟動時，每台機器在 agent 重新連線（幾秒內）之前都顯示離線，還沒連回來的機器會在那 30 秒內保留它的副本：它們的引擎在這段時間仍然會回應。
+1. **立刻：**閘道不再把請求送到它的副本。在其他機器上也有副本的部署，繼續由那些副本回應；沒有其他就緒副本的部署回應 503 `no_ready_replica`，並說明 *the machine is offline*（或轉到它的雲端備援）。只有在伺服器自己剛啟動時，每台機器在 agent 重新連線（幾秒內）之前都顯示離線，還沒連回來的機器會在那 30 秒內保留它的副本：它們的推論引擎在這段時間仍然會回應。
 2. **10 分鐘之後**（`AGENT_OFFLINE_MOVE_SECONDS`，從最後一次心跳起算）：沒有固定在這台機器上的部署，它的每個副本會依部署自己的規則（分散到不同機器、記憶體足夠、依目前的估算）重新放到放得下的機器上。部署頁面會顯示 *Replica 0: moved: gpu-01 offline for 10 minutes; placing it on another machine (gpu-02 fits)*，接著是它被放到哪裡。這是同一個副本，絕不會多出一份：部署的副本數量不變。
    - **固定（pinned）**在這台機器上的部署，副本留在原地等它回來（*waiting for gpu-01 to come online (the deployment is pinned to it)*）。
    - **沒有其他機器放得下**時，副本也留下來等；之後某次檢查有機器放得下了，才會搬過去。
-3. **機器回來時**，它的 agent 收到的工作清單裡已經沒有搬走的副本，就會停掉它們的引擎。留下來等的副本會重新開始服務。搬走的副本不會自己搬回來：要放回去，請修改部署的機器。
+3. **機器回來時**，它的 agent 收到的工作清單裡已經沒有搬走的副本，就會停掉它們的推論引擎。留下來等的副本會重新開始服務。搬走的副本不會自己搬回來：要放回去，請修改部署的機器。
 
 在 10 分鐘內回來的機器（重新開機、更新 agent、短暫斷線）什麼都不會被搬走；時間會從它下一次心跳重新起算。伺服器自己重新啟動後，每台機器在 agent 重新連線之前都會顯示離線，所以這 10 分鐘從伺服器啟動時才開始算。設定 `AGENT_OFFLINE_MOVE_SECONDS=0` 就永遠不搬移副本。應用程式（已淘汰）遵守同樣的規則，只有工作（task）會留在原地：它可能還在那裡執行，在別處再跑一次可能會把它的工作做兩次。
 
@@ -780,7 +781,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 - 它**也是使用指南的語言**：指南頁面上方的語言連結和主控台的切換，設定的是同一個選擇，主控台裡的說明連結也會用這個語言開啟指南。
 - 數字、大小、時間和日期會跟著語言顯示（*41 秒前*、*2026年11月23日*）。
 - 伺服器的訊息仍然以英文撰寫。主控台會依代碼翻譯常見的訊息（例如 `model_waking`、`cannot_wake`、`budget_exhausted`），並以中文說明每一則**設定健康檢查**項目的種類，底下附上伺服器的原文（裡面有機器和模型的名稱）。沒有翻譯的訊息會照伺服器送來的內容顯示。
-- 每個頁面都有翻譯：外框（選單、登入、開始使用和設定健康檢查）、**機器**、**服務中**、**模型**、**雲端**、**試用區**、**API 金鑰**、**用量**、**使用者**、**稽核紀錄**、你的帳號，以及**信任這台伺服器**。你自己取的名稱（機器、模型、金鑰）、引擎和 agent 印出的內容，以及 API 本身，都維持原樣。
+- 每個頁面都有翻譯：外框（選單、登入、開始使用和設定健康檢查）、**機器**、**服務中**、**模型**、**雲端**、**試用區**、**API 金鑰**、**用量**、**使用者**、**稽核紀錄**、你的帳號，以及**信任這台伺服器**。你自己取的名稱（機器、模型、金鑰）、推論引擎和 agent 印出的內容，以及 API 本身，都維持原樣。
 
 ## 使用自己的憑證或反向代理
 
@@ -865,7 +866,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.1
+  docker.io/tonyhuang1101/forgeyard:1.5.2
 sudo docker logs forgeyard
 ```
 
@@ -883,7 +884,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.2 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -891,7 +892,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.2 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -913,12 +914,12 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.1
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.2
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**機器** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.1 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.2 .`
 
 ## 把伺服器當成服務執行
 
@@ -957,7 +958,7 @@ sudo systemctl enable --now forgeyard
    ```bash
    git pull
    cd web && npm ci && npm run build && cd ..
-   uv sync
+   uv sync --extra server
    ```
 
    然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。用 Docker 的話：拉取新的 tag，再用它執行同一個 `docker run`（[做法](#run-the-server-in-docker)）。
@@ -988,7 +989,7 @@ sudo systemctl enable --now forgeyard
 - **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1007,7 +1008,7 @@ sudo systemctl enable --now forgeyard
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
    ```
 
    在 NVIDIA 機器上，指令還會在 `--gpus` 旁邊用 `--device` 傳入 GPU 的裝置節點（1.4.5 起是 agent 回報的那些；較舊的 agent 則用一小段 shell 迴圈列出主機上的），所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。
@@ -1061,10 +1062,10 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；試用區；用量 |
 | `cloud` | 給了 `--cloud-provider` 才會執行：溢出到雲端、設為 **永不** 的金鑰、只用本機、雲端上限、費用，以及預算和它的警示 |
 | `passthrough` | 一個公開在 `/x/` 的小型 HTTP 程式：在 CPU 機器上以行程執行，在 GPU 機器上以容器執行。金鑰（none、listed）、照原樣轉送的路徑、被拒絕的路徑、被替換的憑證與轉發標頭、強制的沙箱、轉址、串流、本文上限、rpm、同時請求數、讀取逾時、副本連接埠前的金鑰守門員、用量 |
-| `tts`、`img`、`video` | 在 GPU 機器上（有 CPU 引擎的也在 CPU 機器上）的語音、圖片和影片生成：SDK 的呼叫、格式、上限、佇列、用量和金鑰守門員 |
+| `tts`、`img`、`video` | 在 GPU 機器上（有 CPU 推論引擎的也在 CPU 機器上）的語音、圖片和影片生成：SDK 的呼叫、格式、上限、佇列、用量和金鑰守門員 |
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
 | `relay` | 經由伺服器取得模型：把 CPU 機器的 **下載時的網路連線** 設為 **一律經由伺服器**，用 **下載到…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
-| `images` | 在有 Docker 或 Podman 的機器上（`--engine-machine`，預設是 GPU 機器）：它的引擎映像清單；腳本自己做出一個只有幾 KB 的映像檔，上傳、複製到第二台可以接收映像的機器（`--second-engine-machine`），再用 **移除映像檔** 移除（因為只有 recipe 指名的映像才能移除，會有一個 recipe 暫時指名它幾秒鐘） |
+| `images` | 在有 Docker 或 Podman 的機器上（`--engine-machine`，預設是 GPU 機器）：它的推論引擎映像檔清單；腳本自己做出一個只有幾 KB 的映像檔，上傳、複製到第二台可以接收映像的機器（`--second-engine-machine`），再用 **移除映像檔** 移除（因為只有 recipe 指名的映像才能移除，會有一個 recipe 暫時指名它幾秒鐘） |
 | `scale` | 閒置時休眠、喚醒（由請求、**立即喚醒**、試用區）、喚醒期間轉到雲端、`model_waking`、`cannot_wake`、**停止**、自動副本數與排空、啟動時間，以及它們的指標（[見下方](#check-sleep-waking-and-automatic-replicas)） |
 | `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
 
@@ -1077,7 +1078,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 - **只有一個請求會送到雲端供應商**，內容是固定的一小段提示，費用不到一美分。供應商的每月預算會被改動幾秒鐘再改回原值；其他預算檢查只用這次執行自己的金鑰和使用者。
 - **一次性使用者會有五次登入失敗**：伺服器允許每個位址在 15 分鐘內失敗 30 次，所以連續執行很多次時，中間要等一下。
 - **時間：**機器上已經有模型時大約 15 到 20 分鐘（沒有 GPU 機器時約 3 分鐘）；需要下載的話另外加上下載時間。
-- 加上 `--kill-local` 還會檢查容錯移轉：它會強制結束在執行這支腳本的電腦（兩台 CPU 機器之一）上那個 CPU 副本的引擎。
+- 加上 `--kill-local` 還會檢查容錯移轉：它會強制結束在執行這支腳本的電腦（兩台 CPU 機器之一）上那個 CPU 副本的推論引擎。
 - 主控台的檢查需要 Playwright for Python 和 Chrome（`--chrome`，預設 `/opt/google/chrome/chrome`）；`--install-playwright` 會把 Playwright 和 OpenAI SDK 一起裝進腳本自己的虛擬環境（`--venv`）。沒有的話，console 這組會跳過。
 - **副本連接埠的呼叫方式和閘道一樣。**agent 以 TLS 提供服務的機器（1.4.5）上，金鑰守門員的檢查（這裡和 `scripts/accept_*.py` 都一樣）會用 TLS 連到副本的位址，並要求憑證上帶有該機器的綁定名稱（`m<id>-<hash>.replica.forgeyard.invalid`，在 **機器** 可以看到），而且只信任 Forgeyard 的 CA。每個這樣的連接埠還會多三項檢查：純 HTTP 會被拒絕、憑證能以這台機器的名稱驗證通過，以及另一台機器的名稱（有兩台機器用 TLS 時）和不屬於任何機器的名稱都會被拒絕。agent 較舊的機器照舊用純 HTTP 呼叫，並多一行說明它的流量沒有加密。CA 就是 `--ca` 給的那一個；伺服器使用自己的憑證或 `TLS=off` 時，把 `FORGEYARD_REPLICA_CA` 指向伺服器的 `data/tls/ca.crt`。完全沒有 CA 時呼叫照樣進行，只有憑證檢查會跳過。只有完全連不到的連接埠會當成在別的網路而跳過；連上後被關閉連線或憑證不對，都算失敗。
 
@@ -1210,33 +1211,120 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的應用程式則必須重新建立（它們的事件裡會說明）。
 
-## 查看模型或引擎
+## 查看模型或推論引擎
 
-打開 **模型**，在 **目錄** 點模型的名稱，或在 **引擎** 分頁點引擎的名稱（其他地方的名稱也都連到這些頁面：**服務中**、部署的頁面、機器的模型快取、**下載到…**）。所有登入的人都可以查看。
+打開 **模型**，在 **目錄** 點模型的名稱，或在 **推論引擎** 分頁點推論引擎的名稱（其他地方的名稱也都連到這些頁面：**服務中**、部署的頁面、機器的模型快取、**下載到…**）。所有登入的人都可以查看。
 
-**模型頁面**（`/models/<name>`）最上面一行是重點（任務、大小、授權、用第一個引擎的預設值一份副本需要多少、有幾個部署），下面是跳到各區段的連結：
+**模型頁面**（`/models/<name>`）最上面一行是重點（任務、大小、授權、用第一個推論引擎的預設值一份副本需要多少、有幾個部署），下面是跳到各區段的連結：
 
 - **概覽**：來源與版本（附 Hugging Face 連結）、授權、任務和它在 `/v1` 底下回應的路徑、架構。
-- **機器**：每台機器的模型快取裡有沒有這個模型（以它的 agent 最後一次回報為準，附在那裡的大小和誰在用）、一份副本現在**放不放得下**（先看 GPU，再看 CPU；和部署頁面同一個估算，用引擎的預設值），以及它會用的引擎變體和那個映像檔或程式是否已經在那裡。在表格上方選另一個引擎，就會看到那個引擎的結果。**部署到這裡** 和 **下載到這裡** 會從那台機器開始。
-- 這個模型的 **部署**，和 **可以執行它的引擎**（各自連到引擎頁面）。
+- **機器**：每台機器的模型快取裡有沒有這個模型（以它的 agent 最後一次回報為準，附在那裡的大小和誰在用）、一份副本現在**放不放得下**（先看 GPU，再看 CPU；和部署頁面同一個估算，用推論引擎的預設值），以及它會用的推論引擎變體和那個映像檔或程式是否已經在那裡。在表格上方選另一個推論引擎，就會看到那個推論引擎的結果。**部署到這裡** 和 **下載到這裡** 會從那台機器開始。
+- 這個模型的 **部署**，和 **可以執行它的推論引擎**（各自連到推論引擎頁面）。
 - **檔案**，收成一行（機器會下載幾個檔案、總大小、模型檔）；**顯示檔案** 會列出每個檔案和大小，以及儲存庫裡不會下載的其他檔案（其他量化版本和投影器檔）。
 
 **部署**、**下載到…** 和 **移除** 在最上面，和目錄裡一樣。管理員可以在這裡設定**顯示名稱**，例如把 `accept-qwen3-4b` 顯示成 *Qwen3 4B*；留空就顯示名稱。名稱本身不會改變。
 
-**引擎頁面**（`/models/engines/<name>`）有 **概覽**（它服務什麼、在哪個路徑、讀哪些格式、怎麼共用 GPU）、**變體**（每種硬體的映像檔或程式、映像檔是否以 digest 釘選、機器需要什麼，以及把映像檔帶到連不到 registry 的機器的指令）、**機器**（每台機器會用的變體，以及映像檔是否已在那台機器的容器引擎裡（以它最後一次列出的映像檔為準），或程式是否在模型快取裡）、**參數**（收成一行：預設值和範圍），以及使用它的**部署**和**目錄模型**。打開頁面時，連線中的機器如果上次列出映像檔已超過十分鐘，會重新列一次；**重新列出** 會立刻再問一次。離線的機器顯示它最後一次的清單。管理員可以在這裡**編輯**或**刪除**自訂引擎，或把內建引擎**複製**成自訂引擎（例如試用較新的映像檔）。
+**推論引擎頁面**（`/models/engines/<name>`）有 **概覽**（它服務什麼、在哪個路徑、讀哪些格式、怎麼共用 GPU）、**變體**（每種硬體的映像檔或程式、映像檔是否以 digest 釘選、機器需要什麼，以及把映像檔帶到連不到 registry 的機器的指令）、**機器**（每台機器會用的變體，以及映像檔是否已在那台機器的容器引擎裡（以它最後一次列出的映像檔為準），或程式是否在模型快取裡）、**參數**（收成一行：預設值和範圍），以及使用它的**部署**和**目錄模型**。打開頁面時，連線中的機器如果上次列出映像檔已超過十分鐘，會重新列一次；**重新列出** 會立刻再問一次。離線的機器顯示它最後一次的清單。管理員可以在這裡**編輯**或**刪除**自訂推論引擎，或把內建推論引擎**複製**成自訂推論引擎（例如試用較新的映像檔）。
+
+## 查看推論引擎有沒有新版本
+
+Forgeyard 把每個內建推論引擎釘選在一個版本（vLLM 0.32.0、llama.cpp 1.0.0…），只在自己的版本裡、測試過後才更新。想知道上游這段期間有沒有發布更新的版本，管理員可以打開 **模型 → 推論引擎**，按 **檢查推論引擎有沒有新版本**。這個檢查不會定時執行，也不會改變任何東西：它只讀取資料。
+
+伺服器會透過自己的[網路規則](reference.md#models)（只連 https 和公開位址；你網路裡的鏡像站用 `MODEL_ALLOW_PRIVATE_HOSTS`），向每個內建變體**自己的**映像檔儲存庫（Docker Hub 或 GHCR）查詢它的標籤，再向 GitHub 讀取找到的版本的版本說明。大約要半分鐘（最多一分半鐘）。結果會保留到下次檢查，並記下檢查的時間和執行的人，所有登入的人都看得到；每次檢查都會記在稽核紀錄裡。
+
+- **卡片** 會加上標記：*有新版 0.34.0*、*有較新的建置*、*已是最新* 或 *無法檢查*（registry 或 GitHub 連不上時；滑鼠移到標記上會說明原因，其他推論引擎照樣會檢查）。點標記會打開那個推論引擎的頁面。
+- **推論引擎頁面** 有一個 **新版本** 區段，每個較新的版本一塊，最新的在最前面：
+  - 哪些變體有那個版本的映像檔，附上它的標籤和現在的 digest，以及其他變體為什麼沒有（例如 *docker.io/vllm/vllm-openai 沒有 v0.34.0-cu129 映像檔；這個變體的映像檔只到 0.32.0*：vLLM 已經不再發布 CUDA 12.9 的映像檔）。行程變體（`cpu-process`）只有在發布版本提供同一種壓縮檔和它的 SHA-256 時才會包含；
+  - 版本說明的連結，以及說明裡提到的、這個推論引擎會傳入的參數和設定（vLLM 0.34.0 提到 `--gpu-memory-utilization`，它的預設值和意義都變了）。請先讀這些：新版本可能改變預設值和記憶體用量，而 Forgeyard 的估算是用目前釘選的版本量測的。
+
+怎樣算是較新的版本：以映像檔發布的**穩定**版本，而且標籤形式和內建的一樣（`v0.32.0-cu129` 變體對應 `v0.34.0-cu129`）。候選版本（rc）、每日建置和特定模型專用的映像檔一律不列；GitHub 上已發布、但映像檔還沒出來的版本只會提一下。每個較新的版本都會列出，你可以選跨度比較小的那個。只用會移動的標籤發布的推論引擎（stable-diffusion.cpp 的 `master-cuda`），在標籤指向較新的映像檔時會顯示**有較新的建置**。Forgeyard 自己的視覺映像檔不檢查：它跟著 Forgeyard 的版本一起更新。
+
+## 試用推論引擎的新版本
+
+檢查找到較新的版本之後，管理員可以在不動到內建推論引擎的情況下試用它。在推論引擎的頁面上，**新版本** 裡的每個版本都有 **試用這個版本** 按鈕。它會建立一個**自訂推論引擎**：內建推論引擎的複本，改用那個版本的映像檔，名稱是 `<推論引擎>-x-y-z`（例如 `vllm-0-34-0`，名稱可以修改）。其他都不會變：內建推論引擎維持原樣，在你自己選擇之前，不會有任何部署改用這個複本。
+
+建立之前，對話框會先說明：
+
+- **複本包含哪些變體**：有新版本映像檔的變體。沒有映像檔的變體不會包含，並附上原因（vLLM 0.34.0 沒有 CUDA 12.9 的映像檔）；需要那個變體的機器會繼續使用內建推論引擎。行程變體（`cpu-process`）只有在發布版本提供同一種壓縮檔和它的 SHA-256 時才會包含。
+- **簽章**：llama.cpp 會為它的映像檔和發布壓縮檔簽章（GitHub 建置證明，artifact attestation）。Forgeyard 建立複本時會逐一檢查簽章；只要有一個驗證不過或找不到，就不會建立複本。如果完全無法檢查簽章（伺服器連不到 GitHub 或 Sigstore），對話框會說明原因，並提供 **不驗證，照樣建立**：這樣建立的複本，在所有顯示簽章的地方都會標示為 *未驗證*，稽核紀錄也會記下是誰做的選擇。vLLM、vLLM-Omni 和 speaches 沒有提供簽章，stable-diffusion.cpp 只附上沒有簽章的建置紀錄：它們的複本只以 digest 釘選，對話框和頁面都會清楚說明。
+- **要先讀什麼**：新版本可能改變參數、預設值和記憶體用量。複本會沿用內建推論引擎原本的參數，而 Forgeyard 的估算是以內建的版本量測的。對話框會再列一次版本說明提到的參數，並附上版本說明的連結。
+
+按 **建立複本** 時，Forgeyard 會重新查詢每個映像檔標籤指向的內容。只要有標籤指向的映像檔和你檢查時不同，就什麼都不會建立：請再檢查一次，然後再試用。每個映像檔都以 digest 釘選，並記下 Forgeyard 辨認它所需要的 ID（和內建映像檔記錄的 ID 相同）。所以複本的映像檔可以**經由伺服器**送到連不到 registry 的機器、用 `docker load` 載入後可以**離線執行**，也會出現在機器頁面上、可以用 **移除** 刪掉，和內建的映像檔一樣。建立複本會以 `recipe.created` 記進稽核紀錄，並寫明它的來源。
+
+複本的頁面會說明它的來源、建立時間和建立者，每個變體釘選的 digest 和驗證了什麼（簽章的 workflow 和建置紀錄，或是 *上游未簽章*），以及哪些變體沒有包含。目錄中為內建推論引擎設定的推論引擎參數（例如 Qwen3-Reranker 給 `vllm-pooling` 的 `--hf-overrides`），也同樣適用於它的複本。
+
+要使用複本，建議先[試跑](#try-out-a-new-engine-version-before-switching)，再到部署的 **編輯** 頁面把部署換過去（[把部署換到推論引擎的其他版本](#move-a-deployment-to-another-engine-version)），或用它部署一個模型（在部署頁面選它當推論引擎），先和內建推論引擎比較過，再把其他部署換過去。複本頁面上的 **下載到…** 可以先把它的映像檔下載到機器上（[預先下載推論引擎](#download-an-engine-ahead-of-time)）。用完之後請刪除複本：還有部署在使用時無法刪除。刪除之前，請先從各台機器移除它的映像檔（機器頁面的 **推論引擎的映像檔**）：複本刪除之後，Forgeyard 就不再把那個映像檔當成自己的。
+
+## 換推論引擎版本前先試跑
+
+把部署換到推論引擎的新版本之前，可以先**試跑**：Forgeyard 會在一台機器上用它暫時部署一個模型，大約幾分鐘，檢查完再移除。通常是試跑用[試用這個版本](#try-a-newer-version-of-an-engine)建立的複本，不過任何推論引擎都能試跑；試跑內建推論引擎，可以得到它的複本拿來比較的基準數字。管理員和操作員可以開始和取消試跑；所有登入的人都能看到結果。
+
+1. 打開推論引擎的頁面（**模型**，**推論引擎** 分頁，再點推論引擎），按 **試跑**。
+2. 選一個這個推論引擎能提供的**模型**，以及一台**機器**（能執行這個推論引擎某個變體的機器；離線的機器不能選）。**參數**會沿用這個模型在內建推論引擎上的部署（如果有的話），讓試跑的方式和目前提供服務的方式一樣；沒有的話就用推論引擎的預設值。你也可以在對話框裡修改（context、並行數，GPU 上可以選 **獨占** 或 **共用 VRAM**），進階參數則維持原本的值。
+3. 對話框會顯示估算，以及目前放不放得進那台機器；放不下時會像一般部署一樣說明原因。如果機器上還沒有這個推論引擎的映像檔，對話框也會提醒：試跑會先拉取映像檔，可能要花上好幾分鐘（vLLM 的映像檔大約 9 GiB）；同一個頁面上的 **下載到…** 可以預先下載。
+4. **啟動時限**限制啟動的時間，下載也算在內（預設 30 分鐘，可以設 5 到 180 分鐘）。按 **開始試跑**。
+
+試跑的部署是**隔離**的：它沒有路由，所以不會出現在 `/v1/models`，任何 API 金鑰或試用區都無法呼叫它，閘道也不會替它記錄用量或費用。它不會休眠，也不會被自動調整副本數；服務中頁面只會把它列為進行中的試跑，機器頁面則把它佔用的卡標示為推論引擎的*試跑*。試跑進行期間，推論引擎和模型都不能刪除。一台伺服器同時最多四個試跑，每個推論引擎一個。
+
+接著 Forgeyard 會直接對副本送出檢查（帶著副本的內部金鑰，和 **試試看** 一樣）：
+
+| 檢查 | 內容 | 未通過的情況 |
+|---|---|---|
+| **啟動** | 多久才就緒，分段列出（模型、映像檔、推論引擎），並和內建推論引擎上次啟動同一個模型的時間比較 | 無法放置、啟動失敗（會保留它最後的輸出），或在時限內沒有就緒 |
+| **記憶體** | 它在 GPU 上（或機器 RAM 中）用了多少：就緒後的機器讀數減去推論引擎啟動前的讀數，各取幾次，並和副本預留的量比較 | 用量超過預留的量（考量忙碌的卡上讀數會有誤差，容許 5%） |
+| **回應** | 先送一個請求暖機，再依模型種類送五個：對話（固定的問題，temperature 0，最多 128 個 token）、嵌入、重排序（關於巴黎的句子必須排第一）、文字分類、語音轉文字（測試音檔裡的話）、文字轉語音、圖片（一張）、視覺 | 有回應不是該種類的格式，或是錯誤 |
+| **延遲** | 那五個請求的 p50 和 p95，以及第一個請求的時間 | —（只顯示，不評判） |
+| **回應比較** | 如果內建推論引擎上同一個模型的部署已經就緒，會把同樣的請求送給它一次，比較兩邊的回應是否相同 | —（新版本的回應可能不一樣：請兩邊都看過） |
+
+影片不會送請求（產生一段影片要好幾分鐘），只檢查它的啟動和記憶體。如果這張卡也有其他工作在使用，記憶體量測只能當作參考，檢查結果也會註明。如果這段期間其他工作釋放了記憶體，或機器沒有及時傳來讀數，記憶體就會標示為**未量測**：檢查和結果都會用文字說明原因，不會顯示數字。沒有任何檢查未通過，試跑就算**通過**。通過之後，或有檢查未通過、你按了 **取消試跑**、超過時限，或試跑期間伺服器重新啟動時，它的部署都會被移除。試跑會記進稽核紀錄：先是 `engine_trial.started`，之後是 `engine_trial.finished` 或 `engine_trial.cancelled`。
+
+推論引擎頁面的 **試跑紀錄** 會保留每次試跑，最新的在最上面：模型、機器、執行者和結果。按 **檢查項目** 會展開那次試跑的表格（量測值、比較基準、說明），以及它和內建推論引擎的比較：內建推論引擎上同一個模型的部署（上次啟動的時間和預留的量），以及內建推論引擎最近一次通過的試跑（啟動時間、記憶體和延遲）。**推論引擎** 分頁的卡片會顯示最近一次的結果；部署的 **編輯** 頁面也會說明所選版本上次試跑的結果（*上次在 gpu-01 上用 qwen3-0.6b 試跑：通過*），或還沒有試跑過。這些都只是參考資訊：沒有試跑過的版本，也一樣可以換過去。
+
+用程式操作：`POST /api/recipes/{name}/trials`（[參考資料](reference.md#trial-runs-through-the-api)）。
+
+## 把部署換到推論引擎的其他版本
+
+部署可以在內建推論引擎和用[試用這個版本](#try-a-newer-version-of-an-engine)建立的複本之間切換，例如從 `vllm`（vLLM 0.32.0）換到 `vllm-0-34-0`，之後再換回來。部署的名稱、提供服務的模型名稱、API 金鑰和路由都不變，用戶端只會遇到一次重新啟動。
+
+1. 在部署的頁面選擇 **編輯**（管理員和操作員）。
+2. 在 **推論引擎** 底下的 **推論引擎版本** 選擇版本：內建的版本，以及每個用同樣方式提供這個模型的複本。沒有複本的推論引擎只會列出自己，並附上它頁面的連結，可以在那裡檢查有沒有新版本。
+3. 表單會改成新版本的參數。**儲存後會發生什麼** 會列出推論引擎的變更、新版本不接受的參數（會被拿掉）、副本怎麼重新啟動，右側則是新的估算（複本計算記憶體的方式可能不同）。現在放不下的版本，會和其他修改一樣被拒絕。
+4. 按 **儲存並重新啟動**。
+
+副本會像其他修改一樣重新啟動：有多個副本時一次一個，模型會持續回應。只有一個執行中的副本時，新的就緒之前模型不會回應，表單會在你儲存之前先說明：
+
+- 大約多久：依它上次啟動的時間（來自它的事件）；沒有的話，依這台伺服器上同一個推論引擎其他部署最近幾次啟動時間的中間值；再沒有，就用這個推論引擎一般的啟動時間（vLLM 在 A100 上大約兩分鐘，llama.cpp 只要幾秒）；
+- 新版本的推論引擎第一次啟動可能比較久（它可能要先編譯）；如果機器上還沒有它的映像檔，會先下載（[先下載好](#download-an-engine-ahead-of-time)）；
+- 怎麼避免這段空檔：在機器放得下兩個副本時，在同一次修改裡把 **副本** 調成 2（新副本會先啟動），或開啟自動調整副本數；如果部署的路由有雲端層，這段期間可以使用雲端的 API 金鑰會改由雲端層回應。
+
+它只是說明：儲存後的行為和以前一樣。要在舊版本旁邊先啟動新版本，卡上必須放得下兩份，共用的 GPU 常常沒有這個空間，所以 Forgeyard 不會替你這樣做。
+
+要換回來，再選一次內建推論引擎就好。這次變更會以 `deployment.changed` 記入稽核紀錄，包含 `recipe`（換之前和換之後）、兩個版本和被拿掉的參數；部署的事件會寫 *engine vllm → vllm-0-34-0*。部署的頁面會註明它執行的是複本（*執行的是複本：vLLM 0.34.0（以 vllm 為基礎）*）。之後的 Forgeyard 版本把內建推論引擎升到複本的版本或更新時，複本的頁面會說明：先把部署換回來，再刪除複本。不會有任何東西自動切換。
+
+用程式修改：`PATCH /api/deployments/{id}` 加上 `"recipe"`（[參考](reference.md#change-a-deployment-through-the-api)）。
+
+## 預先下載推論引擎
+
+推論引擎頁面（內建推論引擎或複本）上的 **下載到…** 只會把推論引擎下載到你選的機器：每台機器會執行的變體的映像檔（依它釘選的 digest），或它的行程程式（用 SHA-256 核對）。不含模型，也不會啟動任何東西。管理員和操作員可以使用。例如在把部署換過去之前，先把 9 GiB 的 vLLM 映像檔放到機器上。
+
+1. 打開推論引擎的頁面（**模型** 的 **推論引擎** 分頁，再點推論引擎），按 **下載到…**。
+2. 勾選機器。每一行會寫出那台機器會拿到的變體，以及能不能下載：**放得下**、**已經在這裡**、**下載中**、**離線**、**請更新 agent**，或是 **沒有適用的變體**（並說明原因：這個推論引擎沒有能在那台機器上執行的變體，例如機器上沒有 vLLM 支援的卡）。
+3. 按 **下載到 N 台機器**。
+
+進度會顯示在推論引擎的頁面上（機器表格裡，以及 **這個推論引擎的下載** 底下），也會顯示在每台機器的頁面上，並可以 **取消**。設成經由伺服器下載的機器，會經由伺服器拿到映像檔（[經由伺服器把模型送到離線機器](#give-an-offline-machine-models-through-the-server)）：複本的映像檔和內建的一樣，會依建立時記下的 ID 經由伺服器傳送。每次要求和取消都會記入稽核紀錄（`engine.download_requested`、`engine.download_cancelled`），刪除推論引擎時，它正在進行的下載也會結束。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
 
 ## 部署之前先下載模型
 
-**下載到…**會現在就把模型，以及預設也把它的引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
+**下載到…**會現在就把模型，以及預設也把它的推論引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
 
 1. 打開 **模型**（**目錄** 分頁），在模型那一列按 **下載到…**。或打開機器的頁面，在 **快取中的模型** 上方按 **下載模型到這裡…**，再選模型。
 2. 勾選機器。每一行會說明那台機器能不能下載：
-   - **放得下**：要下載多少、可用的磁碟空間，以及會一起抓的引擎；
-   - **已經在這裡**：模型（和引擎）已經在那台機器的快取裡；
+   - **放得下**：要下載多少、可用的磁碟空間，以及會一起抓的推論引擎；
+   - **已經在這裡**：模型（和推論引擎）已經在那台機器的快取裡；
    - **下載中**：那台機器上已經在下載這個模型；
    - **離線**、**沒有模型快取**、**磁碟空間不足**（模型加上 1 GiB 的保留空間）；
    - **請更新 agent**：1.4 以前的 agent 不能先下載。
-3. **連同引擎** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
+3. **連同推論引擎** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的推論引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
 4. 按 **下載到 N 台機器**。
 
 進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**取消** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **下載到…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **快取中的模型** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
@@ -1247,7 +1335,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 ## 經由伺服器把模型送到離線機器
 
-自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型、引擎壓縮檔和有釘選的引擎映像檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。從加入這種機器到部署好模型的完整流程，請看[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)。
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型、推論引擎的壓縮檔和有釘選的推論引擎映像檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。從加入這種機器到部署好模型的完整流程，請看[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)。
 
 1. 打開機器的頁面（admin）。在 **快取中的模型** 底下設定 **下載時的網路連線**：
    - **自動**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
@@ -1255,7 +1343,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
    - **只直接下載**：永遠不經由伺服器。
 2. 照常部署，或使用 **下載到…**。進度會在部署的頁面、目錄裡模型的下方和機器的頁面上顯示 *經由伺服器下載模型：…/…*，完成的下載會顯示 *…下載完成，經由伺服器*。對設成一律經由伺服器的機器，**下載到…** 對話框會標示 *經由伺服器*。
 
-不變的部分：中斷後 agent 會從磁碟上已有的部分繼續下載（伺服器會把 `Range` 轉給來源）、會重試、按 **取消** 會立刻停止，而且每個檔案都像直接下載一樣檢查（大檔的 SHA-256、小檔的 git blob id、引擎壓縮檔釘選的 SHA-256、URL 模型記下的 SHA-256）。在路上被改過的檔案會被拒絕並刪除，所以伺服器並沒有因此多了任何它原本做不到的權限。
+不變的部分：中斷後 agent 會從磁碟上已有的部分繼續下載（伺服器會把 `Range` 轉給來源）、會重試、按 **取消** 會立刻停止，而且每個檔案都像直接下載一樣檢查（大檔的 SHA-256、小檔的 git blob id、推論引擎的壓縮檔釘選的 SHA-256、URL 模型記下的 SHA-256）。在路上被改過的檔案會被拒絕並刪除，所以伺服器並沒有因此多了任何它原本做不到的權限。
 
 不同的部分：
 
@@ -1273,9 +1361,9 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - **你會看到**：*經由伺服器從 gpu-host 下載模型：…/…*、*…下載完成，經由伺服器，來自 gpu-host*，有機器能送出時，**下載到…** 會顯示 *經由伺服器，來自 gpu-host*。
 - 只有經由伺服器取得檔案的機器會用到（**一律經由伺服器**，或 **自動** 且連不到來源之後）。連得到網際網路的機器仍然直接下載。
 - 受限模型可能這樣送到一台機器而不用到任何 Hugging Face 權杖，因為另一台機器已經有它。和以前一樣，每台機器拿到什麼由伺服器決定。
-- 引擎壓縮檔仍然經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
+- 推論引擎的壓縮檔仍然經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
 
-**引擎映像檔**（container 變體）在 recipe 以 digest 釘選時也會經由伺服器，所有內建 recipe 都是如此：
+**推論引擎的映像檔**（container 變體）在 recipe 以 digest 釘選時也會經由伺服器，所有內建 recipe 都是如此：
 
 - 映像檔不在機器上時，agent 照常 pull（**自動**）；pull 連不到 registry（`lookup ghcr.io: no such host`、逾時）時改經由伺服器，之後一小時內同一個 registry 的映像檔也一樣。設成 **一律經由伺服器** 時完全不會先試 registry。
 - 伺服器依 Forgeyard 為這個映像檔記下的 digest（`forgeyard/recipes/images.lock.json`），用 registry 發的匿名 pull token 讀取**那台機器平台**（amd64、arm64）的 manifest，再依 digest 提供那份 manifest、它的 config 和每一層。那份 manifest 沒列的 digest 一律不給，完整的一層經過時也會檢查。
@@ -1285,7 +1373,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。要送檔案給其他機器，agent 必須是 1.4.1 以後的版本；提出要求的機器只要 1.4。
 
-## 把引擎映像檔上傳到機器
+## 把推論引擎的映像檔上傳到機器
 
 管理員可以從 console 把映像檔放到機器上：不能經由伺服器的映像檔（自訂 recipe 只用 tag 指定的映像檔、自己建置的映像檔），或那台機器要 pull 很久的映像檔。
 
@@ -1296,19 +1384,19 @@ uv run --no-sync python -m forgeyard secrets reset --yes
    ```
 
    `podman save` 也可以。有釘選的映像檔請先依 digest pull 並加上 tag，做法和[離線機器](#offline-machines)一樣，這樣檔案裡就是那個映像檔、而且是 recipe 的 tag。
-2. 打開目標機器的頁面 → **引擎映像檔** → **上傳映像檔**，選擇檔案，按 **上傳**。對話框會顯示已送出多少，接著顯示 *正在載入 … 的容器引擎…*。
+2. 打開目標機器的頁面 → **推論引擎的映像檔** → **上傳映像檔**，選擇檔案，按 **上傳**。對話框會顯示已送出多少，接著顯示 *正在載入 … 的容器引擎…*。
 3. 載入完成後，對話框會列出檔案裡的每個映像檔：它的 tag、id，以及它是哪個 recipe 的映像檔。*llama-cpp (vulkan) 釘選的映像檔，已用記錄的 ID 核對*：那台機器上的部署不用 pull 就會使用它。*名稱和 … 的映像檔相同*：只用 tag 指定它的 recipe 會照樣使用。*不是任何配方的映像檔*：自訂 recipe 可以用它的 tag 指定它。
 
-檔案從你的瀏覽器經過伺服器直接送到 agent，agent 一邊收一邊把它串流進 `docker load`（或 `podman load`）：伺服器只保留很小的緩衝，機器也不需要其他通往你電腦的路。container 引擎載入時會檢查每一層；中斷的檔案絕不會被載入。每台機器同時只能有一個上傳，全部最多兩個；檔案最大為 `IMAGE_UPLOAD_MAX_GB`（沒設定時是 64 GiB）。機器的 agent 必須是 1.4 以後的版本、有 container 引擎，而且在線上。每次上傳和失敗的原因都會記入稽核紀錄（`node.image_uploaded`）。
+檔案從你的瀏覽器經過伺服器直接送到 agent，agent 一邊收一邊把它串流進 `docker load`（或 `podman load`）：伺服器只保留很小的緩衝，機器也不需要其他通往你電腦的路。容器引擎載入時會檢查每一層；中斷的檔案絕不會被載入。每台機器同時只能有一個上傳，全部最多兩個；檔案最大為 `IMAGE_UPLOAD_MAX_GB`（沒設定時是 64 GiB）。機器的 agent 必須是 1.4 以後的版本、有 容器引擎，而且在線上。每次上傳和失敗的原因都會記入稽核紀錄（`node.image_uploaded`）。
 
 要複製另一台機器已經有的映像檔，不需要檔案：請看下一節。
 
-## 從另一台機器複製引擎映像檔
+## 從另一台機器複製推論引擎的映像檔
 
-管理員可以把一台機器的 container 引擎裡的映像檔，經由伺服器複製到另一台機器（1.4.1）：只用 tag 指定的自訂 recipe 映像檔、在某台機器上自己建置的映像檔，或連不到 registry 的機器需要的映像檔。不會自動複製任何東西。
+管理員可以把一台機器的 容器引擎裡的映像檔，經由伺服器複製到另一台機器（1.4.1）：只用 tag 指定的自訂 recipe 映像檔、在某台機器上自己建置的映像檔，或連不到 registry 的機器需要的映像檔。不會自動複製任何東西。
 
-1. 打開目標機器的頁面 → **引擎映像檔** → **從其他機器複製**。
-2. 在 **來源** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。對話框只顯示 recipe 指定的映像檔（1.4.2）；勾選 **顯示所有映像檔** 才會顯示其他的，例如共用機器上別人的映像檔。
+1. 打開目標機器的頁面 → **推論引擎的映像檔** → **從其他機器複製**。
+2. 在 **來源** 選要複製的來源機器。它的 agent 會列出容器引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。對話框只顯示 recipe 指定的映像檔（1.4.2）；勾選 **顯示所有映像檔** 才會顯示其他的，例如共用機器上別人的映像檔。
 3. 選一個，按 **複製**。來源機器會用它自己的 tag 對它執行 `docker save`（或 `podman save`），送給伺服器，伺服器直接轉進目標機器的 `docker load`，只保留很小的緩衝。載入完成後，對話框會列出載入了什麼、它是哪個 recipe 的映像檔，以及 *The same image as on gpu-host (same content id)*：載入的就是來源機器上的那個映像檔。
 
 注意事項：
@@ -1316,11 +1404,11 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - **信任**：只用 tag 指定的映像檔沒有記錄的 id，所以目標機器會執行來源機器在那個 tag 底下的任何東西。只從你信任的機器複製。有釘選的映像檔在執行前仍會以記錄的 id 檢查。
 - `docker save` 的資料流事先不知道大小，也不能續傳：中斷的複製會從頭重來，目標機器不會從中斷的資料流載入任何東西。對話框會說明中斷，以及來源機器的說明，例如 *The copy broke off after 131072 bytes: gpu-host stopped sending, so nothing was loaded on gpu-01. gpu-host says: docker save failed: …*：先在那台機器上解決，再複製一次。
 - 限制和上傳相同：每台目標機器同時只能有一個複製或上傳，全部最多兩個，最大 `IMAGE_UPLOAD_MAX_GB`；每台來源機器同時只能送一個。
-- 來源機器的 agent 必須是 1.4.1 以後、有 container 引擎；目標機器是 1.4 以後、有 container 引擎。兩台都必須在線上。每次複製和失敗的原因都會記入稽核紀錄（`node.image_copied`，包含兩台機器和載入的 id）。
+- 來源機器的 agent 必須是 1.4.1 以後、有 容器引擎；目標機器是 1.4 以後、有 容器引擎。兩台都必須在線上。每次複製和失敗的原因都會記入稽核紀錄（`node.image_copied`，包含兩台機器和載入的 id）。
 
 ## 釋出機器上的磁碟空間
 
-機器的頁面上有 **快取中的模型**：列出它的 agent 下載過的東西和大小。每個 Hugging Face revision 一列；有好幾個 GGUF 檔的 revision，底下每個檔案各一列。從 URL 下載的單一 GGUF 檔，以及 process 引擎的引擎壓縮檔也會列出。清單上方是快取在那顆磁碟上占了多少，以及磁碟還剩多少可用空間。
+機器的頁面上有 **快取中的模型**：列出它的 agent 下載過的東西和大小。每個 Hugging Face revision 一列；有好幾個 GGUF 檔的 revision，底下每個檔案各一列。從 URL 下載的單一 GGUF 檔，以及 process 變體的推論引擎壓縮檔也會列出。清單上方是快取在那顆磁碟上占了多少，以及磁碟還剩多少可用空間。
 
 - **移除** 會從那台機器刪除一個項目，管理員和操作員可以使用。那台機器上有部署正在使用這個模型時會被拒絕，該列也會指出是哪個部署：請先停止它。同一個 repository 的其他 revision 共用的檔案會保留，和 `hf cache rm` 的做法相同。之後需要這個模型的部署會在那裡重新下載。
 - **移除未完成的下載** 會刪除未完成的下載留下的檔案。下載會從這些檔案接續，所以只有在不想再繼續那次下載時才刪除。那台機器上有下載正在進行時會被拒絕。
@@ -1328,12 +1416,12 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含刪了什麼、釋出了多少空間。API 請見[參考文件](reference.md#a-machines-model-cache-through-the-api)。
 
-### 引擎映像檔
+### 推論引擎的映像檔
 
-引擎映像檔也占磁碟空間，recipe 換成較新的映像檔後，舊的會越積越多。機器的頁面在 **引擎映像檔** 底下列出它們（1.4.2）：agent 目前列出的、由 recipe 指定的每個映像檔（有釘選的映像檔以記錄的 id 辨識，只用 tag 指定的映像檔以那個 tag 辨識），包含大小、指定它的 recipe，以及那台機器上使用它的部署。清單上方是引擎存放映像檔的位置還剩多少空間，前提是 agent 看得到那個目錄（在 container 裡執行的 agent 通常看不到）。引擎裡的其他映像檔只會計數：沒有 recipe 指定它們，所以它們不屬於 Forgeyard。
+推論引擎的映像檔也占磁碟空間，recipe 換成較新的映像檔後，舊的會越積越多。機器的頁面在 **推論引擎的映像檔** 底下列出它們（1.4.2）：agent 目前列出的、由 recipe 指定的每個映像檔（有釘選的映像檔以記錄的 id 辨識，只用 tag 指定的映像檔以那個 tag 辨識），包含大小、指定它的 recipe，以及那台機器上使用它的部署。清單上方是容器引擎存放映像檔的位置還剩多少空間，前提是 agent 看得到那個目錄（在 container 裡執行的 agent 通常看不到）。容器引擎裡的其他映像檔只會計數：沒有 recipe 指定它們，所以它們不屬於 Forgeyard。
 
-- **移除**（管理員）會從那台機器刪除一個映像檔。該列會先詢問，然後 agent 對它執行 `docker rmi`（或 `podman rmi`），絕不加 `-f`。完成後主控台會說明釋出了多少空間：最多是映像檔的大小，因為其他映像檔共用的 layer 會保留；agent 看得到引擎的磁碟時，也會顯示之後的可用空間。之後需要這個映像檔的部署會重新 pull（或經由伺服器取得，或由你再載入一次）。
-- 以下情況會被拒絕，該列也會說明原因：那台機器上有部署正在使用這個映像檔（請先停止它）、agent 本身就是從這個映像檔執行的，以及引擎裡有任何 container 正在使用它，即使不是 Forgeyard 啟動的（引擎會保留這種映像檔；訊息會指出是哪個 container）。
+- **移除**（管理員）會從那台機器刪除一個映像檔。該列會先詢問，然後 agent 對它執行 `docker rmi`（或 `podman rmi`），絕不加 `-f`。完成後主控台會說明釋出了多少空間：最多是映像檔的大小，因為其他映像檔共用的 layer 會保留；agent 看得到容器引擎的磁碟時，也會顯示之後的可用空間。之後需要這個映像檔的部署會重新 pull（或經由伺服器取得，或由你再載入一次）。
+- 以下情況會被拒絕，該列也會說明原因：那台機器上有部署正在使用這個映像檔（請先停止它）、agent 本身就是從這個映像檔執行的，以及容器引擎裡有任何 container 正在使用它，即使不是 Forgeyard 啟動的（容器引擎會保留這種映像檔；訊息會指出是哪個 container）。
 - 沒有 recipe 指定的映像檔，絕不會提供刪除。
 - agent 只會依 id 刪除它自己清單裡的映像檔：伺服器絕不會指定名稱要它刪除。有好幾個 tag 的映像檔會以那些 tag 刪除。
 - 早於 1.4.2 的 agent 會列出映像檔，但不能刪除。請更新 agent。

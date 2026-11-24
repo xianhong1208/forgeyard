@@ -16,7 +16,7 @@ from forgeyard.models import modalities
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import (CODEC_LABEL, GIB, gpu_memory_utilization, image_caps, image_side,
                                        vllm_batch_tokens)
-from forgeyard.models.recipes import IMAGE_COMPONENTS, Variant, render_text
+from forgeyard.models.recipes import IMAGE_COMPONENTS, Variant, engine_args_for, render_text
 
 
 def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context: int) -> dict:
@@ -127,7 +127,7 @@ def args_for(ctx: Context, variant: Variant, vals: dict) -> list[str]:
         if all(str(ctx.params.get(k)) == str(v) for k, v in oa.if_.items()) and \
                 (oa.if_model is None or model_has(ctx, oa.if_model)):
             base += oa.args
-    base += list((ctx.model.engine_args or {}).get(ctx.recipe.name) or [])
+    base += engine_args_for(ctx.model.engine_args, ctx.recipe)
     base += list(ctx.params.get("extra_args") or [])
     return [render_text(a, vals) for a in base]
 

@@ -371,7 +371,7 @@ describe("Cloud in zh-TW", () => {
     expect(screen.getByRole("heading", { name: "層" })).toBeTruthy();
     expect(screen.getByText("接著，第 2 層")).toBeTruthy();
     expect(screen.getByLabelText("Gemini/gemini-2.5-flash 的權重")).toBeTruthy();
-    expect(screen.getByText(/沒有就緒的本機副本、每個副本都在忙、引擎回傳 429 或 503、或提示詞超過本機的上下文長度時，移到下一層（最多先等 250 毫秒/)).toBeTruthy();
+    expect(screen.getByText(/沒有就緒的本機副本、每個副本都在忙、推論引擎回傳 429 或 503、或提示詞超過本機的上下文長度時，移到下一層（最多先等 250 毫秒/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "什麼時候往下移" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "儲存" })).toBeTruthy();
     headingsInChinese(["smart"]);
@@ -395,7 +395,7 @@ describe("Cloud in zh-TW", () => {
     expect(targetWhere(off)).toBe("雲端 · 供應商已停用");
     expect(targetName(gone)).toBe("（已移除）");
     expect(spillRules(one)).toBe("只有一層：沒有地方可以溢出。");
-    expect(spillRules({ ...SMART, wait_ms: 0, spill_on_long_prompt: false })).toBe("沒有就緒的本機副本、每個副本都在忙、或引擎回傳 429 或 503 時，移到下一層。回答一旦開始就不會再移。");
+    expect(spillRules({ ...SMART, wait_ms: 0, spill_on_long_prompt: false })).toBe("沒有就緒的本機副本、每個副本都在忙、或推論引擎回傳 429 或 503 時，移到下一層。回答一旦開始就不會再移。");
     expect(targetHeader("local:chat")).toBe("本機 chat");
     expect(targetHeader("provider:Gemini/x")).toBe("Gemini/x");
   });

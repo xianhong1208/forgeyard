@@ -112,7 +112,9 @@ def model_step(db: DbSession, admin: bool) -> dict:
 
 
 def deploy_step(db: DbSession, can_deploy: bool, has_model: bool) -> dict:
-    deps = db.scalars(select(Deployment).options(selectinload(Deployment.workload))).all()
+    from forgeyard.models import trials
+
+    deps = db.scalars(select(Deployment).where(trials.not_trial()).options(selectinload(Deployment.workload))).all()
     ready, waiting = [], []
     for d in deps:
         s = wstate.summary(d.workload)

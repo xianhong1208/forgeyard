@@ -29,14 +29,14 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
-from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, new_session, utcnow
+from forgeyard.db import CatalogModel, CustomRecipe, Deployment, EngineTrial, Node, get_db, new_session, utcnow
 from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
                               recommended as rec, scheduler, sources, textcls, vision)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
 from forgeyard.security.ratelimit import limiter, retry_after
-from forgeyard.workloads import images, placement
+from forgeyard.workloads import images, pins, placement
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -150,6 +150,8 @@ def media_out(meta: dict, fmt: str) -> dict:
 def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
     out = {"name": r.name, "title": r.title, "description": r.description, "engine": r.engine, "version": r.version,
            "tasks": r.tasks, "formats": r.formats, "api": r.api, "share": r.share, "builtin": r.builtin,
+           # 1.5.2 (#95): a copy of a built-in engine ("Try this version"), and what the copy did.
+           "based_on": r.based_on, "copy": r.copy_of.model_dump() if r.copy_of is not None else None,
            "estimate": r.estimate.method,
            "media": r.media.model_dump() if r.media is not None else None,
            "tts": r.tts.model_dump() if r.tts is not None else None,
@@ -168,7 +170,10 @@ def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
 
 
 def _counts(db: DbSession) -> dict[int, int]:
-    return dict(db.execute(select(Deployment.model_id, func.count()).group_by(Deployment.model_id)).all())
+    from forgeyard.models import trials
+
+    return dict(db.execute(select(Deployment.model_id, func.count()).where(trials.not_trial())
+                           .group_by(Deployment.model_id)).all())
 
 
 @router.get("/models")
@@ -176,8 +181,13 @@ def list_models(caller: Caller = Depends(current), db: DbSession = Depends(get_d
     all_r = catalog.all_recipes(db)
     counts = _counts(db)
     rows = db.scalars(select(CatalogModel).order_by(CatalogModel.name)).all()
+    from forgeyard.models import trials
+
+    # 1.5.2 (#95, PR 4): each engine's latest finished trial and whether one runs now (its card shows them).
+    last, running = trials.last_per_recipe(db), {t.recipe for t in trials.running(db)}
     out = {"models": [model_out(m, all_r, counts.get(m.id, 0)) for m in rows],
-           "recipes": [recipe_out(r) for r, _ in all_r.values()],
+           "recipes": [{**recipe_out(r), "last_trial": last.get(r.name), "trial_running": r.name in running}
+                       for r, _ in all_r.values()],
            "can_manage": caller.user.role == "admin", "can_deploy": can_run_workloads(caller.user),
            # Whether the server has a Hugging Face token (the deploy form says its own field is an override).
            "hf_token_set": hf_token.info(db)["set"]}
@@ -500,6 +510,11 @@ def remove_model(model_id: int, caller: Caller = Depends(require_admin), db: DbS
     m = db.get(CatalogModel, model_id)
     if m is None:
         raise fail(404, "not_found", "No such model.")
+    from forgeyard.models import trials
+
+    if db.scalar(select(EngineTrial.id).where(EngineTrial.model_id == m.id, EngineTrial.state == trials.RUNNING)):
+        raise fail(409, "trial_running", f"A trial of an engine with {m.name} is running. Wait for it, or cancel it on "
+                                         "the engine's page.")
     used = db.scalars(select(Deployment.name).where(Deployment.model_id == m.id)).all()
     if used:
         raise fail(409, "model_in_use", f"{m.name} is deployed as {', '.join(used)}. Delete those deployments first.")
@@ -539,7 +554,12 @@ def _recipe_page(request: Request, name: str, listing: bool) -> dict | list:
         if listing:
             return [SimpleNamespace(id=n.id, name=n.name) for n in pages.listable(db)]
         return {"recipe": recipe_out(*found), **pages.engine_page(db, found[0]),
-                "can_manage": caller.user.role == "admin"}
+                # 1.5.2 (#95): per variant, what the server recorded for its pinned image (a copy's: Try this version).
+                "pins": {v.name: got for v in found[0].variants
+                         if (got := pins.signatures(db, [v.image or ""]).get(v.image or "")) is not None},
+                "can_manage": caller.user.role == "admin",
+                # 1.5.2 (#95): Download to… for the engine alone (operators and admins, as for models).
+                "can_download": can_run_workloads(caller.user)}
     finally:
         db.close()
 
@@ -604,7 +624,10 @@ def change_recipe(name: str, body: RecipeIn, caller: Caller = Depends(require_ad
     row.updated_at = utcnow()
     audit.record(db, "recipe.updated", actor=caller.user, target=name, ip=caller.ip,
                  images=[v.image or (v.engine.url if v.engine else v.command) for v in r.variants])
+    db.flush()
+    pins.prune(db)   # 1.5.2: an image the edit no longer names loses its recorded ids (when no other copy names it)
     db.commit()
+    pins.refresh(db)
     return {"recipe": recipe_out(r, body.yaml)}
 
 
@@ -615,12 +638,26 @@ def remove_recipe(name: str, caller: Caller = Depends(require_admin), db: DbSess
         if name in recipes.builtin_recipes():
             raise fail(409, "builtin", "Built-in recipes cannot be removed.")
         raise fail(404, "not_found", "No such recipe.")
-    used = db.scalars(select(Deployment.name).where(Deployment.recipe == name)).all()
+    from forgeyard.models import trials
+
+    if db.scalar(select(EngineTrial.id).where(EngineTrial.recipe == name, EngineTrial.state == trials.RUNNING)):
+        raise fail(409, "trial_running", f"A trial of {name} is running. Cancel it on the engine's page first.")
+    used = db.scalars(select(Deployment.name).where(Deployment.recipe == name, trials.not_trial())).all()
     if used:
         raise fail(409, "recipe_in_use", f"{name} is used by {', '.join(used)}. Delete those deployments first.")
     db.delete(row)
     audit.record(db, "recipe.deleted", actor=caller.user, target=name, ip=caller.ip)
+    # 1.5.2: a download of this engine alone that is under way ends with it (its agent is told at once).
+    from forgeyard.machines.hub import hub
+    from forgeyard.models import prefetch
+
+    told = prefetch.end_engine(db, name, f"the engine {name} was deleted")
+    db.flush()
+    pins.prune(db)   # 1.5.2: a copy's images lose their recorded ids once no other copy names them
     db.commit()
+    pins.refresh(db)
+    for node_id in set(told):
+        hub.poke(node_id)
     return {"ok": True}
 
 

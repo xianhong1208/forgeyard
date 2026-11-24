@@ -129,6 +129,8 @@ class Prefetcher:
                 job.image_ids = images.parse_check(item.get("image_ids")) if item.get("image_ids") else None
             if job.model is None and job.engine is None and job.image is None:
                 raise CacheError("nothing to download")
+            if not job.label:   # 1.5.2: an engine alone, named in the log by what it fetches
+                job.label = str((job.engine or {}).get("name") or job.image or jid[:12])[:120]
         except (CacheError, SourceError, ValueError, TypeError) as e:
             job.state, job.reason = "failed", f"refused the download: {e}"[:400]
             self.tokens.pop(jid, None)

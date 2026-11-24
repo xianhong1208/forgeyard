@@ -1,6 +1,6 @@
 [project]
 name = "forgeyard"
-version = "1.5.1"
+version = "1.5.2"
 description = "Forgeyard: one control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API."
 readme = "README.md"
 license = "Apache-2.0"
@@ -31,6 +31,12 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
+# The server's own extras (1.5.2, #95): verifying upstream signatures (GitHub artifact attestations, Sigstore bundles)
+# when an admin tries a newer engine version. The server image, the install docs and development install it
+# (`uv sync --extra server`); the agent never imports it (it runs the digest the server verified) and its wheel and
+# image do not carry it. Without it, a signed engine's version cannot be verified (Try says so). Apache-2.0,
+# maintained by the Sigstore project (OpenSSF).
+server = ["sigstore>=4.6,<5"]
 # Agent on NVIDIA machines: NVML bindings (read-only; no CUDA context, no GPU memory).
 # AMD machines use the amdsmi library that ships with ROCm.
 nvidia = ["nvidia-ml-py>=12.535"]

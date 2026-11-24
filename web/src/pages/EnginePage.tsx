@@ -1,11 +1,17 @@
 // 1.4.3 (#140): an engine's page, /models/engines/<name>: what it serves, its variants (image or program per kind of
 // hardware, and how each is pinned), which machines have that image or program, its parameters (folded to one line),
 // and the deployments and catalog models that use it. Admins edit and delete a custom engine, and copy a built-in one
-// as a custom engine.
-import { IconCopy, IconCpu, IconEngine, IconPencil, IconRefresh, IconTrash } from "@tabler/icons-react";
+// as a custom engine. 1.5.2 (#95): operators and admins download the engine alone to machines ahead of time.
+import { IconCopy, IconCpu, IconDownload, IconEngine, IconPencil, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { DownloadList, EngineDownloadDialog } from "../components/DownloadTo";
+import { isActive } from "../lib/downloads";
+import { CopySection, TryButton } from "../components/EngineTry";
+import { TrialButton, TrialsSection } from "../components/EngineTrials";
+import { CheckBar, EngineUpdates } from "../components/EngineUpdates";
+import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Crumb, FoldButton, HardwareChips, Jump, MachineCell, ModelCards, Section } from "../components/LibraryPage";
 import { Notice } from "../components/ui";
@@ -13,14 +19,17 @@ import { pluralForm } from "../i18n/format";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { imageTag, when } from "../lib/format";
-import { engineDescription } from "../lib/engines";
+import { engineDescription, engineRuns } from "../lib/engines";
 import { API_LABEL, TASK_LABEL, mediaText } from "../lib/models";
 import { digestOf, engineHref, pinned, stale, whereText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
-import type { CatalogResponse, Deployment, DeploymentsResponse, EnginePage as Page, Machine, MachinesResponse, Recipe, RecipeParam } from "../lib/types";
+import type { CatalogResponse, Deployment, DeploymentsResponse, EnginePage as Page, EngineUpdatesResponse, Machine, MachinesResponse, Recipe,
+  RecipeParam } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { EngineForm, OfflineImages } from "./Models";
 import { DeploymentRow } from "./Serving";
+
+const DOWNLOAD_POLL_MS = 3000;
 
 export function EnginePage() {
   const { name = "" } = useParams();
@@ -70,9 +79,32 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
   const r = p.recipe;
   const t = useT();
   const navigate = useNavigate();
+  // 1.5.2 (#95): newer versions of a built-in engine, as the last check found them.
+  const updates = useApi<EngineUpdatesResponse>(r.builtin ? "/engine-updates" : null);
+  const [checked, setChecked] = useState<EngineUpdatesResponse | null>(null);
+  const upd = checked ?? updates.data;
+  // A card's badge links here (#updates): once the result is in, the section is where it should be.
+  const scrolled = useRef(false);
+  // 1.5.2 (#95, PR 4): a link to its trials (Serving, a card's chip, Edit) lands on them.
+  useEffect(() => {
+    if (window.location.hash === "#trials") document.getElementById("trials")?.scrollIntoView?.({ block: "start" });
+  }, []);
+  useEffect(() => {
+    if (!upd || scrolled.current || window.location.hash !== "#updates") return;
+    scrolled.current = true;
+    document.getElementById("updates")?.scrollIntoView?.({ block: "start" });
+  }, [upd]);
   const [form, setForm] = useState<"edit" | "copy" | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // 1.5.2: while a download of this engine runs, the page follows it.
+  const running = (p.downloads ?? []).some(isActive);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(reload, DOWNLOAD_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [running, reload]);
   const paramList = Object.values(r.params);
   const advanced = paramList.filter((x) => x.advanced).length;
   const mine = (deployments ?? []).filter((d) => d.recipe === r.name);
@@ -96,22 +128,30 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
           <div className="lp-head-text">
             <p className="eyebrow">{t("enginepage.eyebrow", { kind: r.builtin ? t("enginepage.builtin") : t("enginepage.custom") })}</p>
             <h1 className="mono">{r.name}</h1>
-            <p className="small muted lp-sub">{r.title} {r.version}</p>
+            <p className="small muted lp-sub">{baseTitle(r)} {r.version}</p>
+            <p className="engine-image-line lp-image"><EngineImage runs={engineRuns(r.variants)} /></p>
           </div>
         </div>
-        {p.can_manage && (
+        {(p.can_manage || p.can_download) && (
           <div className="page-actions">
-            {!r.builtin && <button type="button" className="btn" onClick={() => { setNote(null); setForm("edit"); }}><IconPencil size={15} aria-hidden="true" /> {t("library.edit")}</button>}
-            {!r.builtin && (
+            {p.can_download && <TrialButton r={r} page={p} onStarted={(text) => { setNote({ tone: "ok", text }); reload(); }} />}
+            {p.can_download && p.machines.length > 0 && (
+              <button type="button" className="btn" onClick={() => { setNote(null); setDownloading(true); }} title={t("enginepage.dl.buttonTitle")}>
+                <IconDownload size={15} aria-hidden="true" /> {t("enginepage.dl.button")}</button>
+            )}
+            {p.can_manage && !r.builtin && <button type="button" className="btn" onClick={() => { setNote(null); setForm("edit"); }}><IconPencil size={15} aria-hidden="true" /> {t("library.edit")}</button>}
+            {p.can_manage && !r.builtin && (
               <button type="button" className="btn btn-quiet" disabled={p.deployments.length > 0} title={p.deployments.length ? t("enginepage.inUse") : undefined}
                 onClick={() => void remove()}><IconTrash size={15} aria-hidden="true" /> {t("library.delete")}</button>
             )}
-            {r.builtin && <button type="button" className="btn btn-quiet" onClick={() => { setNote(null); setForm("copy"); }}
+            {p.can_manage && r.builtin && <button type="button" className="btn btn-quiet" onClick={() => { setNote(null); setForm("copy"); }}
               title={t("enginepage.copyTitle")}><IconCopy size={15} aria-hidden="true" /> {t("enginepage.copy")}</button>}
           </div>
         )}
       </header>
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
+      {downloading && <EngineDownloadDialog recipe={r.name} onClose={() => setDownloading(false)}
+        onStarted={(text) => { setNote({ tone: "ok", text }); reload(); }} />}
       {form && (
         <EngineForm key={form} edit={form === "edit" ? r.name : null} from={form === "copy" ? r.name : undefined} recipes={recipes}
           onCancel={() => setForm(null)}
@@ -129,14 +169,42 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         {r.share === "vram" ? <span className="chip chip-tone-wait">{t("library.sharesGpu")}</span> : <span className="muted">{t("enginepage.ownCard")}</span>}
         {!r.builtin && <span className="chip chip-tone-run">{t("library.custom")}</span>}
       </p>
-      <Jump links={[["overview", t("enginepage.jump.overview")], ["variants", t("enginepage.jump.variants")], ["machines", t("enginepage.jump.machines")],
+      <Jump links={[["overview", t("enginepage.jump.overview")],
+        ...(r.based_on ? [["copy", t("enginetry.copyTitle", { name: r.based_on })] as [string, string]] : []),
+        ["trials", t("enginetrial.title")],
+        ["variants", t("enginepage.jump.variants")],
+        ...(r.builtin ? [["updates", t("engineupdates.title")] as [string, string]] : []), ["machines", t("enginepage.jump.machines")],
         ["params", t("enginepage.jump.params")], ["deployments", t("enginepage.jump.deployments")]]} />
 
       <Section id="overview" title={t("enginepage.jump.overview")}><EngineAbout r={r} /></Section>
 
+      {r.based_on && (
+        <Section id="copy" title={t("enginetry.copyTitle", { name: r.based_on })}>
+          {p.caught_up && (
+            <Notice tone="info">{t.rich(p.caught_up.same ? "enginepage.caughtUp.same" : "enginepage.caughtUp.newer", {
+              builtin: <Link to={engineHref(p.caught_up.builtin)} className="mono">{p.caught_up.builtin}</Link>, version: p.caught_up.version })}</Notice>
+          )}
+          <CopySection r={r} pins={p.pins} />
+        </Section>
+      )}
+
+      {/* 1.5.2 (#95, PR 4): trial runs of this engine: the one running now, and the history with each trial's checks. */}
+      <Section id="trials" title={t("enginetrial.title")} note={t("enginetrial.note")}>
+        <TrialsSection r={r} page={p} canRun={Boolean(p.can_download)} onChanged={reload} />
+      </Section>
+
       <Section id="variants" title={t("enginepage.jump.variants")} count={r.variants.length} note={t("enginepage.variantsNote")}>
         <EngineVariants r={r} />
       </Section>
+
+      {r.builtin && (
+        <Section id="updates" title={t("engineupdates.title")}
+          count={upd?.result?.engines[r.name]?.candidates.length || undefined}
+          actions={<CheckBar compact data={upd} onChecked={(res) => setChecked({ result: res, can_check: true })} />}>
+          <EngineUpdates u={upd?.result?.engines[r.name]} version={r.version}
+            action={upd?.can_check ? (c) => <TryButton recipe={r} candidate={c} signed={upd.signatures?.[r.name]} /> : undefined} />
+        </Section>
+      )}
 
       <Section id="machines" title={t("enginepage.jump.machines")} count={t("enginepage.thereOn", { count: String(here) })}
         actions={canList ? <button type="button" className="btn btn-quiet btn-small" onClick={relist} disabled={listing}
@@ -144,6 +212,13 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
           <IconRefresh size={14} aria-hidden="true" /> {listing ? t("enginepage.listing") : t("enginepage.listAgain")}</button> : undefined}
         note={t("enginepage.machinesNote")}>
         <EngineMachines p={p} machines={machines} />
+        {(p.downloads ?? []).length > 0 && (
+          <div className="et-block">
+            <h3 className="small">{t("enginepage.dl.listTitle")}</h3>
+            <DownloadList list={p.downloads ?? []} show="machine" canCancel={Boolean(p.can_download)}
+              onChanged={(text) => { setNote({ tone: "ok", text }); reload(); }} onError={(text) => setNote({ tone: "error", text })} />
+          </div>
+        )}
       </Section>
 
       <Section id="params" title={t("enginepage.jump.params")} actions={paramList.length ? <FoldButton open={paramsOpen} setOpen={setParamsOpen} what={t("enginepage.paramsWhat")} controls="params-list" /> : undefined}>
@@ -165,9 +240,17 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
       <HelpLinks>
         <HelpLink page="concepts" anchor="models-engines-and-estimates">{t("library.help.concepts")}</HelpLink>
         <HelpLink page="how-to" anchor="offline-machines">{t("library.help.offline")}</HelpLink>
+        {r.builtin && <HelpLink page="how-to" anchor="see-whether-an-engine-has-a-newer-version">{t("engineupdates.help")}</HelpLink>}
+        {(r.builtin || r.based_on) && <HelpLink page="how-to" anchor="try-a-newer-version-of-an-engine">{t("enginetry.help")}</HelpLink>}
+        <HelpLink page="how-to" anchor="try-out-a-new-engine-version-before-switching">{t("enginetrial.help")}</HelpLink>
       </HelpLinks>
     </>
   );
+}
+
+// A copy's title already ends with its version ("vLLM 0.34.0"): said once.
+function baseTitle(r: Recipe): string {
+  return r.title.endsWith(` ${r.version}`) ? r.title.slice(0, -(r.version.length + 1)) : r.title;
 }
 
 function EngineAbout({ r }: { r: Recipe }) {
@@ -176,7 +259,7 @@ function EngineAbout({ r }: { r: Recipe }) {
     <>
       <p className="lp-desc">{engineDescription(r)}</p>
       <dl className="facts lp-facts">
-        <div className="fact"><dt>{t("enginepage.fact.engine")}</dt><dd>{r.title} <span className="mono small">{r.version}</span></dd></div>
+        <div className="fact"><dt>{t("enginepage.fact.engine")}</dt><dd>{baseTitle(r)} <span className="mono small">{r.version}</span></dd></div>
         <div className="fact"><dt>{t("enginepage.fact.serves")}</dt><dd>{r.tasks.map((x) => <span key={x} className="lp-api">{TASK_LABEL[x]} <code>{API_LABEL[r.api[x]] ?? r.api[x]}</code></span>)}</dd></div>
         <div className="fact"><dt>{t("enginepage.fact.formats")}</dt><dd className="mono small">{r.formats.join(", ")}</dd></div>
         {r.media && <div className="fact"><dt>{t("enginepage.fact.takes")}</dt><dd>{r.media.inputs.length ? mediaText(r.media.inputs) : t("enginepage.fact.textOnly")}{r.media.files ? t("enginepage.fact.files") : ""}</dd></div>}
@@ -236,7 +319,8 @@ function EngineMachines({ p, machines }: { p: Page; machines: Machine[] | null }
             <td data-label={t("enginepage.col.thereShort")} className="small">
               {!x.variant ? <span className="muted">—</span> : (
                 <div className="cell-stack">
-                  <span>{x.present === true ? <span className="chip chip-tone-ok">{t("enginepage.here")}</span> : x.present === false ? <span className="chip">{t("enginepage.notHere")}</span> : <span className="chip chip-tone-wait">{t("enginepage.notKnown")}</span>}</span>
+                  <span>{x.present === true ? <span className="chip chip-tone-ok">{t("enginepage.here")}</span> : x.present === false ? <span className="chip">{t("enginepage.notHere")}</span> : <span className="chip chip-tone-wait">{t("enginepage.notKnown")}</span>}
+                    {x.download && <> <span className="chip chip-tone-wait">{t("enginepage.dl.under")}</span></>}</span>
                   <span className="muted">{x.present === null && x.note ? x.note : whereText(x.kind, x.present)}{x.listed_at ? t("enginepage.listed", { when: when(x.listed_at) }) : ""}</span>
                 </div>
               )}

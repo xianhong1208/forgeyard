@@ -671,7 +671,9 @@ class ModelDownload(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # What the agent knows it by. Random, like replicas.uid.
     uid: Mapped[str] = mapped_column(String(32), unique=True, default=lambda: uuid.uuid4().hex)
-    model_id: Mapped[int] = mapped_column(ForeignKey("models.id", ondelete="CASCADE"), index=True)
+    # NULL (1.5.2, #95, migration 0017): an engine alone, the image or program of `recipe`'s variant for the machine.
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("models.id", ondelete="CASCADE"), nullable=True,
+                                                    index=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
     # The GGUF file of the commit, when the catalog model is one GGUF file (its cache key includes it).
     file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
@@ -689,9 +691,70 @@ class ModelDownload(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    model: Mapped[CatalogModel] = relationship()
+    model: Mapped[Optional[CatalogModel]] = relationship()
     node: Mapped[Node] = relationship(foreign_keys=[node_id])
     source_node: Mapped[Optional[Node]] = relationship(foreign_keys=[source_node_id])
+
+
+class ImagePin(Base):
+    """The recorded ids of an engine copy's image (1.5.2, issue #95): what "Try this version" read from the registry
+    for a `repo:tag@sha256:…` it pinned, in the shape of forgeyard/recipes/images.lock.json's entries, so the copy's
+    image is relayed through the server, matched after `docker load`, shown on machine pages and removable like a
+    built-in's (forgeyard/workloads/images.py entry_for). One row per image, shared by every copy that names it; a
+    row no custom recipe names any more is removed. `signature`: what the server verified about it at Try time
+    (forgeyard/models/signatures.py): {"status": "verified", "repository", "workflow", …} or {"status": "unsigned",
+    …}; agents never verify, they run this digest."""
+
+    __tablename__ = "image_pins"
+
+    ref: Mapped[str] = mapped_column(String(255), primary_key=True)
+    entry: Mapped[dict] = mapped_column(JSON)
+    signature: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EngineTrial(Base):
+    """A trial run of an engine (1.5.2, issue #95, PR 4; forgeyard/models/trials.py): a temporary, isolated deployment of
+    one catalog model with that engine on one machine, a few checks against its replica, then the deployment is
+    removed. Usually of a copy "Try this version" made, compared with its built-in engine. The row is the record: kept
+    after the copy, the model or the machine is gone (their names are kept here), for the engine page's history.
+
+    `checks`: [{id, label, value, expected, ok (true | false | null: not checked), note}]; `comparison`: the built-in
+    engine's numbers for the same model, when known; `measurements`: what the trial measured while it ran (memory
+    readings, start time, latencies). `deployment_id`: the temporary deployment while it exists (never in /v1/models,
+    never callable with a key, never counted in usage, sleep or automatic replicas)."""
+
+    __tablename__ = "engine_trials"
+    __table_args__ = (Index("ix_engine_trials_recipe", "recipe", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recipe: Mapped[str] = mapped_column(String(40))                       # the engine tried (a copy, or a built-in)
+    builtin: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)   # its built-in engine (based_on)
+    engine: Mapped[str] = mapped_column(String(40))                       # vllm, llama.cpp…
+    engine_version: Mapped[str] = mapped_column(String(64))
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("models.id", ondelete="SET NULL"), nullable=True)
+    model_name: Mapped[str] = mapped_column(String(64))
+    task: Mapped[str] = mapped_column(String(16))
+    node_id: Mapped[Optional[int]] = mapped_column(ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True)
+    machine_name: Mapped[str] = mapped_column(String(128))
+    gpus: Mapped[list] = mapped_column(JSON, default=list)                # [{key, index, model}] once placed
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimate: Mapped[dict] = mapped_column(JSON, default=dict)
+    reserved: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)   # per GPU, or of RAM
+    deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="SET NULL"),
+                                                         nullable=True, index=True)
+    requested_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(String(16), default="running", index=True)  # running | passed | failed | cancelled
+    phase: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)        # starting | measuring | asking
+    checks: Mapped[list] = mapped_column(JSON, default=list)
+    comparison: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    measurements: Mapped[dict] = mapped_column(JSON, default=dict)
+    summary: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
 
 _engine = None
