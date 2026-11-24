@@ -196,6 +196,8 @@ export default {
   "machine.gpuChanges.removed": "removed {gpus}",
   "machine.gpuChanges.join": "; ",
   "machine.gpuChanges.hidden": "The host has {host} {vendor} GPUs; its agent sees {seen}",
+  "machine.gpuChanges.unused": "This host has {host} {vendor} GPUs; this agent uses none of them. To use them, re-create the agent with GPUs (Add a machine → Docker).",
+  "machine.gpuChanges.limited": "This agent is limited to {seen} of the host's {host} {vendor} GPUs ({how}).",
   "machine.gpuChanges.hiddenWhat": "{hidden}. Re-create the agent with the update command below so it sees them all.",
   "machine.gpu.hint": "A card in use cannot be taken off; stop the model on it first. Every change is in the audit log.",
   "machine.loopbackSameHost": "loopback, on the server's host",

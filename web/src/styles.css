@@ -388,6 +388,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 
 .gpu-access { margin: 0 0 8px; }
 .gpu-changes { margin-top: 10px; }
+.gpu-census { margin: 8px 0 0; overflow-wrap: anywhere; }
 .gpu-changes h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
 .gpu-changes ul { margin: 0; padding-left: 18px; font-size: 13px; }
 .gpu-changes li { overflow-wrap: anywhere; }

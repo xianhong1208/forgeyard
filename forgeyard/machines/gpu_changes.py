@@ -136,3 +136,29 @@ def changes_of(runtime_info: dict) -> list[dict]:
 
 def changes(node: Node) -> list[dict]:
     return changes_of(node.runtime_info or {})
+
+
+# ------------------------------------------------------------------ the host's GPUs next to the agent's (gpu_census)
+def annotate_census(runtime_info: dict) -> None:
+    """An agent container started with `--gpus "device=0,2"` or `--gpus 2` (as its install report says) is limited to
+    some NVIDIA GPUs on purpose, which its own environment does not show: mark the census so (`limited_by`)."""
+    census = runtime_info.get("gpu_census")
+    nvidia = (census or {}).get("vendors", {}).get("nvidia") if isinstance(census, dict) else None
+    install = runtime_info.get("install")
+    container = install.get("container") if isinstance(install, dict) else None
+    gpus = container.get("gpus") if isinstance(container, dict) else None
+    if not isinstance(nvidia, dict) or nvidia.get("limited_by") or not isinstance(gpus, str) or gpus in ("", "all"):
+        return
+    nvidia["limited_by"] = f"--gpus {gpus[:64]}"
+
+
+def census_state(v: dict) -> Optional[str]:
+    """For one vendor's census: None (the agent sees every GPU of the host), "unused" (it sees none: an agent run
+    without that vendor's GPUs on purpose, say a CPU-only agent on a GPU host), "limited" (it was given some on purpose)
+    or "hidden" (it sees some but not all, and nothing limits it: usually a GPU added after the container was made)."""
+    host, visible = v.get("host", 0), v.get("visible", 0)
+    if not isinstance(host, int) or not isinstance(visible, int) or host <= visible:
+        return None
+    if visible == 0:
+        return "unused"
+    return "limited" if v.get("limited_by") else "hidden"

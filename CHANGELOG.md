@@ -14,9 +14,12 @@ version until 1.0.
     (`/sys/bus/pci/devices`, which a container sees whole: NVIDIA 3D/VGA controllers; AMD display, 3D and accelerator
     functions, an APU's graphics included; never audio functions, NVSwitches or SR-IOV virtual functions) and compares
     them with the ones NVML or amd-smi lists. It sends `runtime_info.gpu_census` (`host_gpus`, `visible_gpus`,
-    `missing` PCI addresses, per vendor); servers before 1.5.4 drop it. Setup health warns
-    `machine-gpus-hidden` (*gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8*), linking to the machine's update
-    command, and the machine's GPU access section says it too.
+    `missing` PCI addresses, per vendor, and `limited_by` when its environment or its container's `--gpus "device=…"`
+    limits it to some on purpose); servers before 1.5.4 drop it. Setup health warns `machine-gpus-hidden` (*gpu-01:
+    the host has 9 NVIDIA GPUs but the agent sees 8*) only when the agent sees some but not all of a vendor's GPUs and
+    nothing limits it, linking to the machine's update command. An agent that sees none of them (a CPU-only agent on a
+    GPU host) or was limited on purpose is not warned; the machine's GPU access section says so quietly (and shows the warning for the
+    case Setup health warns about).
   - **GPUs added or removed.** The server compares each report with the GPUs it last trusted, by UUID (an AMD card by
     its PCI address), never by index; a vendor whose collector failed in that report changes nothing, and a machine's
     first report (also the first after upgrading) only sets what is known. A change is audited as `node.gpus_changed`

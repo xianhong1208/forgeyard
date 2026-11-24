@@ -201,6 +201,9 @@ def apply_hello(db: DbSession, node: Node, hello: HelloIn, ip: Optional[str]) ->
     if hello.install is not None:
         # 1.4.2 (#121): how the agent runs; admins only see it, as the update command (api/machines.py).
         node.runtime_info["install"] = hello.install
+    from forgeyard.machines.gpu_changes import annotate_census
+
+    annotate_census(node.runtime_info)  # 1.5.4: `--gpus "device=…"` limits the agent to some GPUs on purpose
     from forgeyard.models import prefetch
 
     prefetch.store_cache(db, node, hello.model_cache)

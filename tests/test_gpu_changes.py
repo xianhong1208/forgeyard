@@ -382,3 +382,52 @@ def test_fy_gpuch_011_a_malformed_record_is_skipped(owner, change):
     assert owner.get("/api/machines").status_code == 200
     shown = machine(owner, nid)["runtime_info"]["gpu_changes"]
     assert shown == [] if change == "nonsense" else [c["at"] for c in shown] == ["nonsense"]
+
+
+# ------------------------------------------------------------------ deliberate: no GPUs, or only some
+def _census(host: int, visible: int, **extra) -> dict:
+    v = {"host": host, "visible": visible, "missing": [], **extra}
+    return {"host_gpus": host, "visible_gpus": visible, "missing": [], "vendors": {"nvidia": v}}
+
+
+def test_fy_gpuch_012_a_cpu_only_agent_on_a_gpu_host_is_not_warned(owner):
+    """FY-GPUCH-012: an agent container that sees none of the host's 8 NVIDIA GPUs (a CPU-only agent on a GPU host, on
+    purpose) gets no Setup health warning; the census stays for the machine page, which says so quietly; the 9-vs-8 case
+    (sees some, nothing limits it) still warns."""
+    nid = node("cpu-on-gpu-host", "nvidia-a100x8", runtime_info={
+        "gpu_census": _census(8, 0), "install": {"method": "container", "known": True}})
+    assert "machine-gpus-hidden" not in findings()
+    assert machine(owner, nid)["runtime_info"]["gpu_census"]["vendors"]["nvidia"]["visible"] == 0
+    assert gpu_changes.census_state(_census(8, 0)["vendors"]["nvidia"]) == "unused"
+    edit(Node, nid, runtime_info={"gpu_census": _census(9, 8), "install": {"method": "container", "known": True}})
+    [f] = findings()["machine-gpus-hidden"]
+    assert f.title == "cpu-on-gpu-host: the host has 9 NVIDIA GPUs but the agent sees 8"
+
+
+def test_fy_gpuch_013_an_agent_limited_on_purpose_is_not_warned(owner, monkeypatch, tmp_path):
+    """FY-GPUCH-013: an agent limited to some GPUs on purpose is not warned: by its environment (NVIDIA_VISIBLE_DEVICES
+    or CUDA_VISIBLE_DEVICES set to some; ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES for AMD; NVIDIA_VISIBLE_DEVICES=all
+    does not limit), or by its container's `--gpus "device=…"` / `--gpus 2`, which the server reads from the install
+    report at hello."""
+    assert gc.limits({"NVIDIA_VISIBLE_DEVICES": "0,1"}) == {"nvidia": "NVIDIA_VISIBLE_DEVICES=0,1"}
+    assert gc.limits({"NVIDIA_VISIBLE_DEVICES": "all"}) == {}
+    assert gc.limits({"NVIDIA_VISIBLE_DEVICES": "all", "CUDA_VISIBLE_DEVICES": "2"}) == {"nvidia": "CUDA_VISIBLE_DEVICES=2"}
+    assert gc.limits({"HIP_VISIBLE_DEVICES": "0"}) == {"amd": "HIP_VISIBLE_DEVICES=0"}
+    ids = nvidia_host(tmp_path / "s", 8)
+    c = gc.census(seen(ids[:2]), tmp_path / "s", gc.limits({"ROCR_VISIBLE_DEVICES": "0", "CUDA_VISIBLE_DEVICES": "0,1"}))
+    assert c["vendors"]["nvidia"]["limited_by"] == "CUDA_VISIBLE_DEVICES=0,1"
+    assert parse_gpu_census(c)["vendors"]["nvidia"]["limited_by"] == "CUDA_VISIBLE_DEVICES=0,1"
+    assert "limited_by" not in parse_gpu_census(_census(8, 2, limited_by="a\nb"))["vendors"]["nvidia"]
+    nid = node("gpu-02", runtime_info={"gpu_census": parse_gpu_census(c)})
+    assert "machine-gpus-hidden" not in findings()
+    # --gpus "device=0,2" (from the install report), applied when the hello is stored
+    j = joined(owner, "gpu-03")
+    for gpus, limited in (("device=0,2", "--gpus device=0,2"), ("2", "--gpus 2"), ("all", None)):
+        install = {"method": "container", "known": True, "container": {"gpus": gpus}}
+        with connect(owner, j["credential"]) as ws:
+            ws.send_json(hello(install=install, runtime_info={"gpu_census": _census(8, 2)}))
+            assert ws.receive_json()["type"] == "welcome"
+            got = machine(owner, j["node_id"])["runtime_info"]["gpu_census"]["vendors"]["nvidia"].get("limited_by")
+            assert got == limited, gpus
+            assert ("machine-gpus-hidden" in findings()) == (limited is None), gpus  # while it is online
+    assert nid

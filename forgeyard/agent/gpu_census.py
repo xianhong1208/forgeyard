@@ -71,13 +71,34 @@ def host_gpus(root: Path = SYSFS) -> Optional[dict[str, list[str]]]:
     return out
 
 
-def census(accelerators: Iterable[dict], root: Path = SYSFS) -> Optional[dict]:
+# Variables that limit which GPUs of a vendor this agent may use: set to a subset, the agent was deliberately given
+# only some of the host's GPUs, and seeing fewer is no problem.
+LIMIT_VARS = {"nvidia": ("NVIDIA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"),
+              "amd": ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL")}
+
+
+def limits(environ: dict) -> dict[str, str]:
+    """{vendor: "NAME=value"} for each vendor whose GPUs this agent's environment limits. NVIDIA_VISIBLE_DEVICES=all
+    (the CUDA images' default) does not limit; any value of the others does."""
+    out: dict[str, str] = {}
+    for vendor, names in LIMIT_VARS.items():
+        for name in names:
+            value = environ.get(name)
+            if value is None or (name == "NVIDIA_VISIBLE_DEVICES" and value.strip().lower() in ("all", "")):
+                continue
+            out[vendor] = f"{name}={value.strip()[:64]}"
+            break
+    return out
+
+
+def census(accelerators: Iterable[dict], root: Path = SYSFS, limited: Optional[dict[str, str]] = None) -> Optional[dict]:
     """The host's GPUs next to the ones the agent sees, per vendor:
 
         {"host_gpus": 9, "visible_gpus": 8, "missing": ["0000:c1:00.0"],
          "vendors": {"nvidia": {"host": 9, "visible": 8, "missing": ["0000:c1:00.0"]}}}
 
-    `missing`: the host's bus ids no seen GPU has. When a seen GPU does not say its bus id, only the counts compare
+    `missing`: the host's bus ids no seen GPU has. `limited_by` (only when set): the variable that limits this agent
+    to some of the vendor's GPUs (limits()). When a seen GPU does not say its bus id, only the counts compare
     (`missing` holds what cannot be matched only if the counts differ)."""
     host = host_gpus(root)
     if host is None:
@@ -95,6 +116,8 @@ def census(accelerators: Iterable[dict], root: Path = SYSFS) -> Optional[dict]:
         else:
             missing = [] if len(visible) >= len(on_host) else on_host[len(visible):]
         vendors[vendor] = {"host": len(on_host), "visible": len(visible), "missing": missing[:MAX_IDS]}
+        if (limited or {}).get(vendor):
+            vendors[vendor]["limited_by"] = limited[vendor]
     return {"host_gpus": sum(v["host"] for v in vendors.values()),
             "visible_gpus": sum(v["visible"] for v in vendors.values()),
             "missing": [b for v in vendors.values() for b in v["missing"]][:MAX_IDS],
@@ -108,7 +131,7 @@ def for_agent(accelerators: Iterable[dict], *, simulated: bool, environ: Optiona
     if simulated and not stand_in:
         return None  # the fixture's GPUs are not this host's
     try:
-        return census(accelerators, Path(stand_in) if simulated and stand_in else SYSFS)
+        return census(accelerators, Path(stand_in) if simulated and stand_in else SYSFS, limits(env))
     except Exception:  # never keep an agent from connecting over this
         log.debug("Could not count the host's GPUs", exc_info=True)
         return None

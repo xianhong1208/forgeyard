@@ -188,6 +188,8 @@ export default {
   "machine.gpuChanges.removed": "拆下 {gpus}",
   "machine.gpuChanges.join": "；",
   "machine.gpuChanges.hidden": "主機有 {host} 張 {vendor} GPU，它的 agent 只看到 {seen} 張",
+  "machine.gpuChanges.unused": "這台主機有 {host} 張 {vendor} GPU，這個 agent 一張都沒有使用。要使用它們，請帶著 GPU 重新建立 agent（加入機器 → Docker）。",
+  "machine.gpuChanges.limited": "這個 agent 只能使用主機 {host} 張 {vendor} GPU 中的 {seen} 張（{how}）。",
   "machine.gpuChanges.hiddenWhat": "{hidden}。請用下方的更新指令重新建立 agent，讓它看到每一張。",
   "machine.gpu.hint": "使用中的卡無法取消勾選；請先停止上面的模型。每次變更都會記在稽核紀錄裡。",
   "machine.loopbackSameHost": "迴路位址，在伺服器的主機上",

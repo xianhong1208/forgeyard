@@ -1223,7 +1223,9 @@ What Forgeyard tells you (admins, in **Setup health** and as a banner on **Machi
 - *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8* (`machine-gpus-hidden`): from 1.5.4 the agent counts the
   host's GPUs on its PCI bus, which a container sees whole, and compares them with the GPUs it can use. It names the
   PCI address of each one it does not see. Re-create the agent as in step 1. A GPU that is not for Forgeyard (a
-  desktop CPU's integrated graphics, say): snooze it.
+  desktop CPU's integrated graphics, say): snooze it. An agent that sees none of the host's GPUs (a CPU-only agent on
+  a GPU host) or was given only some on purpose (`--gpus "device=0,2"`, `NVIDIA_VISIBLE_DEVICES=0,1`) is not
+  warned: the machine's **GPU access** section says *this agent uses none of them* or *is limited to 2 of 8*.
 - *New GPU on gpu-01: allow GPU #8?* (`machine-gpu-not-allowed`), or, without a GPU access list, *New GPU on gpu-01 is
   in use* (`machine-gpu-added`, a note).
 - *gpu-01 no longer reports GPU #3* (`machine-gpu-removed`), with the deployments that were placed on it. Forgeyard

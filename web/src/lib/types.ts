@@ -770,7 +770,9 @@ export type GpuCensus = {
   host_gpus: number;
   visible_gpus: number;
   missing: string[];
-  vendors: Record<string, { host: number; visible: number; missing: string[] }>;
+  // limited_by: what limits the agent to some of that vendor's GPUs on purpose ("--gpus device=0,2",
+  // "NVIDIA_VISIBLE_DEVICES=0,1").
+  vendors: Record<string, { host: number; visible: number; missing: string[]; limited_by?: string }>;
 };
 
 // 1.5.4: one card in a GPU change.

@@ -771,7 +771,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 Forgeyard 會這樣告訴你（管理員可以在 **設定健康檢查** 看到，**機器** 和機器的頁面上也會顯示橫幅）：
 
-- *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8*（`machine-gpus-hidden`）：從 1.5.4 起，agent 會清點主機 PCI 匯流排上的 GPU（容器也看得到完整的匯流排），再和它能使用的 GPU 比較，並列出每張看不到的卡的 PCI 位址。請照第 1 步重新建立 agent。不是給 Forgeyard 用的 GPU（例如桌上型 CPU 的內建顯示晶片），把這項暫停提醒即可。
+- *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8*（`machine-gpus-hidden`）：從 1.5.4 起，agent 會清點主機 PCI 匯流排上的 GPU（容器也看得到完整的匯流排），再和它能使用的 GPU 比較，並列出每張看不到的卡的 PCI 位址。請照第 1 步重新建立 agent。不是給 Forgeyard 用的 GPU（例如桌上型 CPU 的內建顯示晶片），把這項暫停提醒即可。一張 GPU 都看不到的 agent（例如 GPU 主機上只用 CPU 的 agent），或刻意只給部分 GPU 的 agent（`--gpus "device=0,2"`、`NVIDIA_VISIBLE_DEVICES=0,1`），不會收到警告：機器的 **GPU 存取** 區塊會寫 *這個 agent 一張都沒有使用*，或 *只能使用 8 張中的 2 張*。
 - *New GPU on gpu-01: allow GPU #8?*（`machine-gpu-not-allowed`）；沒有 GPU 存取清單時則是 *New GPU on gpu-01 is in use*（`machine-gpu-added`，備註）。
 - *gpu-01 no longer reports GPU #3*（`machine-gpu-removed`），並列出原本放在那張卡上的部署。Forgeyard 不會因為 GPU 不見了就搬動副本：副本會留在原來的位置。請重新啟動那些部署（先停止再啟動，或修改它們），放置時就會選這台機器現有的 GPU，或改放到另一台機器。
 

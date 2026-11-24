@@ -616,15 +616,19 @@ GPU_CHANGE_RECENT = timedelta(days=7)
 def machine_gpus_hidden(ctx: Context) -> Iterator[Finding]:
     """1.5.4: the host has GPUs its agent does not see (agent/gpu_census.py: sysfs next to NVML / amd-smi). Usually a
     GPU installed after the agent container was created: a container only has the device nodes it was started with.
-    Agents before 1.5.4 do not count, and nothing is said for them."""
+    Only when the agent sees some of a vendor's GPUs and nothing limits it to them (gpu_changes.census_state): an agent
+    that sees none of them (a CPU-only agent on a GPU host) or was given some on purpose (`--gpus "device=…"`,
+    NVIDIA_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES…) is left alone; the machine's page says so quietly. Agents before
+    1.5.4 do not count, and nothing is said for them."""
     from forgeyard.machines import gpu_access
+    from forgeyard.machines.gpu_changes import census_state
 
     for n in ctx.nodes:
         census = (n.runtime_info or {}).get("gpu_census")
         if n.status != "online" or not isinstance(census, dict):
             continue
         short = [(gpu_access.VENDOR_LABEL.get(v, v), c) for v, c in sorted((census.get("vendors") or {}).items())
-                 if isinstance(c, dict) and c.get("host", 0) > c.get("visible", 0)]
+                 if isinstance(c, dict) and census_state(c) == "hidden"]
         if not short:
             continue
         counts = " and ".join(f"{c['host']} {label} GPUs" for label, c in short)

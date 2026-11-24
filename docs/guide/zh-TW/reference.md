@@ -1060,7 +1060,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
  "vendors": {"nvidia": {"host": 9, "visible": 8, "missing": ["0000:c1:00.0"]}}}
 ```
 
-`visible` 是 agent 的 NVML 或 amd-smi 列出的 GPU 數量；`missing` 是主機上沒有任何一張對應得到的 PCI 位址。1.5.4 之前的伺服器會捨棄這個欄位，1.5.4 之前的 agent 則不會送出（這時不會有提醒）。
+`visible` 是 agent 的 NVML 或 amd-smi 列出的 GPU 數量；`missing` 是主機上沒有任何一張對應得到的 PCI 位址。出現 `limited_by` 時，表示有東西刻意把 agent 限制在這個廠商的部分 GPU：它的環境變數（不是 `all` 的 `NVIDIA_VISIBLE_DEVICES`、`CUDA_VISIBLE_DEVICES`、`ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES`、`GPU_DEVICE_ORDINAL`），或是伺服器根據 agent 的安裝回報補上的容器 `--gpus "device=…"` 或 `--gpus N`。只有在 agent 看得到某個廠商的部分 GPU、但不是全部，而且沒有任何限制時，設定健康檢查才會警告。一張都看不到的 agent，會被視為刻意不使用這些 GPU（例如 GPU 主機上只用 CPU 的 agent）；刻意限制的 agent 也不會收到警告；這兩種情況機器頁面都會低調地說明。1.5.4 之前的伺服器會捨棄這個欄位，1.5.4 之前的 agent 則不會送出（這時不會有提醒）。
 
 **伺服器記錄什麼。** 伺服器會保留每台機器上次回報的 GPU，用 key 辨識（UUID；AMD 的卡用 PCI 位址）；某次回報多了或少了卡時，就會在 `runtime_info.gpu_changes` 加上一筆（保留最近 20 筆）：
 
@@ -1106,7 +1106,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
 | `machine-loopback-address` | 警告 | 不是伺服器主機的機器把副本公開在 loopback 位址上（透過 tunnel 或 proxy），而且它的連接埠範圍沒有轉送到伺服器的主機（[做法](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)） |
 | `machine-gpu-access-lost` | 錯誤 | 線上機器的新行程打不開它的 GPU（agent 每 5 分鐘以workload 帳號檢查一次；只用 `--gpus` 啟動的 agent 容器，在主機執行 `systemctl daemon-reload` 後會失去這份存取權）。這段期間不會把行程類 workload放到那些 GPU 上；修正連結會開啟機器的更新指令（[做法](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)） |
-| `machine-gpus-hidden` | 警告 | 線上機器的主機 PCI 匯流排上的 GPU 比它的 agent 看到的多（1.5.4 起的 agent 會清點），並列出每張看不到的卡的 PCI 位址：通常是 agent 容器建立之後才裝上的 GPU。修正連結會開啟機器的更新指令（[做法](how-to.md#add-or-remove-a-gpu-on-a-machine)） |
+| `machine-gpus-hidden` | 警告 | 線上機器的主機 PCI 匯流排上某個廠商的 GPU 比它的 agent 看到的多（1.5.4 起的 agent 會清點），agent 看得到其中幾張，而且沒有任何設定把它限制在這幾張，並列出每張看不到的卡的 PCI 位址：通常是 agent 容器建立之後才裝上的 GPU。一張都看不到的 agent（例如 GPU 主機上只用 CPU 的 agent），或刻意只給部分 GPU 的 agent，不會收到警告；機器頁面會說明這種情況。修正連結會開啟機器的更新指令（[做法](how-to.md#add-or-remove-a-gpu-on-a-machine)） |
 | `machine-gpu-not-allowed` | 警告 | 最近 7 天內，有 GPU 存取清單的機器上出現了一張不在清單裡的 GPU：管理員允許之前，Forgeyard 不會使用它 |
 | `machine-gpu-added` | 說明 | 最近 7 天內，沒有 GPU 存取清單的機器上出現了一張 GPU：放置時已經會使用它 |
 | `machine-gpu-removed` | 警告 | 最近 7 天內，機器不再回報某張 GPU，並列出原本放在它上面的部署（重新啟動之前，它們會留在原來的位置） |

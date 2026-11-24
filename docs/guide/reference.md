@@ -1460,7 +1460,13 @@ is one GPU, like a separate card. It sends `runtime_info.gpu_census`, which `GET
 ```
 
 `visible` counts the GPUs the agent's NVML or amd-smi lists; `missing`, the host's PCI addresses none of them has.
-Servers before 1.5.4 drop the field, and agents before 1.5.4 send nothing (no finding then).
+`limited_by`, when present, says what limits the agent to some of that vendor's GPUs on purpose: its environment
+(`NVIDIA_VISIBLE_DEVICES` other than `all`, `CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+`GPU_DEVICE_ORDINAL`), or, added by the server from the agent's install report, its container's `--gpus "device=…"`
+or `--gpus N`. Setup health warns only when the agent sees some but not all of a vendor's GPUs and nothing limits it.
+An agent that sees none of them is taken to run without them on purpose (a CPU-only agent on a GPU host), and one
+limited on purpose is left alone; the machine's page says either quietly. Servers before 1.5.4 drop the field, and
+agents before 1.5.4 send nothing (no finding then).
 
 **What the server records.** It keeps the GPUs a machine last reported, by key (the UUID; an AMD card's PCI address),
 and when a report adds or removes one it appends to `runtime_info.gpu_changes` (the last 20):
@@ -1516,7 +1522,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
 | `machine-gpu-access-lost` | error | New processes on an online machine cannot open its GPUs (the agent checks every 5 minutes as its workload account; an agent container started with `--gpus` alone loses that access when the host runs `systemctl daemon-reload`). Process workloads are not placed on those GPUs meanwhile; the fix opens the machine's update command ([what to do](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)) |
-| `machine-gpus-hidden` | warning | An online machine's host has more GPUs on its PCI bus than its agent sees (agents from 1.5.4 count them), with the PCI address of each one it does not see: usually a GPU installed after the agent container was created. The fix opens the machine's update command ([what to do](how-to.md#add-or-remove-a-gpu-on-a-machine)) |
+| `machine-gpus-hidden` | warning | An online machine's host has more GPUs of a vendor on its PCI bus than its agent sees (agents from 1.5.4 count them), the agent sees some of them, and nothing limits it to those, with the PCI address of each one it does not see: usually a GPU installed after the agent container was created. An agent that sees none of them (a CPU-only agent on a GPU host) or was limited to some on purpose is not warned; the machine's page says so. The fix opens the machine's update command ([what to do](how-to.md#add-or-remove-a-gpu-on-a-machine)) |
 | `machine-gpu-not-allowed` | warning | In the last 7 days a GPU appeared on a machine that has a GPU access list, and it is not on the list: Forgeyard does not use it until an admin allows it |
 | `machine-gpu-added` | note | In the last 7 days a GPU appeared on a machine without a GPU access list: placement already uses it |
 | `machine-gpu-removed` | warning | In the last 7 days a machine stopped reporting a GPU, with the deployments that were placed on it (they keep their place until restarted) |

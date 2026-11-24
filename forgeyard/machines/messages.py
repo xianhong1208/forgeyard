@@ -344,6 +344,7 @@ def _runtime_info(value: Any) -> dict:
 
 
 _BUS_ID = re.compile(r"^[0-9a-f]{4,8}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 CENSUS_VENDORS = ("nvidia", "amd")
 
 
@@ -366,6 +367,9 @@ def parse_gpu_census(value: Any) -> Optional[dict]:
         missing = v.get("missing") if isinstance(v.get("missing"), list) else []
         vendors[name] = {"host": host, "visible": visible,
                          "missing": [m for m in missing[:64] if isinstance(m, str) and _BUS_ID.match(m)]}
+        limited = v.get("limited_by")
+        if isinstance(limited, str) and limited.strip() and len(limited) <= 128 and not _CONTROL.search(limited):
+            vendors[name]["limited_by"] = limited.strip()
     return {"host_gpus": sum(v["host"] for v in vendors.values()),
             "visible_gpus": sum(v["visible"] for v in vendors.values()),
             "missing": [m for v in vendors.values() for m in v["missing"]],

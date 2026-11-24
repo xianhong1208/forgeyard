@@ -8,7 +8,7 @@ import { MemoryRouter } from "react-router";
 import App from "../App";
 import { AuthProvider } from "../auth";
 import { LANG_KEY, setLang } from "../i18n/lang";
-import { cardLabel, changeText, hiddenText, recentChanges } from "../lib/gpuChanges";
+import { cardLabel, censusLines, censusState, changeText, recentChanges } from "../lib/gpuChanges";
 import machinesFixture from "../test/machines.json";
 import type { GpuChange, Machine } from "../lib/types";
 
@@ -53,12 +53,13 @@ describe("GPU changes", () => {
     expect(recentChanges(m).map((c) => c.at)).toEqual([REMOVED.at, ADDED.at]);
     expect(recentChanges(m, 1)).toHaveLength(1);
     expect(recentChanges({ runtime_info: {} })).toEqual([]);
-    expect(hiddenText(CENSUS)).toBe("The host has 9 NVIDIA GPUs; its agent sees 8");
-    expect(hiddenText({ ...CENSUS, vendors: { nvidia: { host: 8, visible: 8, missing: [] } } })).toBeNull();
-    expect(hiddenText(undefined)).toBeNull();
+    expect(censusLines(CENSUS)).toEqual([{ tone: "warn",
+      text: "The host has 9 NVIDIA GPUs; its agent sees 8. Re-create the agent with the update command below so it sees them all." }]);
+    expect(censusLines({ ...CENSUS, vendors: { nvidia: { host: 8, visible: 8, missing: [] } } })).toEqual([]);
+    expect(censusLines(undefined)).toEqual([]);
     setLang("zh-TW");
     expect(changeText(ADDED)).toBe("加裝 GPU #8 (NVIDIA A100 80GB PCIe, 80 GiB)");
-    expect(hiddenText(CENSUS)).toBe("主機有 9 張 NVIDIA GPU，它的 agent 只看到 8 張");
+    expect(censusLines(CENSUS)[0].text).toBe("主機有 9 張 NVIDIA GPU，它的 agent 只看到 8 張。請用下方的更新指令重新建立 agent，讓它看到每一張。");
     setLang("en");
   });
 
@@ -71,7 +72,8 @@ describe("GPU changes", () => {
     const items = within(list).getAllByRole("listitem").map((li) => li.textContent);
     expect(items[0]).toMatch(/removed GPU #3 \(NVIDIA A100 80GB PCIe, 80 GiB\)$/);
     expect(items[1]).toMatch(/added GPU #8 \(NVIDIA A100 80GB PCIe, 80 GiB\)$/);
-    expect(within(section).getByText(/The host has 9 NVIDIA GPUs; its agent sees 8\. Re-create the agent/)).toBeTruthy();
+    const warn = within(section).getByText(/The host has 9 NVIDIA GPUs; its agent sees 8\. Re-create the agent/);
+    expect(warn.closest(".notice-warn")).not.toBeNull();
     cleanup();
     localStorage.setItem(LANG_KEY, "zh-TW");
     mount("/machines/1");
@@ -87,5 +89,35 @@ describe("GPU changes", () => {
     const section = await screen.findByRole("region", { name: "GPU access and runtimes" });
     expect(within(section).queryByRole("heading", { name: "GPU changes" })).toBeNull();
     expect(within(section).queryByText(/its agent sees/)).toBeNull();
+  });
+
+  it("FY-WEB-943 an agent that uses none of a vendor's GPUs, or was limited to some, gets a quiet line, not a warning", async () => {
+    const none = { host: 8, visible: 0, missing: [] };
+    const some = { host: 8, visible: 2, missing: [], limited_by: "--gpus device=0,2" };
+    expect(censusState(none)).toBe("unused");
+    expect(censusState(some)).toBe("limited");
+    expect(censusState({ host: 9, visible: 8, missing: [] })).toBe("hidden");
+    expect(censusState({ host: 8, visible: 8, missing: [] })).toBeNull();
+    expect(censusLines({ ...CENSUS, vendors: { nvidia: none } })).toEqual([{ tone: "info",
+      text: "This host has 8 NVIDIA GPUs; this agent uses none of them. To use them, re-create the agent with GPUs (Add a machine → Docker)." }]);
+    expect(censusLines({ ...CENSUS, vendors: { nvidia: some } })).toEqual([{ tone: "info",
+      text: "This agent is limited to 2 of the host's 8 NVIDIA GPUs (--gpus device=0,2)." }]);
+    server(machines({ gpu_census: { ...CENSUS, vendors: { nvidia: none } } }));
+    mount("/machines/1");
+    const section = await screen.findByRole("region", { name: "GPU access and runtimes" });
+    const line = within(section).getByText(/this agent uses none of them/);
+    expect(line.closest(".notice")).toBeNull();
+    expect(within(section).queryByRole("status")).toBeNull();
+    cleanup();
+    localStorage.setItem(LANG_KEY, "zh-TW");
+    server(machines({ gpu_census: { ...CENSUS, vendors: { nvidia: some } } }));
+    mount("/machines/1");
+    const zh = await screen.findByRole("region", { name: "GPU 存取和執行環境" });
+    expect(within(zh).getByText("這個 agent 只能使用主機 8 張 NVIDIA GPU 中的 2 張（--gpus device=0,2）。")).toBeTruthy();
+    cleanup();
+    server(machines({ gpu_census: { ...CENSUS, vendors: { nvidia: none } } }));
+    mount("/machines/1");
+    const zh2 = await screen.findByRole("region", { name: "GPU 存取和執行環境" });
+    expect(within(zh2).getByText(/這台主機有 8 張 NVIDIA GPU，這個 agent 一張都沒有使用。要使用它們，請帶著 GPU 重新建立 agent（加入機器 → Docker）/)).toBeTruthy();
   });
 });

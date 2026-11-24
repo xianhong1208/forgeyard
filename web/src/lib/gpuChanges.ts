@@ -26,12 +26,28 @@ export function changeText(c: GpuChange): string {
   return parts.join(t("machine.gpuChanges.join"));
 }
 
-// "The host has 9 NVIDIA GPUs; its agent sees 8", or null when it sees them all (or its agent does not count).
-export function hiddenText(census: GpuCensus | undefined): string | null {
-  if (!census || typeof census !== "object" || !census.vendors) return null;
-  const short = Object.entries(census.vendors).filter(([, v]) => v && v.host > v.visible);
-  if (short.length === 0) return null;
-  return short
-    .map(([vendor, v]) => t("machine.gpuChanges.hidden", { host: String(v.host), vendor: VENDOR[vendor] ?? vendor, seen: String(v.visible) }))
-    .join(t("machine.gpuChanges.join"));
+// Per vendor, as the server classifies it (machines/gpu_changes.census_state): the agent sees every GPU (nothing to
+// say), none ("unused": a CPU-only agent on a GPU host, on purpose), some it was limited to on purpose ("limited"), or
+// some but not all with nothing limiting it ("hidden": usually a GPU added after the container was made; Setup health
+// warns about that one only).
+export type CensusState = "unused" | "limited" | "hidden";
+
+export function censusState(v: { host: number; visible: number; missing?: string[]; limited_by?: string }): CensusState | null {
+  if (!v || typeof v.host !== "number" || typeof v.visible !== "number" || v.host <= v.visible) return null;
+  if (v.visible === 0) return "unused";
+  return v.limited_by ? "limited" : "hidden";
+}
+
+// What the machine page says, per vendor: "warn" for a hidden GPU, "info" for the deliberate cases.
+export function censusLines(census: GpuCensus | undefined): { tone: "warn" | "info"; text: string }[] {
+  if (!census || typeof census !== "object" || !census.vendors) return [];
+  const out: { tone: "warn" | "info"; text: string }[] = [];
+  for (const [vendor, v] of Object.entries(census.vendors)) {
+    const state = censusState(v);
+    const vars = { host: String(v.host), vendor: VENDOR[vendor] ?? vendor, seen: String(v.visible), how: v.limited_by ?? "" };
+    if (state === "hidden") out.push({ tone: "warn", text: t("machine.gpuChanges.hiddenWhat", { hidden: t("machine.gpuChanges.hidden", vars) }) });
+    else if (state === "unused") out.push({ tone: "info", text: t("machine.gpuChanges.unused", vars) });
+    else if (state === "limited") out.push({ tone: "info", text: t("machine.gpuChanges.limited", vars) });
+  }
+  return out;
 }
