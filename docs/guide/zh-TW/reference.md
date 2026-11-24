@@ -443,7 +443,7 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | `required` | vLLM-Omni 0.32.0 能執行的圖片轉影片 pipeline：`WanImageToVideoPipeline`（Wan2.2-I2V-A14B）、`SanaImageToVideoPipeline`、`HunyuanVideo15ImageToVideoPipeline` | 沒有時回應 400 `input_reference_required` |
 | `none` | 其他文字轉影片 pipeline（Wan2.1-T2V-1.3B） | 帶了時回應 400 `input_reference_not_supported` |
 
-1.5.5 以前加入的 Wan2.2-TI2V-5B 不用重新加入，就能接受起始圖片。其他圖片轉影片和影片轉影片的 pipeline 不能加入成影片模型。記憶體估算不因起始圖片而改變（Wan2.2-TI2V-5B 用它取代第一個潛在影格，它的編碼在去噪之前執行）；這一點還沒有實測。
+模型的能力會先判斷：確認金鑰可以使用模型後，不接受起始圖片的模型收到起始圖片時，會在檢查圖片或下載網址之前就拒絕。1.5.5 以前加入的 Wan2.2-TI2V-5B 不用重新加入，就能接受起始圖片。其他圖片轉影片和影片轉影片的 pipeline 不能加入成影片模型。記憶體估算不因起始圖片而改變（Wan2.2-TI2V-5B 用它取代第一個潛在影格，它的編碼在去噪之前執行）；這一點還沒有實測。
 
 **工作**採用 OpenAI 的格式：`{"id", "object": "video", "model", "status", "progress", "created_at",
 "completed_at", "expires_at", "size", "seconds", "quality", "remixed_from_video_id", "error"}`。

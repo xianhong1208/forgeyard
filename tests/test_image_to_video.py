@@ -399,3 +399,9 @@ def test_fy_i2v_013_what_the_model_does_comes_before_the_image(iv):
     r = iv.api.post("/v1/videos", json={"model": "i2v", "prompt": "x", "input_reference": {"image_url": url}})
     assert r.status_code == 200, r.text
     assert iv.media.hits == ["/img.png"] and [d for _, _, d in posts(iv, "i2v")[-1]["files"]] == [PNG]
+    # A route whose deployments differ: a start image goes on while any of them takes one.
+    image = videogen.check({"prompt": "x", "input_reference": {"image_url": url}})
+    videogen.offered("m", image, [videogen.Films(), videogen.Films(image_input="optional")])
+    with pytest.raises(GatewayError) as e:
+        videogen.offered("m", image, [videogen.Films(), videogen.Films()])
+    assert e.value.code == "input_reference_not_supported"

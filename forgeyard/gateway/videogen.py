@@ -268,14 +268,11 @@ def check(obj: dict) -> Ask:
 
 def offered(name: str, ask: Ask, all_f: list[Films]) -> None:
     """What the model does with a start image comes first (1.5.5), before the image is checked or its URL fetched: a
-    start image to a model none of whose deployments takes one is 400 `input_reference_not_supported`, and a request
-    without one to a model all of whose deployments need one is 400 `input_reference_required`. Called once the key's
-    access is checked; a route that mixes them is sorted out per deployment (`takes`)."""
-    kinds = {f.image_input for f in all_f}
-    if ask.image is not None and kinds == {"none"}:
+    start image to a model none of whose deployments takes one is 400 `input_reference_not_supported`. Called once the
+    key's access is checked. (A request without one to a model that needs one has nothing to check or fetch: `takes`
+    answers `input_reference_required`; a route that mixes kinds is sorted out per deployment there too.)"""
+    if ask.image is not None and all(f.image_input == "none" for f in all_f):
         raise refusal(name, "input_reference_not_supported", ask, all_f)
-    if ask.image is None and kinds == {"required"}:
-        raise refusal(name, "input_reference_required", ask, all_f)
 
 
 def takes(f: Optional[Films], ask: Ask) -> Optional[str]:

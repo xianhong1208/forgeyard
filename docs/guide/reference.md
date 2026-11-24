@@ -560,7 +560,9 @@ catalog (`video.image_input`):
 | `required` | Image-to-video pipelines vLLM-Omni 0.32.0 runs: `WanImageToVideoPipeline` (Wan2.2-I2V-A14B), `SanaImageToVideoPipeline`, `HunyuanVideo15ImageToVideoPipeline` | Without one: 400 `input_reference_required` |
 | `none` | Other text-to-video pipelines (Wan2.1-T2V-1.3B) | With one: 400 `input_reference_not_supported` |
 
-A Wan2.2-TI2V-5B entry added before 1.5.5 takes start images without being added again. Other
+What the model does comes first: once the key may use the model, a start image to a model that takes none is
+refused before the image is checked or its URL fetched. A Wan2.2-TI2V-5B entry added before 1.5.5 takes start
+images without being added again. Other
 image-to-video and video-to-video pipelines cannot be added as video models. The memory estimate does not
 change with a start image (Wan2.2-TI2V-5B puts it in place of the first latent frame, and its encode runs
 before the denoiser); this is not yet measured.
