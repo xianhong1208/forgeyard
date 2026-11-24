@@ -140,8 +140,8 @@ jobs:
           cache-from: type=gha,scope=server-arm64
           cache-to: type=gha,scope=server-arm64,mode=max
 
-  # Forgeyard's vision server (images/vision: the 1.3 templates, the 1.4 vision recipe): its tests, the CPU build, and each task answering a
-  # real request without the network. The CUDA build is made only by publish-images.yml.
+  # Forgeyard's vision server (images/vision: the 1.3 templates, the 1.4 vision recipe, the 1.5.4 transformers recipe): its tests, the CPU
+  # build, and each task answering a real request without the network. The CUDA build is made only by publish-images.yml.
   vision-image:
     runs-on: ubuntu-latest
     steps:
@@ -157,10 +157,15 @@ jobs:
           /tmp/vision/bin/pip install --disable-pip-version-check --require-hashes \
             --extra-index-url https://download.pytorch.org/whl/cpu -r images/vision/requirements-cpu.txt
           /tmp/vision/bin/pip install --disable-pip-version-check pytest==8.4.2 httpx==0.28.1
-          /tmp/vision/bin/python -m pytest -q -p no:cacheprovider --noconftest tests/test_vision_server.py
+          /tmp/vision/bin/python -m pytest -q -p no:cacheprovider --noconftest tests/test_vision_server.py \
+            tests/test_transformers_server.py
+      - name: Tiny models for the smoke test (embed, classify)
+        run: |
+          /tmp/vision/bin/python images/vision/tinymodels.py /tmp/tiny-models
+          chmod -R a+rX /tmp/tiny-models
       - name: Build the vision image (CPU)
         run: docker build -t forgeyard-vision:ci --build-arg VARIANT=cpu images/vision
-      - name: Smoke test (detect, segment, depth)
-        run: images/vision/smoke.sh forgeyard-vision:ci
+      - name: Smoke test (detect, segment, depth, embed, classify)
+        run: images/vision/smoke.sh forgeyard-vision:ci /tmp/tiny-models
       - name: Image size
         run: docker image ls forgeyard-vision:ci

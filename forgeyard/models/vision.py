@@ -248,15 +248,20 @@ def deploy_refusal(task: str, meta: dict, recipe) -> Optional[tuple[str, str]]:
 
 
 def _old_image(recipe, what: str) -> Optional[tuple[str, str]]:
-    """(vision_image_too_old, why) when a variant of `recipe` names a Forgeyard vision image older than
-    ZERO_SHOT_SINCE (the first that runs zero-shot detection and image classification), else None."""
+    return old_image(recipe, what, ZERO_SHOT_SINCE)
+
+
+def old_image(recipe, what: str, since: tuple[int, int, int]) -> Optional[tuple[str, str]]:
+    """(vision_image_too_old, why) when a variant of `recipe` names a Forgeyard vision image older than `since` (the
+    first that runs what is asked: ZERO_SHOT_SINCE for zero-shot detection and image classification, 1.5.4 for the
+    transformers recipe's tasks), else None."""
     if recipe is None:
         return None
     old = sorted({v for v in (image_version(getattr(x, "image", None)) for x in getattr(recipe, "variants", []) or [])
-                  if v is not None and v < ZERO_SHOT_SINCE})
+                  if v is not None and v < since})
     if not old:
         return None
-    need = ".".join(map(str, ZERO_SHOT_SINCE))
+    need = ".".join(map(str, since))
     return "vision_image_too_old", (
         f"{what} needs Forgeyard's vision image {need} or newer; the {recipe.name} recipe runs "
         f"{'.'.join(map(str, old[0]))}. The built-in recipe moves to the new image right after the release that "

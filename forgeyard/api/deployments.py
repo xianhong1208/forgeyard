@@ -39,7 +39,7 @@ from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, N
 from forgeyard.gateway import imagegen, proxy, waking
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
-from forgeyard.models import catalog, modalities, routes, scheduler, textcls, trials, vision
+from forgeyard.models import catalog, encoders, modalities, routes, scheduler, textcls, trials, vision
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -161,6 +161,10 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
     if why := vision.deploy_refusal(m.task, m.meta or {}, recipe):
         # 1.4.4 (#142): a zero-shot detector the vision server cannot load: one that needs timm (OmDet-Turbo, added
         # before 1.4.3), or one on a vision image from before 1.4.4; an image classifier (#141) on such an image too.
+        raise fail(422, *why)
+    if why := encoders.deploy_refusal(m.task, m.meta or {}, recipe):
+        # 1.5.4 (#141, #144): the transformers server runs image embedders and text classifiers only, and on a vision
+        # image from 1.5.4 on.
         raise fail(422, *why)
     params = normalise_params(recipe, body.params)
     fit_default_context(recipe, body.params, params, m.meta or {})

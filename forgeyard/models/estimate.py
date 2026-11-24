@@ -491,13 +491,26 @@ def _projector(meta: dict, recipe: Recipe, params: dict) -> list[Part]:
     return parts + _vision(meta, recipe, params, "gguf")
 
 
+def _float32_bytes(meta: dict) -> Optional[int]:
+    """The model's weights held in float32 (4 bytes a parameter, from the safetensors headers the catalog read), or None
+    when the catalog has no parameter count (a local model, an entry without its headers)."""
+    params = (meta.get("weights") or {}).get("params") if isinstance(meta.get("weights"), dict) else None
+    if not isinstance(params, dict) or not params:
+        return None
+    n = sum(v for v in params.values() if isinstance(v, int) and not isinstance(v, bool))
+    return 4 * n if n > 0 else None
+
+
 def _files(meta: dict, recipe: Recipe, gpus: int, ctx: int, device: str) -> Estimate:
     w = int(meta.get("weights_bytes") or meta.get("size_bytes") or 0)
     if w <= 0:
         raise EstimateError("the model's files have no known size")
     est = Estimate("files", device, gpus if device == "gpu" else 0)
     if device == "cpu":
-        est.parts = [Part("Model files", w), Part("Engine overhead", recipe.estimate.cpu_overhead, "recipe")]
+        widened = _float32_bytes(meta) if recipe.estimate.cpu_float32 else None
+        first = Part("Model weights in float32", widened, "16-bit weights are widened on a CPU") \
+            if widened is not None and widened > w else Part("Model files", w)
+        est.parts = [first, Part("Engine overhead", recipe.estimate.cpu_overhead, "recipe")]
         est.ram = sum(p.bytes for p in est.parts)
     else:
         est.parts = [Part("Model files", w // gpus), Part("Engine overhead", recipe.estimate.overhead, "recipe"),

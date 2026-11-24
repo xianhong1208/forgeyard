@@ -67,6 +67,18 @@ version until 1.0.
 
 - **`forgeyard check-apps` (#89)**: what upgrading to 1.5.3 removes (apps, keys' `/x/` access), or removed (from the
   audit log), read only, with the server's own settings; exit code 1 when something will be removed.
+- **The `transformers` engine (1.5.4, #141 and #144; part 1: the engine and its recipe).** Forgeyard's vision server
+  (the same `forgeyard-vision` image, no new dependency) gains `--task embed` (image and text embeddings with CLIP,
+  SigLIP, SigLIP 2 and DINOv2: OpenAI's `/v1/embeddings` plus typed `{"text"}` / `{"image"}` items, vectors
+  L2-normalised, long texts cut and counted) and `--task classify` (any sequence classifier with fixed labels, in
+  vLLM's `/classify` shape, and zero-shot with NLI models: `labels`, `multi_label`, `hypothesis_template`, probabilities
+  in the request's label order, the same numbers as transformers' zero-shot pipeline; texts x labels capped by
+  `max_pairs`). No code from a model's repository is run. A new built-in recipe `transformers` runs it (CPU and
+  CUDA, `threads`, `max_images`, `max_pairs`), offered for CLIP-like and DINOv2 `embed` models and for text
+  classifiers, after vLLM; a text embedding model is refused on it. On a CPU the weights are held in float32 (a
+  bge-m3 NLI pass: 1.4 s in float16, 0.2 s in float32) and the estimate counts them so (`cpu_float32`). Until the
+  recipe's pin moves to the 1.5.4 image, deploying on it answers 422 `vision_image_too_old`. The gateway's public
+  shapes, the catalog's rules and the console follow.
 
 ## [1.5.2] — 2026-11-23
 
