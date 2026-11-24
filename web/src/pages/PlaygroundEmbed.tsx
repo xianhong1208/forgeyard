@@ -105,8 +105,8 @@ export function Embeddings({ model, embed, maxImages }: { model: string; embed: 
         {images && <HelpLink page="how-to" anchor="search-images-by-text-image-embeddings">{t("playground.emb.howTo")}</HelpLink>}
       </div>
       <p className="muted small">
-        {embedSummary(embed)}.{" "}
-        {clip ? t("playground.emb.aboutBoth") : images ? t("playground.emb.aboutImages") : t("playground.emb.aboutTexts")}
+        {t("playground.emb.about", { summary: embedSummary(embed),
+          about: clip ? t("playground.emb.aboutBoth") : images ? t("playground.emb.aboutImages") : t("playground.emb.aboutTexts") })}
       </p>
       <form onSubmit={go}>
         {texts && (

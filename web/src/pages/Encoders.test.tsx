@@ -145,7 +145,7 @@ describe("the transformers engine in the console (1.5.4)", () => {
       usage: { prompt_tokens: 12, images: 2 } } }));
     mount("/playground?model=clip");
     const panel = (await screen.findByRole("heading", { name: "Embeddings" })).closest("section") as HTMLElement;
-    expect(panel.textContent).toContain("Texts and images · 4 dimensions · texts up to 77 tokens.");
+    expect(panel.textContent).toContain("Texts and images · 4 dimensions · texts up to 77 tokens. Texts and images land in one space");
     expect(within(panel).getByText(/Images \(0 of up to 8\)/)).toBeTruthy();
     fireEvent.change(within(panel).getByLabelText("Texts, one per line"), { target: { value: "two cats\n\n a street " } });
     const file = new File([Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))], "cats.png", { type: "image/png" });
@@ -185,6 +185,10 @@ describe("the transformers engine in the console (1.5.4)", () => {
     const panel = (await screen.findByRole("heading", { name: "Embeddings" })).closest("section") as HTMLElement;
     expect(within(panel).queryByLabelText("Texts, one per line")).toBeNull();
     expect(within(panel).getByRole("note").textContent).toContain("texts are refused (text_not_supported)");
+    act(() => setLang("zh-TW"));
+    // Chinese sentences end with a full-width stop, also between the model's summary and what it does.
+    expect(await within(panel).findByText("只收圖片 · 3 維。只收圖片：拿圖片互相比，找出相似或重複的圖。")).toBeTruthy();
+    act(() => setLang("en"));
     expect((within(panel).getByRole("button", { name: "Embed" }) as HTMLButtonElement).disabled).toBe(true);
     const png = (name: string) => new File([Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))], name, { type: "image/png" });
     // Two picks before the first is read: still no more than the cap.

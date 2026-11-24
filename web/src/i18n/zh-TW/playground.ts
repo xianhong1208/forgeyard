@@ -88,6 +88,7 @@ export default {
   "playground.emb.embed": "產生嵌入",
   "playground.emb.answer": "回答",
   "playground.emb.howTo": "用文字搜尋圖片",
+  "playground.emb.about": "{summary}。{about}",
   "playground.emb.aboutBoth": "文字和圖片落在同一個空間：拿一段文字和圖片比，就能用文字找圖；圖片之間也能互相比。",
   "playground.emb.aboutImages": "只收圖片：拿圖片互相比，找出相似或重複的圖。",
   "playground.emb.aboutTexts": "依意思比較文字：越接近 1 越相似。",

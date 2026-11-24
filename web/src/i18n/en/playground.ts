@@ -99,6 +99,7 @@ export default {
   "playground.emb.embed": "Embed",
   "playground.emb.answer": "Answer",
   "playground.emb.howTo": "Search images by text",
+  "playground.emb.about": "{summary}. {about}",
   "playground.emb.aboutBoth": "Texts and images land in one space: compare a text with images to search pictures by words, or images with each other.",
   "playground.emb.aboutImages": "Images only: compare images with each other to find look-alikes and duplicates.",
   "playground.emb.aboutTexts": "Compare texts by meaning: the closer to 1, the more alike.",
