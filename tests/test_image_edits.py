@@ -508,3 +508,19 @@ def test_fy_iedt_013_try_it_edits_with_an_edit_only_model(ed):
     assert [name for name, _, _ in sent["files"]] == ["image[]"] and sent["files"][0][2][:8] == b"\x89PNG\r\n\x1a\n"
     r = ed.owner.post(f"/api/deployments/{deps['klein']}/try", json={})
     assert r.status_code == 200 and r.json()["endpoint"].endswith("v1/images/generations")
+
+
+def test_fy_iedt_014_the_openai_sdk_edits(ed):
+    """FY-IEDT-014: the official OpenAI SDK's images.edit (one image, then two) is answered in its own types; the
+    engine gets the files as sent; images.create_variation gets the SDK's NotFoundError."""
+    openai = pytest.importorskip("openai")
+    c = openai.OpenAI(base_url="http://localhost/v1", api_key=ed.key, http_client=ed.api, max_retries=0)
+    a, b = png(640, 480, 5), png(320, 320, 6)
+    one = c.images.edit(model="klein", image=("a.png", a, "image/png"), prompt="Add a moon.")
+    assert len(one.data) == 1 and base64.b64decode(one.data[0].b64_json)[:8] == b"\x89PNG\r\n\x1a\n"
+    assert [data for _, _, data in ed.e["klein"].edits()[-1]["files"]] == [a]
+    two = c.images.edit(model="klein", image=[("a.png", a, "image/png"), ("b.png", b, "image/png")],
+                        prompt="Put the cat from the second image in the first.", n=2)
+    assert len(two.data) == 2 and [data for _, _, data in ed.e["klein"].edits()[-1]["files"]] == [a, b]
+    with pytest.raises(openai.NotFoundError):
+        c.images.create_variation(model="klein", image=("a.png", a, "image/png"))
