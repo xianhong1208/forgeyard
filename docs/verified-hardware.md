@@ -40,6 +40,9 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
+| 1.5.3 | full regression (`accept_all.py`; 10 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 394 | 0 |
+| 1.5.3 | sleep when idle, waking and automatic replicas (`accept_scale.py`), the automatic replicas on two CPU machines; 1 check skipped | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
+| 1.5.3 | during development: the upgrade from 1.5.2 (#260) on the development server's database, with no apps left and 93 API keys with `/x/` access: `check-apps` listed the 93 keys before the upgrade and, from the audit log, after it; the upgrade wrote 93 audit entries; `/x/` answered 410; the model deployments were not affected | A100 host, x86-64 CPU machine | 10 | 0 |
 | 1.5.2 | full regression (`accept_all.py`; 15 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 488 | 0 |
 | 1.5.2 | sleep when idle, waking and automatic replicas (`accept_scale.py`), the automatic replicas on two CPU machines; 1 check skipped | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
 | 1.5.2 | during development: Try this version (#253), vLLM 0.34.0 as a copy pinned by digest, Qwen3-0.6B at a 4096 context, concurrency 4, on a card shared with other work: reserved 5.54 GiB, measured +5.17 GiB, ready in 95 s, chat answered; the built-in vLLM 0.32.0 with the same parameters: reserved 5.54 GiB, measured +5.19 GiB, ready in 112 s. A newer stable-diffusion.cpp build as a copy, its image through the server: Stable Diffusion 1.5 GGUF made a 512×512 image | A100 | 3 | 0 |
@@ -62,6 +65,6 @@ name machines and networks. Only the hardware models and the counts are.
 | 1.4.3 | full regression (`accept_all.py`) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 303 | 0 |
 | 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
 
-The Ryzen AI MAX+ 395 machine was not part of the 1.4.5, 1.5.0, 1.5.1 and 1.5.2 runs.
+The Ryzen AI MAX+ 395 machine was not part of the 1.4.5, 1.5.0, 1.5.1, 1.5.2 and 1.5.3 runs.
 
 Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
