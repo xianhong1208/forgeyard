@@ -703,11 +703,13 @@ offline. The message gives each replica's state, for example
 **Do:** open the deployment's page. Wait while it downloads or starts (the page shows the progress).
 If a replica keeps failing, its output on that page says why; a machine that is offline is in
 [An agent shows offline](#an-agent-shows-offline). To have such requests go to a cloud provider
-meanwhile, give the deployment a cloud fallback on its page ([Cloud providers](cloud-providers.md#give-a-deployment-a-cloud-fallback)).
+meanwhile, put a cloud model in a later tier of the deployment's **Routing and fallback**
+([Cloud providers](cloud-providers.md#let-a-deployment-spill-to-a-cloud-model)); another local deployment
+works too ([Share requests between two local deployments](how-to.md#share-requests-between-two-local-deployments)).
 
 ## A request does not spill to the cloud
 
-**You see:** a deployment has a cloud fallback, but requests still fail (503, 429) or wait while the
+**You see:** a deployment has a cloud model in a later tier of its routing and fallback, but requests still fail (503, 429) or wait while the
 local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 
 **Why**, in the order to check:

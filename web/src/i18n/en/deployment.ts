@@ -67,7 +67,7 @@ export default {
   "deployment.gw.title": "Through the gateway",
   "deployment.gw.modelName": "Model name",
   "deployment.gw.endpoint": "Endpoint",
-  "deployment.gw.fallback": "Cloud fallback",
+  "deployment.gw.fallback": "Routing and fallback",
   "deployment.gw.then": "then ",
   "deployment.gw.thenNext": " → then ",
   "deployment.gw.none": "none",

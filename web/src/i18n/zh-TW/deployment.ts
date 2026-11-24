@@ -65,7 +65,7 @@ export default {
   "deployment.gw.title": "經由閘道",
   "deployment.gw.modelName": "模型名稱",
   "deployment.gw.endpoint": "端點",
-  "deployment.gw.fallback": "雲端備援",
+  "deployment.gw.fallback": "分流與備援",
   "deployment.gw.then": "接著 ",
   "deployment.gw.thenNext": " → 再來 ",
   "deployment.gw.none": "無",

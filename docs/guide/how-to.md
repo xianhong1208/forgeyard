@@ -1033,13 +1033,35 @@ same goes for the token field in **Add a model**, which is used for that one ins
 A token is only ever sent to Hugging Face (`HF_ENDPOINT`), never to an `https://` GGUF host. Setup
 health says when a deployment of a gated model has no token to use (`gated-model-no-token`).
 
+## Share requests between two local deployments
+
+A deployment's **Routing and fallback** section, on its page, takes other local deployments as well as
+cloud models. Use it to put two copies of a model behind one model name: a 4-bit and an 8-bit build of
+the same model, or the same model on two machines. Admins:
+
+1. Deploy the second copy as usual, under a model name of its own (say `qwen3-8b-q8` beside
+   `qwen3-8b`). It must answer the same kind of request: chat with chat, embeddings with embeddings.
+2. Open the first deployment from **Serving**. In **Routing and fallback**, add the second deployment:
+   - **to the first tier**, beside the deployment itself, to **share** the requests: the ready replicas
+     of both take them in turn, the one with the fewest requests in flight first. (Weights split
+     requests between cloud models only.)
+   - **to a later tier** (**Add a tier**), to use it **only when the first tier cannot serve**: no
+     replica is ready, every one is busy, or the engine answers 429 or 503. See
+     [when a request spills](cloud-providers.md#when-a-request-spills).
+3. Choose **Save routing**. It applies to the next request.
+
+Clients keep sending the first deployment's model name; `X-Forgeyard-Target` on the answer says which
+deployment served it. The second deployment still answers under its own name too. A local tier needs no
+cloud setting on the key: every key may use it. To share two deployments under a new name instead, make
+one on **Cloud → Cloud models** with both in its first tier.
+
 ## Add a cloud provider
 
 Admins: open **Cloud → Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google
 Gemini, Azure OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test
-connection**. Add the models you want, then use one: open a deployment, and under **Cloud fallback**
-add a cloud tier with the cloud model and save; or serve it under a name of its own with **Cloud →
-Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
+connection**. Add the models you want, then use one: open a deployment, and in **Routing and
+fallback** choose **Add a tier**, put the cloud model in it and **Save routing**; or serve it under a
+name of its own with **Cloud → Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
 **Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
 [Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
 one's endpoint cannot do.
@@ -1236,7 +1258,7 @@ A machine is *offline* once nothing has been heard from it for 30 seconds (`AGEN
 
 1. **At once:** the gateway no longer sends requests to its replicas. A deployment with replicas on other
    machines keeps answering from those; one with no other ready replica answers 503 `no_ready_replica`, saying
-   *the machine is offline* (or spills to its cloud fallback). Only right after the server itself starts, when
+   *the machine is offline* (or moves on to the next tier of its routing and fallback). Only right after the server itself starts, when
    every machine shows offline until its agent reconnects (seconds), a machine not heard from yet keeps its
    replicas for those 30 seconds: their engines still answer meanwhile.
 2. **After 10 minutes** (`AGENT_OFFLINE_MOVE_SECONDS`, counted from the last heartbeat): each replica of a

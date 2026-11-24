@@ -94,6 +94,11 @@ version until 1.0.
 
 ### Changed
 
+- **"Cloud fallback" is now "Routing and fallback" (分流與備援).** A later tier may hold another local deployment as
+  well as a cloud model, so the deployment page's section, its buttons (**Add a tier**, **Save routing**) and the
+  guide say so; its summary follows the tiers on screen and says *Not saved yet* until they are saved (it used to
+  say "one tier" while two were shown). The section is at `#routing` (`#cloud-fallback` still opens it); the guide
+  gains *Share requests between two local deployments*. API field names do not change.
 - **Which engine serves which embedding and classification model (1.5.4).** vLLM's pooling runner (`vllm-pooling`) is
   offered only what it runs: not an NLI (zero-shot) model or a classifier of an architecture vLLM 0.32 does not run
   (DeBERTa, DistilBERT, BART), and not an image embedder (CLIP-like, DINOv2); those are served by the `transformers`

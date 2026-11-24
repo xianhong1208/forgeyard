@@ -9,7 +9,7 @@ import { t as tNow } from "../i18n/core";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { API_KIND } from "../lib/gateway";
-import { FALLBACK_ANCHOR, ROUTE_KIND_LABEL, ROUTE_KIND_TONE, isCloudModel, routeHome, spillRules, targetName, targetWhere, tiers } from "../lib/routing";
+import { FALLBACK_ANCHOR, ROUTE_KIND_LABEL, ROUTE_KIND_TONE, isCloudModel, kindOf, routeHome, spillRulesOf, targetName, targetWhere, tiers } from "../lib/routing";
 import type { RouteInfo, RouteOptions, RouteTarget } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -43,7 +43,7 @@ export function OldProviders() {
   return <Navigate to={id ? `/cloud/providers/${id}${hash}` : "/cloud"} replace />;
 }
 
-// 1.4 (#81): a deployment's own route is edited on the deployment's page (its cloud fallback); this
+// 1.4 (#81): a deployment's own route is edited on the deployment's page (its routing and fallback); this
 // page is for the names an admin made: cloud models, and other names for deployments. It lives under
 // Cloud → Cloud models; /models/routes/<id> (before 1.4) opens wherever the route lives now.
 export function RouteDetailPage() {
@@ -86,7 +86,8 @@ export function RouteDetailPage() {
 }
 
 // The tiers and the spill rules of one route. On a deployment's page (embedded) it is that
-// deployment's cloud fallback, in one panel; on its own page, a name an admin made, with its name and
+// deployment's routing and fallback (1.5.4; "cloud fallback" before: later tiers may hold other local
+// deployments too), in one panel; on its own page, a name an admin made, with its name and
 // protocol when new, and Delete.
 export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
   r: RouteInfo | null; admin: boolean; opts: RouteOptions | null; reload: () => void; embedded?: boolean;
@@ -102,6 +103,21 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
   const [draft, setDraft] = useState<Draft[][]>(r ? tiers(r).map((tier) => tier.map(fromTarget)) : [[]]);
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 1.5.4: the summary and the kind follow what the editor holds now, and say so when it is not saved:
+  // a tier added on screen is counted at once (it used to say "one tier" until saved).
+  const filled = draft.filter((tier) => tier.length > 0);
+  const shape = (localOnly_: boolean, longPrompt_: boolean, waitMs_: number, tiers_: Draft[][]) => JSON.stringify(
+    [localOnly_, longPrompt_, waitMs_, tiers_.map((tier) => tier.map((x) => [x.key, x.weight, x.enabled]))]);
+  const unsaved = r !== null && admin && shape(localOnly, longPrompt, Number(waitMs) || 0, filled)
+    !== shape(r.local_only, r.spill_on_long_prompt, r.wait_ms, tiers(r).map((tier) => tier.map(fromTarget)));
+  const summary = spillRulesOf({ localOnly, tiers: filled.length, waitMs: Number(waitMs) || 0, longPrompt });
+  const kind = kindOf(draft.flat().map((d) => d.kind === "provider" && d.cloud));
+  const summaryLine = (
+    <span className="muted small route-summary" data-testid="route-summary">
+      {summary}{unsaved && <strong className="route-unsaved">{t("cloud.route.unsaved")}</strong>}
+    </span>
+  );
 
   const used = new Set(draft.flat().map((d) => d.key));
   const choices = [
@@ -204,7 +220,7 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
       </ol>
       {admin && (
         <button type="button" className="btn btn-quiet btn-small" onClick={() => setDraft((d) => [...d, []])}>
-          <IconPlus size={14} aria-hidden="true" /> {embedded ? t("cloud.route.addCloudTier") : t("cloud.route.addTier")}
+          <IconPlus size={14} aria-hidden="true" /> {t("cloud.route.addTier")}
         </button>
       )}
       {admin && opts && opts.provider_models.length === 0 && ["openai-chat", "openai-embeddings"].includes(apiName) && (
@@ -247,14 +263,14 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
       <section className="panel" id={FALLBACK_ANCHOR} aria-labelledby="fallback-title">
         <div className="panel-head">
           <h2 id="fallback-title">{t("cloud.route.fallback")}</h2>
-          <span className={`chip chip-tone-${ROUTE_KIND_TONE[r.kind]}`}>{ROUTE_KIND_LABEL[r.kind]}</span>
+          <span className={`chip chip-tone-${ROUTE_KIND_TONE[kind]}`}>{ROUTE_KIND_LABEL[kind]}</span>
         </div>
-        <p className="muted small">
-          {t.rich("cloud.route.fallbackLead", {
-            rules: spillRules(r),
-            help: <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">{t("cloud.help.modelSpill")}</HelpLink>,
-          })}
-        </p>
+        <p className="muted small">{t("cloud.route.fallbackLead")}</p>
+        <p className="route-summary-line">{summaryLine}</p>
+        <HelpLinks>
+          <HelpLink page="how-to" anchor="share-requests-between-two-local-deployments">{t("cloud.help.shareLocal")}</HelpLink>
+          <HelpLink page="cloud-providers" anchor="let-a-deployment-spill-to-a-cloud-model">{t("cloud.help.modelSpill")}</HelpLink>
+        </HelpLinks>
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
         <form onSubmit={save} className="fallback-form">
           {tiersBlock}
@@ -270,9 +286,9 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       {r && (
         <div className="wl-status">
-          <span className={`chip chip-big chip-tone-${ROUTE_KIND_TONE[r.kind]}`}>{ROUTE_KIND_LABEL[r.kind]}</span>
-          {r.local_only && <span className="chip chip-tone-ok">{t("cloud.route.localOnlyChip")}</span>}
-          <span className="muted small">{spillRules(r)}</span>
+          <span className={`chip chip-big chip-tone-${ROUTE_KIND_TONE[kind]}`}>{ROUTE_KIND_LABEL[kind]}</span>
+          {localOnly && <span className="chip chip-tone-ok">{t("cloud.route.localOnlyChip")}</span>}
+          {summaryLine}
         </div>
       )}
       <form onSubmit={save}>

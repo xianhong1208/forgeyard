@@ -11,7 +11,7 @@ import { useApi } from "../lib/useApi";
 // Cloud → Cloud models (1.4, #81): the model names an admin made. Those with a provider's model in
 // them are cloud models; those with deployments only (several behind one name, or one under a second
 // name) are listed after them, since they have no single deployment to live on. A deployment's own
-// route is its cloud fallback, on its page: only named here, with a link.
+// route is its routing and fallback, on its page: only named here, with a link.
 export function CloudModels() {
   const t = useT();
   const { data, error } = useApi<RoutesResponse>("/routes");

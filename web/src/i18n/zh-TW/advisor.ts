@@ -42,7 +42,7 @@ export default {
   "advisor.fix.Open Models": "前往「模型」",
   "advisor.fix.Open Serving": "前往「服務中」",
   "advisor.fix.Open Users": "前往「使用者」",
-  "advisor.fix.Open its cloud fallback": "開啟它的雲端備援",
+  "advisor.fix.Open its routing": "開啟它的分流與備援",
   "advisor.fix.Open the deployment": "開啟部署",
   "advisor.fix.Open the machine": "開啟機器",
   "advisor.fix.Open the model name": "開啟模型名稱",
