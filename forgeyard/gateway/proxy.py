@@ -113,7 +113,7 @@ from forgeyard.gateway.cloud import (DROPPED_HEADER, RETRY_AFTER_CAP, CloudSendi
                                      provider_error, retry_after, rng)
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.fit import (BYTES_PER_TOKEN, KIND_WORDS, MEDIA_ENDPOINTS, _takes, body_size, fit_classify,
-                                   fit_images, fit_route, fit_speech, prompt_estimate, scan_media)
+                                   fit_embeddings, fit_images, fit_route, fit_speech, prompt_estimate, scan_media)
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
 from forgeyard.gateway.replicas import LOCAL_BUSY_RETRY_AFTER, ReplicaSending
@@ -140,7 +140,8 @@ __all__ = [
     "CEILING_TTL", "USAGE_ENDPOINTS", "Parsed", "_ceiling", "body_ceiling", "forget_ceiling", "parse_body",
     "parse_vision", "read_body", "streams", "upstream_body",
     # fit.py
-    "BYTES_PER_TOKEN", "KIND_WORDS", "MEDIA_ENDPOINTS", "_takes", "body_size", "fit_classify", "fit_images",
+    "BYTES_PER_TOKEN", "KIND_WORDS", "MEDIA_ENDPOINTS", "_takes", "body_size", "fit_classify", "fit_embeddings",
+    "fit_images",
     "fit_route", "fit_speech", "prompt_estimate", "scan_media",
     # upstream.py
     "CLIENT_CLOSED", "NOT_TAKEN_HEADER", "RETRYABLE", "SENT_BROKE", "ClientGone", "EngineUnreachable", "Failed",
@@ -194,6 +195,8 @@ class Job(ReplicaSending, CloudSending, Answering):
         self.busy_ms: int = 0                       # images: the replica's time on it, times its GPUs
         self.image_draws: Optional[imagegen.Draws] = None
         self.seen: Optional[tuple[int, int]] = None   # vision: the size of the image the replica answered for (1.4)
+        self.embedded: Optional[tuple[int, int]] = None   # embeddings: the images and kilopixels the engine embedded (1.5.4)
+        self.busy_usage = False                     # the replica answering it counts its busy time (1.5.4)
         self.queue_key = ""
         self.sent_at = 0.0
         self._ticket: Optional[int] = None
@@ -258,7 +261,12 @@ class Job(ReplicaSending, CloudSending, Answering):
             if not served:
                 return None
             return {"characters": tts.characters, **({"media_ms": self.media_ms} if self.media_ms else {})}
-        return {"media_items": m.items} if m is not None and m.items else None
+        out = {"media_items": m.items} if m is not None and m.items else {}
+        if self.embedded is not None:      # 1.5.4: images embedded, as the vision endpoints count them
+            out.update(images=self.embedded[0], kilopixels=self.embedded[1])
+        if self.busy_usage and self.busy_ms:   # 1.5.4: the transformers server's time on it
+            out["busy_ms"] = self.busy_ms
+        return out or None
 
     def headers(self, target: str) -> dict:
         out = {"X-Forgeyard-Target": target}

@@ -48,7 +48,10 @@ export default {
   "addmodel.group.retrieval.description": "通用的搜尋與檢索（RAG）模型，支援超過 100 種語言。",
   "addmodel.group.text-classification.title": "文字分類",
   "addmodel.group.text-classification.description":
-    "在 /v1/classify 替文字貼上一組固定標籤之一（情緒、語言、有害內容）的小模型，在 NVIDIA GPU 上用 vLLM 執行。比問對話模型快得多。只收 MIT 和 Apache-2.0。",
+    "給 /v1/classify 用的小模型，比問對話模型快得多。固定標籤（情緒、語言、有害內容）的在 NVIDIA GPU 上用 vLLM 執行；從你送來的標籤中挑選的零樣本模型，在 Forgeyard 的 transformers 伺服器上執行，任何 CPU 都行。只收 MIT 和 Apache-2.0。",
+  "addmodel.group.image-embeddings.title": "圖片嵌入",
+  "addmodel.group.image-embeddings.description":
+    "在 Forgeyard 的 transformers 伺服器上（任何 CPU，或 NVIDIA GPU），給 /v1/embeddings 用的圖片向量。CLIP 和 SigLIP 2 把文字和圖片放在同一個空間，所以可以用文字找圖片；DINOv2 拿圖片比對圖片（重複的、相似的）。只收 Apache-2.0 和 MIT。",
 
   "addmodel.search.aria": "在 Hugging Face 上搜尋",
   "addmodel.search.label": "搜尋 Hugging Face",
@@ -167,6 +170,7 @@ export default {
   "addmodel.lang.pt": "葡萄牙文",
   "addmodel.lang.es": "西班牙文",
   "addmodel.lang.it": "義大利文",
+  "addmodel.lang.multilingual": "多種語言",
 
   "addmodel.terms.openrail": "OpenRAIL：允許商業使用，但授權禁止某些用途。部署前請先閱讀。",
   "addmodel.terms.gemma": "Gemma 條款：允許商業使用，但須遵守 Google 的禁止用途政策。部署前請先閱讀。",

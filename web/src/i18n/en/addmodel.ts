@@ -51,7 +51,10 @@ export default {
   "addmodel.group.retrieval.description": "General-purpose models for search and retrieval (RAG), in over 100 languages.",
   "addmodel.group.text-classification.title": "Text classification",
   "addmodel.group.text-classification.description":
-    "Small models that give a text one of a fixed set of labels (sentiment, language, toxicity) at /v1/classify, on vLLM on an NVIDIA GPU. Much faster than asking a chat model. MIT and Apache-2.0 only.",
+    "Small models for /v1/classify, much faster than a chat model. Fixed labels (sentiment, language, toxicity) on vLLM on an NVIDIA GPU; zero-shot models that choose among the labels you send on Forgeyard's transformers server, on any CPU. MIT and Apache-2.0 only.",
+  "addmodel.group.image-embeddings.title": "Image embeddings",
+  "addmodel.group.image-embeddings.description":
+    "Vectors for images at /v1/embeddings, on Forgeyard's transformers server (any CPU, or an NVIDIA GPU). CLIP and SigLIP 2 put texts and images in one space, so a text finds images; DINOv2 compares images with images (duplicates, look-alikes). Apache-2.0 and MIT only.",
 
   // Hugging Face search
   "addmodel.search.aria": "Hugging Face search",
@@ -177,6 +180,7 @@ export default {
   "addmodel.lang.pt": "Portuguese",
   "addmodel.lang.es": "Spanish",
   "addmodel.lang.it": "Italian",
+  "addmodel.lang.multilingual": "Many languages",
 
   // Licences with terms beyond a permissive one's (lib/licences.ts)
   "addmodel.terms.openrail": "OpenRAIL: commercial use is allowed, but the licence forbids some uses. Read it before you deploy.",

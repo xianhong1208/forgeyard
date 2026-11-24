@@ -96,9 +96,10 @@ def check(data: dict) -> Recommended:
             raise RecommendedError(f"{where}: {err}") from None
         if src.kind != "hf":
             raise RecommendedError(f"{where}: only hf:// sources are recommended")
-        key = (str(src), e.revision, e.file)
+        # 1.5.4 (Q5): one repository may be listed once per task (a CLIP-like model classifies images and embeds them).
+        key = (str(src), e.revision, e.file, e.task)
         if key in keys:
-            raise RecommendedError(f"{where}: the same source is listed twice")
+            raise RecommendedError(f"{where}: the same source is listed twice for the same task")
         keys.add(key)
         if e.revision is not None and not (sources.REF_RE.match(e.revision) or sources.REVISION_RE.match(e.revision)):
             raise RecommendedError(f"{where}: revision is a branch, tag, ref or commit")
@@ -143,6 +144,9 @@ def check(data: dict) -> Recommended:
             raise RecommendedError(f"{where}: a vision model has a permissive licence ({', '.join(vision.PERMISSIVE)})")
         if e.task == "classify" and e.license not in vision.PERMISSIVE:
             raise RecommendedError(f"{where}: a text classifier has a permissive licence ({', '.join(vision.PERMISSIVE)})")
+        if e.recipe == "transformers" and e.license not in vision.PERMISSIVE:
+            raise RecommendedError(f"{where}: a model of the transformers server has a permissive licence "
+                                   f"({', '.join(vision.PERMISSIVE)})")
         if e.mmproj is not None:
             if e.format != "gguf":
                 raise RecommendedError(f"{where}: only a GGUF entry names a projector (mmproj) file")

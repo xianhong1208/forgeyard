@@ -141,16 +141,16 @@ def test_fy_tfm_002_which_models_the_transformers_server_runs():
 
 def test_fy_tfm_003_the_catalog_offers_it_after_vllm_and_only_for_its_models(tfm):
     """FY-TFM-003: a text embedding model (Qwen3-Embedding) keeps vllm-pooling alone; CLIP, SigLIP 2 and DINOv2 are
-    offered vllm-pooling then the transformers server, and text classifiers too: vLLM stays first (what deploys by
-    default changes only with the catalog's per-recipe rules); a model's page and Download to… list the same."""
+    offered the transformers server alone (1.5.4: vLLM's pooling runner does not embed images with them), and so are an
+    NLI model and a DistilBERT classifier (vLLM runs neither); a model's page and Download to… list the same."""
     owner, _, _ = tfm
     listed = {m["name"]: m["recipes"] for m in owner.get("/api/models").json()["models"]}
     assert listed["qwen3-embedding-0.6b"] == ["vllm-pooling"]
     for name in ("clip", "siglip2", "dinov2", "bge-m3-nli", "sentiment"):
-        assert listed[name] == ["vllm-pooling", "transformers"], name
+        assert listed[name] == ["transformers"], name
     assert listed["qwen3-4b"] == ["vllm"]
     page = owner.get("/api/models/dinov2").json()
-    assert [x["name"] for x in page["recipes"]] == ["vllm-pooling", "transformers"]
+    assert [x["name"] for x in page["recipes"]] == ["transformers"]
     page = owner.get("/api/models/qwen3-embedding-0.6b").json()
     assert [x["name"] for x in page["recipes"]] == ["vllm-pooling"]
 

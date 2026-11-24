@@ -103,6 +103,17 @@ class Answering:
         return Response(content=data, status_code=status, headers={**upstream_retry_after(response), **out_headers},
                         media_type="application/json")
 
+    def counted(self, usage) -> None:
+        """1.5.4: what an answer of the transformers server adds to usage: the images it embedded and their
+        kilopixels (from its `usage`), and the replica's busy time."""
+        if self.busy_usage:
+            self.busy_ms = int(max(0.0, time.monotonic() - self.sent_at) * 1000)
+        e = self.parsed.embed
+        if e is not None and e.images and isinstance(usage, dict):
+            images, kpx = usage.get("images"), usage.get("kilopixels")
+            ok = all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (images, kpx))
+            self.embedded = (images, kpx) if ok else (e.images, 0)
+
     async def serve(self, response: httpx.Response, out_headers: dict, strip: bool, *, release: str,
                     who: str) -> Response:
         self.first_byte_at = time.monotonic()  # the status line and headers are here (a stream: its first chunk, below)
@@ -149,6 +160,8 @@ class Answering:
                 usage = answer.get("usage") if isinstance(answer, dict) else None
             except ValueError:
                 pass
+        if response.status_code == 200:
+            self.counted(usage)
         self.finish(response.status_code, usage)
         return Response(content=data, status_code=response.status_code,
                         headers={**upstream_retry_after(response), **out_headers},

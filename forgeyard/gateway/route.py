@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from starlette.requests import Request
 
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc
-from forgeyard.gateway import classify, imagegen, pricing, speech, videogen
+from forgeyard.gateway import classify, embeddings, imagegen, pricing, speech, videogen
 from forgeyard.gateway.balancer import Target
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -71,6 +71,9 @@ class LocalGroup:
     films: Optional[videogen.Films] = None          # video generation: caps, default size and length (1.3)
     first_answer: float = FIRST_ANSWER_DEFAULT      # seconds to start answering once sent (1.4.5)
     wake_wait: int = 300                            # seconds a request waits for it to wake (1.5.0, its wake_wait)
+    embeds: Optional[embeddings.Embeds] = None      # embeddings: texts, images or both, images per request (1.5.4)
+    classifies: Optional[classify.Classifies] = None  # text classification: zero-shot or fixed labels (1.5.4)
+    busy_usage: bool = False                        # usage counts the replica's busy time (the transformers server)
 
 
 @dataclass
@@ -188,6 +191,15 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
         if found is not None and "image" in found[0].tasks else None
     films = videogen.films(found[0], params, model.meta if model is not None else None) \
         if found is not None and "video" in found[0].tasks else None
+    task = model.task if model is not None else None
+    meta = model.meta if model is not None else None
+    embeds = embeddings.embeds(found[0], params, meta) if found is not None and task == "embed" \
+        and "embed" in found[0].tasks else None
+    classifies = classify.classifies(found[0], params, meta) if found is not None and task == "classify" \
+        and "classify" in found[0].tasks else None
+    from forgeyard.models import encoders
+
+    busy = found is not None and encoders.is_server(found[0], task)
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
                       concurrency=draws.concurrency if draws else _int(params.get("concurrency")),
@@ -196,7 +208,7 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
                       running=w.desired_state in ("running", "asleep"), asleep=w.desired_state == "asleep",
                       speaks=speaks, draws=draws, films=films,
                       first_answer=float(_int(params.get("first_answer_timeout")) or FIRST_ANSWER_DEFAULT),
-                      wake_wait=sleep.wake_wait_of(params))
+                      wake_wait=sleep.wake_wait_of(params), embeds=embeds, classifies=classifies, busy_usage=busy)
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:

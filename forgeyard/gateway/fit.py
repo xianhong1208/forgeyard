@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import Optional
 
 from forgeyard.config import get_settings
-from forgeyard.gateway import classify, imagegen, media as gmedia, speech
+from forgeyard.gateway import classify, embeddings, imagegen, media as gmedia, speech
 from forgeyard.gateway.body import Parsed
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.route import LocalGroup, Route, Tier
@@ -17,10 +17,23 @@ from forgeyard.gateway.route import LocalGroup, Route, Tier
 BYTES_PER_TOKEN = 3     # a prompt's size in tokens, estimated on the high side (CJK is ~3 bytes a token)
 
 
-def fit_classify(parsed: "Parsed") -> None:
-    """Text classification (1.4.4): check the body; the engine gets only the fields Forgeyard knows."""
-    if parsed.obj is not None:
-        parsed.obj = classify.check(parsed.obj)
+def fit_classify(route: Route, parsed: "Parsed") -> Route:
+    """Text classification (1.4.4): check the body; the engine gets only the fields Forgeyard knows. 1.5.4: the
+    zero-shot fields go to zero-shot deployments only (forgeyard/gateway/classify.py `fit`)."""
+    if parsed.obj is None:
+        return route
+    parsed.obj = classify.check(parsed.obj)
+    return classify.fit(route, parsed.obj)
+
+
+def fit_embeddings(route: Route, parsed: "Parsed") -> Route:
+    """Embeddings (1.5.4, #141): typed items read and rebuilt, the route narrowed to the deployments that embed what
+    it carries (texts, images, as many images); a request with images keeps to local deployments
+    (forgeyard/gateway/embeddings.py)."""
+    if parsed.obj is None:
+        return route
+    parsed.embed = embeddings.check(parsed.obj)
+    return embeddings.fit(route, parsed.embed)
 
 
 # ------------------------------------------------------------------ media and body size (1.3)
@@ -153,4 +166,7 @@ def prompt_estimate(parsed: "Parsed") -> int:
     m = parsed.media
     if m is not None:  # an image is so many tokens, not the size of its base64 text
         return max(0, size - m.data_bytes) // BYTES_PER_TOKEN + m.items * gmedia.TOKENS_PER_ITEM + (parsed.max_tokens or 0)
+    e = parsed.embed
+    if e is not None and e.images:   # 1.5.4: the same for images to embed
+        return max(0, size - e.data_bytes) // BYTES_PER_TOKEN + e.images * gmedia.TOKENS_PER_ITEM
     return size // BYTES_PER_TOKEN + (parsed.max_tokens or 0)

@@ -299,4 +299,54 @@ describe("models", () => {
     expect((await screen.findByRole("tab", { name: "Catalog (1)" })).getAttribute("aria-selected")).toBe("true");
   });
 
+
+  it("FY-WEB-932 (1.5.4) Try it on a zero-shot text classifier asks for the labels too, and sends them", async () => {
+    const zero: Deployment = { ...dep(rep({ state: "healthy", reason: null, download: null })), name: "topics", served_name: "topics",
+      model: { ...dep(rep()).model, name: "topics", task: "classify",
+        classify: { architecture: "XLMRobertaForSequenceClassification", labels: 2, label_names: ["entailment", "not_entailment"], zero_shot: true } },
+      route: { served_name: "topics", api: "classify", upstream_model: "topics" } };
+    const fetch = server((url, init) => {
+      if (url === "/api/deployments/3/try" && init?.method === "POST") return { status: 200, body: { status: 200, ok: true, api: "classify",
+        endpoint: "http://10.0.0.5:31800/classify", request: {}, summary: "billing 0.910 (3 labels)", answer: {}, ms: 120 } };
+      if (url === "/api/deployments/3") return { status: 200, body: { deployment: zero, events: [], server_time: "", can_manage: true } };
+      return undefined;
+    });
+    mount("/serving/3");
+    expect(await screen.findByRole("heading", { name: "topics" })).toBeTruthy();
+    expect(screen.getByText(/your text and the labels to choose from/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Input"), { target: { value: "My invoice is wrong" } });
+    fireEvent.change(screen.getByLabelText("Labels (comma-separated)"), { target: { value: "billing, technical problem , ,praise" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
+    expect((await screen.findByLabelText("Answer")).textContent).toBe("billing 0.910 (3 labels)");
+    const call = fetch.mock.calls.find(([u]) => u === "/api/deployments/3/try");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ input: "My invoice is wrong", labels: ["billing", "technical problem", "praise"] });
+  });
+
+  it("FY-WEB-933 (1.5.4) Try it on an image-only embedding model sends the test image without a text; a text-and-image one keeps the text", async () => {
+    const base = dep(rep({ state: "healthy", reason: null, download: null }));
+    const embedDep = (modalities: ("text" | "image")[]): Deployment => ({ ...base, name: "photos", served_name: "photos",
+      model: { ...base.model, name: "photos", task: "embed", embed: { family: "image-only", modalities, dimensions: 384 } },
+      route: { served_name: "photos", api: "openai-embeddings", upstream_model: "photos" } });
+    let current = embedDep(["image"]);
+    const fetch = server((url, init) => {
+      if (url === "/api/deployments/3/try" && init?.method === "POST") return { status: 200, body: { status: 200, ok: true, api: "openai-embeddings",
+        endpoint: "http://10.0.0.5:31800/v1/embeddings", request: {}, summary: "384 dimensions: [0.1, …]", answer: {}, ms: 80 } };
+      if (url === "/api/deployments/3") return { status: 200, body: { deployment: current, events: [], server_time: "", can_manage: true } };
+      return undefined;
+    });
+    mount("/serving/3");
+    expect(await screen.findByRole("heading", { name: "photos" })).toBeTruthy();
+    expect(screen.getByText(/the small test image \(two coloured squares\), answered with its vector/)).toBeTruthy();
+    expect(screen.queryByLabelText("Input")).toBeNull();
+    expect(screen.queryByLabelText("Labels (comma-separated)")).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
+    expect((await screen.findByLabelText("Answer")).textContent).toContain("384 dimensions");
+    expect(JSON.parse(String(fetch.mock.calls.find(([u]) => u === "/api/deployments/3/try")?.[1]?.body))).toEqual({});
+    cleanup();
+    current = embedDep(["text", "image"]);
+    mount("/serving/3");
+    expect(await screen.findByRole("heading", { name: "photos" })).toBeTruthy();
+    expect(screen.getByText(/your text and the small test image/)).toBeTruthy();
+    expect(screen.getByLabelText("Input")).toBeTruthy();
+  });
 });

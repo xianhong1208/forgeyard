@@ -40,7 +40,8 @@ export function videoFacts(v: NonNullable<InspectMeta["video"]>, d?: InspectMeta
 }
 
 const LANGUAGE: Record<string, string> = labels({ zh: "addmodel.lang.zh", en: "addmodel.lang.en", ja: "addmodel.lang.ja", ko: "addmodel.lang.ko",
-  de: "addmodel.lang.de", fr: "addmodel.lang.fr", ru: "addmodel.lang.ru", pt: "addmodel.lang.pt", es: "addmodel.lang.es", it: "addmodel.lang.it" });
+  de: "addmodel.lang.de", fr: "addmodel.lang.fr", ru: "addmodel.lang.ru", pt: "addmodel.lang.pt", es: "addmodel.lang.es", it: "addmodel.lang.it",
+  multilingual: "addmodel.lang.multilingual" });
 
 // "Chinese, English +8" (中文、英文 +8) for a speech model's languages.
 export function languagesText(langs: string[]): string {

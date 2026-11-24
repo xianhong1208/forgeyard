@@ -368,9 +368,16 @@ export type CatalogModel = {
   classify?: TextClassifier | null;
   // 1.3, video models: the native size and frame rate, and the pipeline's components.
   video?: VideoModel | null;
+  // 1.5.4: an embedding model's modalities and vector size, and the languages its card names (null: unknown).
+  embed?: EmbedModel | null;
+  languages?: string[] | null;
 };
 
-export type TextClassifier = { architecture?: string; labels?: number; label_names?: string[]; problem?: string };
+// 1.5.4: zero_shot, an NLI model told the labels in each request (its label_names are entailment and the like).
+export type TextClassifier = { architecture?: string; labels?: number; label_names?: string[]; problem?: string; zero_shot?: boolean };
+
+// 1.5.4: what an embedding model embeds (texts, images or both), its vector size and its longest text.
+export type EmbedModel = { family?: string; modalities: ("text" | "image")[]; dimensions?: number; text_max_tokens?: number };
 
 // /v1/classify's answer (vLLM's shape): each input's most likely label and every label's probability.
 export type ClassifyAnswer = {
@@ -447,7 +454,9 @@ export type Deployment = {
     // 1.4: what it takes in chat besides text (null: unknown), so a chat model can be listed as multimodal.
     modalities?: Medium[] | null;
     // 1.4.4: a text classifier's labels (names in index order), for the Playground.
-    classify?: TextClassifier | null };
+    classify?: TextClassifier | null;
+    // 1.5.4: what an embedding model takes (Try it sends the test image to one that embeds images).
+    embed?: EmbedModel | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];

@@ -339,12 +339,11 @@ def test_fy_kind_005_one_label_is_a_reranker_more_is_a_classifier():
 
 def test_fy_kind_006_adding_a_text_classifier_as_a_reranker_is_refused(owner, hf):
     """FY-KIND-006: rerankers tagged text-classification (bge-reranker-v2-m3) or text-ranking (ms-marco-MiniLM, and
-    the causal-LM Qwen3-Reranker) are inspected and added as rerank models, as before; a sentiment model tagged
-    text-classification, and an NLI model (its tags say text-classification too), are refused when inspected
-    or added (422 cannot_inspect). 1.4.4 (#144): without a task they are read as text classifiers, and these two
-    are refused as such (vLLM runs neither DistilBERT nor DeBERTa; an NLI model needs labels in the request);
-    asked as rerankers, they are refused with their labels. Asked for another task, the classifier's hint stays
-    text classification."""
+    the causal-LM Qwen3-Reranker) are inspected and added as rerank models, as before. 1.4.4 (#144): without a task a
+    sentiment model and an NLI model (tagged text-classification too) are read as text classifiers; asked as
+    rerankers, they are refused with their labels (422 cannot_inspect). 1.5.4: as text classifiers they are added,
+    served by the transformers server only (vLLM runs neither DistilBERT nor an NLI model, which needs labels in the
+    request). Asked for another task, the classifier's hint stays text classification."""
     for repo_id in ("BAAI/bge-reranker-v2-m3", "cross-encoder/ms-marco-MiniLM-L6-v2", "Qwen/Qwen3-Reranker-0.6B"):
         assert inspect(hf, repo_id)["task_hint"] == "rerank", repo_id
     for name, source in [("bge-rr", "hf://BAAI/bge-reranker-v2-m3"), ("msmarco", "hf://cross-encoder/ms-marco-MiniLM-L6-v2"),
@@ -353,23 +352,22 @@ def test_fy_kind_006_adding_a_text_classifier_as_a_reranker_is_refused(owner, hf
         assert r.status_code == 201, (name, r.text)
         assert r.json()["model"]["task"] == "rerank" and "vllm-pooling" in r.json()["model"]["recipes"], name
     sst2, nli = "distilbert/distilbert-base-uncased-finetuned-sst-2-english", "cross-encoder/nli-deberta-v3-base"
-    for repo_id, task, why in [(sst2, None, "cannot run DistilBertForSequenceClassification"),
-                               (nli, None, "zero-shot \\(NLI\\) model"),
-                               (sst2, "rerank", "text classifier with 2 labels"),
+    for repo_id, task, why in [(sst2, "rerank", "text classifier with 2 labels"),
                                (nli, "rerank", "text classifier with 3 labels")]:
         with pytest.raises(inspector.InspectError, match=why):
             inspect(hf, repo_id, task)
-    for name, source, task, why in [("sst2", f"hf://{sst2}", None, "cannot run DistilBertForSequenceClassification"),
-                                    ("sst2-rr", f"hf://{sst2}", "rerank", "text classifier with 2 labels"),
-                                    ("nli", f"hf://{nli}", None, "zero-shot (NLI) model")]:
-        r = owner.post("/api/models", json={"name": name, "source": source, **({"task": task} if task else {})})
-        assert r.status_code == 422, (name, r.text)
-        d = r.json()["detail"]
-        assert d["code"] == "cannot_inspect" and why in d["message"], name
-        assert ("#144" in d["message"]) == (task is None), name
+    assert inspect(hf, sst2)["classify"]["architecture"] == "DistilBertForSequenceClassification"
+    assert inspect(hf, nli)["classify"]["zero_shot"] is True
+    r = owner.post("/api/models", json={"name": "sst2-rr", "source": f"hf://{sst2}", "task": "rerank"})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "cannot_inspect"
+    assert "text classifier with 2 labels" in r.json()["detail"]["message"]
+    for name, source in [("sst2", f"hf://{sst2}"), ("nli", f"hf://{nli}")]:
+        r = owner.post("/api/models", json={"name": name, "source": source})
+        assert r.status_code == 201, (name, r.text)
+        assert r.json()["model"]["task"] == "classify" and r.json()["model"]["recipes"] == ["transformers"], name
     prev = owner.post("/api/models/inspect", json={"source": f"hf://{sst2}", "task": "rerank"})
     assert prev.status_code == 422 and "NEGATIVE, POSITIVE" in prev.json()["detail"]["message"]
     other = inspect(hf, sst2, "embed")
     assert other["task_hint"] == "classify" and other["format"] == "safetensors" and "classify" not in other
     names = {m["name"] for m in owner.get("/api/models").json()["models"]}
-    assert {"bge-rr", "msmarco", "qwen-rr"} <= names and not names & {"sst2", "sst2-rr", "nli"}
+    assert {"bge-rr", "msmarco", "qwen-rr", "sst2", "nli"} <= names and "sst2-rr" not in names

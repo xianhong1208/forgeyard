@@ -420,9 +420,10 @@ def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmpr
 TASK_FROM_PIPELINE = {
     "text-generation": "chat", "text2text-generation": "chat", "image-text-to-text": "chat",
     "feature-extraction": "embed", "sentence-similarity": "embed",
+    "image-feature-extraction": "embed",     # 1.5.4 (#141): DINOv2, image embeddings on the transformers server
     # Text classifiers are tagged text-classification (1.4.4, #144); so are many cross-encoder rerankers
     # (BAAI/bge-reranker-v2-m3). The inspector tells them apart by their number of labels (one: a reranker).
-    # Zero-shot (NLI) models are classifiers too, refused until 1.5 (forgeyard/models/textcls.py).
+    # Zero-shot (NLI) models are classifiers too, served by the transformers server (1.5.4, forgeyard/models/textcls.py).
     "text-ranking": "rerank", "text-classification": "classify", "zero-shot-classification": "classify",
     "automatic-speech-recognition": "asr",
     "text-to-speech": "tts",

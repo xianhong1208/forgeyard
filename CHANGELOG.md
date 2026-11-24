@@ -21,7 +21,34 @@ version until 1.0.
   recipe's pin moves to the 1.5.4 image, deploying on it answers 422 `vision_image_too_old`. The gateway's public
   shapes, the catalog's rules and the console follow.
 
+- **Image embeddings and zero-shot classification through the gateway (1.5.4, #141 and #144; part 2: catalog,
+  inspector and gateway).** `/v1/embeddings` takes typed items beside OpenAI's plain strings (`{"text": …}`,
+  `{"image": …}`, Jina's shape): an image is a `data:` URI, bare base64 or an `http(s)` URL the gateway fetches under
+  the media rules (egress guard, `MEDIA_ALLOW_PRIVATE_HOSTS`, `MEDIA_FETCH_MAX_MB`); the engine never fetches. A request
+  of texts only stays an OpenAI request (typed texts are sent as plain strings), so OpenAI clients are unchanged and it
+  may spill as before; **a request with images never goes to a cloud provider**. New 400 codes: `images_not_supported`
+  (a model that embeds texts only), `text_not_supported` (an image-only model, DINOv2), `too_many_images` (over the
+  deployment's `max_images`). Usage counts `images`, `kilopixels` and `busy_ms` for a request with images.
+  `/v1/classify` takes `labels`, `multi_label` and `hypothesis_template` for zero-shot (NLI) models and refuses them for
+  fixed-label ones (400 `labels_not_supported`; a zero-shot model without labels 400 `labels_required`; texts x labels
+  over `max_pairs` 400 `too_many_pairs`); the transformers server's busy time is counted. The catalog keeps what an
+  embedding model takes (`embed`: family, modalities, vector size, text length), marks NLI classifiers `zero_shot` and
+  keeps the languages a model card names (`languages`). Try it on a deployment sends the test image to an image
+  embedder and asks a zero-shot classifier for its labels. The recommended list adds `bge-m3-zeroshot-v2.0-c`
+  (multilingual) and `roberta-base-zeroshot-v2.0-c` (English), MIT, and SigLIP 2 base, CLIP ViT-B/32 LAION-2B and
+  DINOv2 small as embedding models (a new group, Image embeddings); one repository may now be listed once per task.
+
 ### Changed
+
+- **Which engine serves which embedding and classification model (1.5.4).** vLLM's pooling runner (`vllm-pooling`) is
+  offered only what it runs: not an NLI (zero-shot) model or a classifier of an architecture vLLM 0.32 does not run
+  (DeBERTa, DistilBERT, BART), and not an image embedder (CLIP-like, DINOv2); those are served by the `transformers`
+  recipe alone, and a catalog entry of that kind added earlier is refused on `vllm-pooling` at deploy (422
+  `incompatible`). These classifiers are no longer refused when added: 1.4.4's refusals now apply to `vllm-pooling`
+  only. A multimodal embedding model vLLM would serve with chat messages (Qwen3-VL-Embedding, GME) is refused when
+  added as `embed` (422 `no_engine`): it is planned for a later 1.5 patch. **No model's default engine changes**:
+  every model vLLM served keeps `vllm-pooling` first. Hugging Face's `image-feature-extraction` tag is read as an
+  embedding model. No migration.
 
 - **The machine page's update command finds the NVIDIA devices on the host when it runs.** For an NVIDIA agent
   with every GPU (`--gpus all`) it now has the same `$(for d in …)` line as the Add-a-machine Docker command instead of
