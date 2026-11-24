@@ -22,13 +22,16 @@ FEATURES = MODELS + ("replica_keys", "replica_guard")
 GIB = 1024**3
 MIB = 1024**2
 A100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
-# Until the pin moves after the 1.5.4 release, the recipe names the vision recipe's own pinned image (1.4.4rc1).
-VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1"
-              "@sha256:f4e5940bdbfe1c88a6712aaf708432149651e25a9a6d7318e9f382ab697c579b")
-VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda"
-               "@sha256:9e4ef32b302cf3d82a07d69a1a55e42b28c17e9e34f8e3399bfe8918d1362376")
-NEW_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.5.4@sha256:" + "6" * 64
-NEW_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.5.4-cuda@sha256:" + "7" * 64
+# The built-in recipe names the vision recipe's own pinned images (1.5.4rc1 since 1.5.4: the first with embed and
+# classify); OLD_* is the pin before it (1.4.4rc1), which has neither task.
+VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1"
+              "@sha256:da2ddf69235cfc9ebe6ec448dc4cbb1410415bf11ba259503a7303430b37d242")
+VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda"
+               "@sha256:179143ede7f840e990eaa3cbd5cbec4c8b66c5b4ab8ea8c5f1c9f24450c88150")
+OLD_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1"
+           "@sha256:f4e5940bdbfe1c88a6712aaf708432149651e25a9a6d7318e9f382ab697c579b")
+OLD_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda"
+            "@sha256:9e4ef32b302cf3d82a07d69a1a55e42b28c17e9e34f8e3399bfe8918d1362376")
 
 
 def st_meta(repo: str, config: dict, params: dict, size: int, **over) -> dict:
@@ -156,22 +159,23 @@ def test_fy_tfm_003_the_catalog_offers_it_after_vllm_and_only_for_its_models(tfm
 
 
 def test_fy_tfm_004_deploying_on_it(tfm):
-    """FY-TFM-004: on the built-in recipe (its vision image is 1.4.4rc1, which has no embed or classify task) deploying
-    or estimating answers 422 vision_image_too_old; on a copy naming a 1.5.4 image, CLIP deploys on the CPU with
-    --task embed, its cache mount and served name, VISION_THREADS / VISION_MAX_IMAGES / VISION_MAX_PAIRS, and a text
+    """FY-TFM-004: on a copy naming the vision image pinned before 1.5.4 (1.4.4rc1, which has no embed or classify task)
+    deploying or estimating answers 422 vision_image_too_old; on the built-in recipe (1.5.4rc1), CLIP deploys on the
+    CPU with --task embed, its cache mount and served name, VISION_THREADS / VISION_MAX_IMAGES / VISION_MAX_PAIRS, and a text
     classifier on the A100's shared card #4 with the CUDA build and --task classify; a text embedder is refused on it
     (422 incompatible, saying vllm-pooling), and still deploys on vllm-pooling."""
     owner, cpu, gpu = tfm
-    body = {"name": "clip", "model": "clip", "recipe": "transformers", "params": {"gpus": 0}, "machine_id": cpu}
+    old = copy_on(owner, OLD_CPU, OLD_CUDA, "transformers-old")
+    body = {"name": "clip", "model": "clip", "recipe": old, "params": {"gpus": 0}, "machine_id": cpu}
     for path in ("/api/deployments", "/api/deployments/estimate"):
         r = owner.post(path, json=body)
         assert r.status_code == 422 and r.json()["detail"]["code"] == "vision_image_too_old", (path, r.text)
         msg = r.json()["detail"]["message"]
         assert "needs Forgeyard's vision image 1.5.4 or newer" in msg and "runs 1.4.4" in msg, msg
-    copy = copy_on(owner, NEW_CPU, NEW_CUDA, "transformers-154")
+    copy = "transformers"
     deploy(owner, "clip", "clip", copy, params={"gpus": 0, "max_images": 8}, machine_id=cpu)
     spec = replica_row("clip").spec
-    assert spec["runtime"]["image"] == NEW_CPU
+    assert spec["runtime"]["image"] == VISION_CPU
     args = spec["runtime"]["args"]
     assert args[:4] == ["--task", "embed", "--model", "${MODEL_PATH}"] and args[args.index("--served-name") + 1] == "clip"
     assert {k: spec["env"][k] for k in ("VISION_THREADS", "VISION_MAX_IMAGES", "VISION_MAX_PAIRS")} == {
@@ -179,7 +183,7 @@ def test_fy_tfm_004_deploying_on_it(tfm):
     assert "VISION_API_KEY" not in spec["env"] and spec["resources"]["gpus"]["count"] == 0
     d = deploy(owner, "nli", "bge-m3-nli", copy, machine_id=gpu)
     spec = replica_row("nli").spec
-    assert spec["runtime"]["image"] == NEW_CUDA and spec["runtime"]["args"][1] == "classify"
+    assert spec["runtime"]["image"] == VISION_CUDA and spec["runtime"]["args"][1] == "classify"
     assert spec["resources"]["gpus"]["count"] == 1 and spec["resources"]["gpus"]["share"] == "vram"
     assert d["deployment"]["route"]["api"] == "classify"
     r = owner.post("/api/deployments", json={"name": "q", "model": "qwen3-embedding-0.6b", "recipe": copy, "params": {"gpus": 0}})
