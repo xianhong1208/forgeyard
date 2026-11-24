@@ -8,6 +8,7 @@ import { MemoryRouter, useLocation } from "react-router";
 import App from "../App";
 import { AuthProvider } from "../auth";
 import machinesFixture from "../test/machines.json";
+import { LANG_KEY } from "../i18n/lang";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 type Reply = { status: number; body: unknown };
@@ -61,6 +62,7 @@ function mount(path: string) {
 
 afterEach(() => {
   cleanup();
+  localStorage.removeItem(LANG_KEY);
   vi.unstubAllGlobals();
 });
 
@@ -173,5 +175,40 @@ describe("updating an agent", () => {
     mount(`/machines/${data.machines[1].id}`);
     expect(await screen.findByText("no replica certificate")).toBeTruthy();
     expect(screen.getByText(/no certificate from this server \(the CSR cannot be read\)/)).toBeTruthy();
+  });
+
+  it("FY-WEB-930 (1.5.4) an NVIDIA command that lists the host's devices says so under it, in English and Chinese", async () => {
+    const LOOP = "$(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e \"$d\" ] && printf -- '--device %s ' \"$d\"; done)";
+    const run = RUN.replace("--gpus all \\\n", `--gpus all \\\n  ${LOOP} \\\n`);
+    const host = { ...UPDATE, steps: [{ title: "On a100-box", command: run }], nvidia_devices: "host" };
+    server((url) => (url === "/api/machines" ? { status: 200, body: machines() }
+      : url === "/api/machines/1/agent-update" ? { status: 200, body: host } : undefined));
+    mount("/machines/1");
+    const section = await screen.findByRole("region", { name: "Update the agent" });
+    expect((await within(section).findByLabelText("Update command: On a100-box")).textContent).toBe(run);
+    const note = within(section).getByText(/passes every NVIDIA device of the host \(\/dev\/nvidia\*\) with --device/);
+    expect(note.textContent).toMatch(/a GPU installed since the agent started is included/);
+    expect(note.textContent).toMatch(/systemctl daemon-reload/);
+    expect(note.textContent).toMatch(/still this machine's GPU access setting/);
+    cleanup();
+    localStorage.setItem(LANG_KEY, "zh-TW");
+    mount("/machines/1");
+    const zh = await screen.findByRole("region", { name: "更新 agent" });
+    await within(zh).findByLabelText("更新指令：On a100-box");
+    const zhNote = within(zh).getByText(/找出主機上的每個 NVIDIA 裝置（\/dev\/nvidia\*），並用 --device 傳入/);
+    expect(zhNote.textContent).toMatch(/agent 啟動後才裝上的 GPU 也包含在內/);
+    expect(zhNote.textContent).toMatch(/仍然由這台機器的 GPU 存取設定決定/);
+  });
+
+  it("FY-WEB-931 (1.5.4) no such note for nodes listed by name, an AMD or CPU agent, or an older server", async () => {
+    for (const nvidia_devices of ["listed", null, undefined]) {
+      server((url) => (url === "/api/machines" ? { status: 200, body: machines() }
+        : url === "/api/machines/1/agent-update" ? { status: 200, body: { ...UPDATE, nvidia_devices } } : undefined));
+      mount("/machines/1");
+      const section = await screen.findByRole("region", { name: "Update the agent" });
+      await within(section).findByLabelText("Update command: On a100-box");
+      expect(within(section).queryByText(/every NVIDIA device of the host/)).toBeNull();
+      cleanup();
+    }
   });
 });

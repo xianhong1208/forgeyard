@@ -996,11 +996,7 @@ sudo systemctl enable --now forgeyard
      --restart always \
      --network host \
      --gpus all \
-     --device /dev/nvidiactl \
-     --device /dev/nvidia-uvm \
-     --device /dev/nvidia-uvm-tools \
-     --device /dev/nvidia0 \
-     --device /dev/nvidia1 \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1011,7 +1007,7 @@ sudo systemctl enable --now forgeyard
      docker.io/tonyhuang1101/forgeyard-agent:1.5.2
    ```
 
-   在 NVIDIA 機器上，指令還會在 `--gpus` 旁邊用 `--device` 傳入 GPU 的裝置節點（1.4.5 起是 agent 回報的那些；較舊的 agent 則用一小段 shell 迴圈列出主機上的），所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。
+   在 NVIDIA 機器上，指令還會在 `--gpus all` 旁邊用 `--device` 傳入 GPU 的裝置節點，所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。從 1.5.4 起，這些節點是在你執行指令時才從主機上找出來的，用的是和[新增機器](#run-the-agent-in-docker)的 Docker 指令同一行 `$(for d in …)`：當下主機上有的每個 `/dev/nvidia*` 節點都會傳入，所以 agent 啟動後才裝上的 GPU 也包含在內，同一個指令在 1 張或 8 張 GPU 的機器上都能用。shell 會在 Docker 啟動前把這一行展開成一般的 `--device /dev/nvidiaN` 選項，所以 Docker 記錄每個裝置的方式和手動輸入時一樣，這正是 `daemon-reload` 之後裝置還在的原因。傳入每個裝置並不會擴大 Forgeyard 使用的範圍：它可以分配哪些 GPU，仍然由這台機器的 [GPU 存取](#restrict-gpus-on-a-shared-machine)設定決定。只用部分 GPU 啟動的 agent（`--gpus "device=0,2"`）會保留它回報的那些節點，逐一列出名稱；agent 回報、但這一行找不到的節點（其他 `/dev/nvidia…` 名稱）也一樣。
 
    經由伺服器取得檔案的機器（**一律經由伺服器**）則改為搬運映像檔：在能連到 Docker Hub 的機器上 `docker save`，透過 `ssh` 直接送進那台機器的 `docker load`（把 `USER` 換掉），再執行同樣的 `docker rm -f` 與 `docker run`。其他機器也會在 *cannot reach the registry?* 底下列出這個做法。
 - **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。
