@@ -359,8 +359,9 @@ def test_fy_tcls_011_playground_try_it_and_the_deployment_page(gw):
 
 # ------------------------------------------------------------------ search and the recommended list
 def test_fy_tcls_012_searching_for_text_classifiers(owner, monkeypatch):
-    """FY-TCLS-012: a text classification search asks for text-classification, shows its results as text
-    classifiers and puts rerankers (filed there too) last; a rerank search still shows them as rerankers first."""
+    """FY-TCLS-012: a text classification search asks for text-classification (and, 1.5.4, zero-shot-classification),
+    shows its results as text classifiers and puts rerankers (filed there too) last; a rerank search still shows them
+    as rerankers first."""
     from tests.test_hub_search import RERANK, SENTIMENT as SENT, FakeHub
     from forgeyard.config import get_settings
 
@@ -372,7 +373,7 @@ def test_fy_tcls_012_searching_for_text_classifiers(owner, monkeypatch):
         # The reranker is the most downloaded: a text classification search still puts it last.
         fake.by_tag["text-classification"] = [{**RERANK, "downloads": 10**9}, SENT]
         body = owner.get("/api/models/search", params={"q": "x", "task": "classify"}).json()
-        assert [q["pipeline_tag"] for q in fake.queries] == [["text-classification"]]
+        assert sorted(q["pipeline_tag"][0] for q in fake.queries) == ["text-classification", "zero-shot-classification"]
         assert [(x["id"], x["task"]) for x in body["results"]] == [(SENT["id"], "classify"), (RERANK["id"], "classify")]
         assert body["results"][0]["recipes"] == ["vllm-pooling", "transformers"]   # 1.5.4: vLLM first
         body = owner.get("/api/models/search", params={"q": "x", "task": "rerank"}).json()

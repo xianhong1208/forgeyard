@@ -670,7 +670,7 @@ gateway sends the request to the replica's `/classify`. Local deployments only, 
 | `use_activation` | Optional, `true` or `false`: `false` gives the raw scores (logits) instead of probabilities (fixed-label models only) |
 | `labels` | Zero-shot models only (1.5.4): the labels to choose from, 1 to 32 names of 1 to 64 characters of plain text, each once (case does not matter): the probabilities follow their order |
 | `multi_label` | Zero-shot, optional: `true` scores each label on its own (entailment against contradiction), so several can fit; `false` (the default) shares the probability among the labels |
-| `hypothesis_template` | Zero-shot, optional: the sentence each label is put into, one line of at most 200 characters with one `{}` (default `"This text is about {}."`). For Chinese labels a Chinese template reads better, e.g. `"這段文字和{}有關。"` |
+| `hypothesis_template` | Zero-shot, optional: the sentence each label is put into, one line of at most 200 characters with one `{}` (default `"This text is about {}."`). For Chinese labels a Chinese template reads better, e.g. `"這段文字是關於{}。"` |
 
 The gateway sends only these fields (any other is dropped); `messages` (vLLM's chat form) answers 400.
 A zero-shot model (an NLI model, its catalog entry says `classify.zero_shot`) runs once per text and label: texts x

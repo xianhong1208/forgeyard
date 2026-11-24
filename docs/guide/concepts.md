@@ -457,25 +457,60 @@ A text classifier (1.4.4) gives a text one of a fixed set of labels: sentiment, 
 topic. It is a small encoder (100 to 600 M parameters) with a classification head, so it answers thousands
 of texts a second on a GPU with stable labels and scores, at a fraction of a chat model's cost.
 
-- **One engine:** `vllm-pooling` (vLLM's pooling runner, the image the embedding and rerank models use) on
-  an NVIDIA GPU, one card shared by memory (the recipe's ROCm variant should serve AMD GPUs too, not tested
-  yet). There is no CPU engine yet: the transformers engine for the CPU comes in 1.5 (#144).
-- **Which models:** the catalog reads `config.json`. An architecture vLLM runs as a classifier (BERT,
-  RoBERTa, XLM-RoBERTa, ModernBERT, GTE, GPT-2, Jamba: `…ForSequenceClassification`) with two labels or
-  more. The labels are kept with the catalog entry and shown on the model's page. Not accepted: a model with
-  one output (it is a reranker), a regression head, a zero-shot (NLI) model (its labels are entailment and
-  contradiction: it needs the labels in the request, which comes with 1.5), and DeBERTa, DistilBERT or BART
-  classifiers (vLLM does not run them; 1.5 too).
+- **Two engines** (see [the transformers engine](#the-transformers-engine)): `vllm-pooling` (vLLM's pooling runner)
+  on an NVIDIA GPU for the architectures vLLM runs (BERT, RoBERTa, XLM-RoBERTa, ModernBERT, GTE…), and since 1.5.4
+  Forgeyard's own `transformers` server on any CPU or a shared GPU for every sequence classifier, DeBERTa, DistilBERT
+  and BART included. A model both can run defaults to vLLM.
+- **Which models:** the catalog reads `config.json`: a `…ForSequenceClassification` with two labels or more. The
+  labels are kept with the catalog entry and shown on the model's page, with the languages its model card names.
+  Not accepted: a model with one output (it is a reranker) or a regression head.
+- **Zero-shot (1.5.4):** an NLI model (its labels are entailment and contradiction) takes **your labels in each
+  request**: it scores each one by reading the text with a sentence such as "This text is about {label}.", so it
+  runs once per text and label. The catalog marks it *zero-shot*; it runs on the transformers server only. See
+  [the how-to](how-to.md#classify-text-without-training-zero-shot).
 - **Its own API:** `/v1/classify`, vLLM's shape: `input` is a text or a list of texts; each comes back
   with its most likely `label` and the probabilities of every label (`probs`, in the order of
-  `config.json`). A model trained for several labels at once (`multi_label_classification`, such as
-  toxic-bert) scores each label on its own, so its probabilities do not add up to 1.
-- **Labels of your own, today:** a chat model already classifies into any labels you name, with
-  structured outputs: give the labels as `structured_outputs.choice` (vLLM) or as a JSON schema `enum`
-  (vLLM, llama.cpp, cloud providers) at `/v1/chat/completions`. Slower and costlier than a classifier, but
-  nothing to deploy. See [the how-to](how-to.md#classify-text).
-- Usage counts its **prompt tokens**, like embeddings. Texts stay on your own deployments: they never go to
-  a cloud provider.
+  `config.json`, or of the request's `labels` for a zero-shot model). A model trained for several labels at once
+  (`multi_label_classification`, such as toxic-bert) scores each label on its own, so its probabilities do not add
+  up to 1; a zero-shot request does the same with `"multi_label": true`.
+- **A chat model** also classifies into any labels you name, with structured outputs: give the labels as
+  `structured_outputs.choice` (vLLM) or as a JSON schema `enum` (vLLM, llama.cpp, cloud providers) at
+  `/v1/chat/completions`. Slower and costlier than a classifier, best for subtle texts. See
+  [the how-to](how-to.md#classify-text).
+- Usage counts its **prompt tokens**, like embeddings (zero-shot: the tokens of every text and label pair), and
+  on the transformers server its busy time. Texts stay on your own deployments: they never go to a cloud provider.
+
+## The transformers engine
+
+Forgeyard's own model server (1.5.4), the `transformers` recipe: the vision image (`forgeyard-vision`, the same
+one as the `vision` recipe, for CPU on x86-64 and Arm, and NVIDIA) started for embeddings or text classification
+with Hugging Face transformers. It is small and runs well on a CPU: a machine without a GPU serves these models,
+and on a GPU it shares the card by default.
+
+| Model | Engine |
+|---|---|
+| Text embedding models (Qwen3-Embedding, BGE-M3…), rerankers | `vllm-pooling` (a GPU) |
+| CLIP-like models (CLIP, SigLIP, SigLIP 2) and DINOv2 as embeddings | `transformers` |
+| Text classifiers vLLM runs (BERT, RoBERTa, XLM-R, ModernBERT) | `vllm-pooling` first, `transformers` too (a CPU) |
+| DeBERTa, DistilBERT, BART classifiers; zero-shot (NLI) models | `transformers` |
+| Multimodal embedding models (Qwen3-VL-Embedding, GME) | none yet: refused when added (a later 1.5 patch) |
+
+- **Image embeddings:** a CLIP-like model puts texts and images in one space (a text finds pictures); DINOv2 embeds
+  images only (duplicates, look-alikes). Both answer at `/v1/embeddings`, which takes typed items `{"image": …}`
+  beside plain strings; a request of texts only stays an OpenAI request. A request with images never spills to a
+  cloud provider: another model's vectors would not match. See [the how-to](how-to.md#search-images-by-text-image-embeddings).
+- **One job per catalog entry:** a CLIP-like repository is both an image classifier (`/v1/vision/classify`, recipe
+  `vision`) and an embedding model (`transformers`): add it twice, under two names, and deploy each.
+- **On a CPU** the weights are held in float32 (half precision is several times slower there), so a 16-bit model
+  needs about twice its file size in RAM; the estimate counts it. *CPU threads* (`threads`, 4) sets how many torch
+  uses. One replica works on one request at a time; more throughput is more replicas or the CUDA variant.
+- **Limits per request:** *Images per request* (`max_images`, 32) for embeddings, *Zero-shot pairs per request*
+  (`max_pairs`, 256: texts x labels) for zero-shot.
+- **No code from a model's repository runs** (`auto_map` is refused), and the image takes models from the model
+  cache only (`HF_HUB_OFFLINE`).
+- **Its image follows releases:** the built-in recipe's image is pinned by digest and moves to the new vision image
+  right after the release that publishes it; until then a deployment on it answers 422 `vision_image_too_old`, and a
+  custom recipe (an engine copy) can name a newer image.
 
 ## API keys, limits and usage
 

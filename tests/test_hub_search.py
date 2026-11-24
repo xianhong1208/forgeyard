@@ -132,10 +132,11 @@ def test_fy_hub_001_the_server_asks_hugging_face_and_summarises(owner, fake):
 
 
 def test_fy_hub_002_embeddings_search_both_tags_merged_by_downloads(owner, fake):
-    """FY-HUB-002: embedders are tagged two ways: both are asked, the lists merged without duplicates,
-    most downloaded first, cut to the limit."""
+    """FY-HUB-002: embedders are tagged three ways (1.5.4: image-feature-extraction too, DINOv2 and other image
+    embedders): each is asked, the lists merged without duplicates, most downloaded first, cut to the limit."""
     body = search(owner, q="embed", task="embed", limit=2).json()
-    assert sorted(q["pipeline_tag"][0] for q in fake.queries) == ["feature-extraction", "sentence-similarity"]
+    assert sorted(q["pipeline_tag"][0] for q in fake.queries) == ["feature-extraction", "image-feature-extraction",
+                                                                   "sentence-similarity"]
     assert [x["id"] for x in body["results"]] == ["BAAI/bge-m3", "Qwen/Qwen3-0.6B"]
     assert body["results"][0]["task"] == "embed" and body["results"][0]["format"] == "other"
     assert body["results"][0]["recipes"] == []
@@ -255,3 +256,23 @@ def test_fy_hub_009_results_say_whats_already_in_the_catalog(owner, fake):
                 source="hf://Qwen/Qwen3-0.6B")
     res = {x["id"]: x["in_catalog"] for x in search(owner, q="qwen3").json()["results"]}
     assert res["Qwen/Qwen3-0.6B"] == "tiny-qwen" and res["google/gemma-3-4b-it"] is None
+
+
+def test_fy_hub_011_text_classification_search_asks_for_zero_shot_models_too(owner, fake):
+    """FY-HUB-011 (1.5.4, #144): a text classification search also asks for zero-shot-classification (NLI models,
+    which the transformers engine runs), shown as text classification; an image embedder found by its own tag is
+    shown as an embedding model."""
+    nli = {"id": "MoritzLaurer/bge-m3-zeroshot-v2.0-c", "downloads": 50000, "pipeline_tag": "zero-shot-classification",
+           "tags": ["safetensors"]}
+    dino = {"id": "facebook/dinov2-small", "downloads": 900000, "pipeline_tag": "image-feature-extraction",
+            "tags": ["safetensors"]}
+    fake.by_tag["zero-shot-classification"] = [nli]
+    fake.by_tag["image-feature-extraction"] = [dino]
+    body = search(owner, q="m3", task="classify").json()
+    assert sorted(q["pipeline_tag"][0] for q in fake.queries) == ["text-classification", "zero-shot-classification"]
+    got = {x["id"]: x for x in body["results"]}
+    assert got[nli["id"]]["task"] == "classify" and got[nli["id"]]["pipeline_tag"] == "zero-shot-classification"
+    # The rerankers still come last in a text classification search.
+    assert body["results"][-1]["id"] == "BAAI/bge-reranker-v2-m3"
+    body = search(owner, q="dino", task="embed").json()
+    assert next(x for x in body["results"] if x["id"] == dino["id"])["task"] == "embed"

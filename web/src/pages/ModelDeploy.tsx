@@ -134,6 +134,7 @@ export function ModelDeployPage() {
                   {recipes.map((r) => <option key={r.name} value={r.name}>{r.title} ({r.engine} {r.version})</option>)}
                 </select>
                 {recipe && <p className="field-hint engine-image-line"><EngineImage runs={engineRuns(recipe.variants, view.device)} /></p>}
+                {recipe && model && transformersEngine(recipe, model.task) && <p className="field-hint">{t("deploy.anyCpu")}</p>}
                 {model && recipes.length === 0 && <p className="field-error">{t("deploy.noEngine", { format: model.format, task: TASK_LABEL[model.task] })}</p>}
               </div>
             </div>
@@ -238,6 +239,15 @@ export function ModelDeployPage() {
   );
 }
 
+// 1.5.4 (#141, #144): Forgeyard's transformers server (the forgeyard-vision image) serving an embedding or a text
+// classification model: it runs on any CPU (x86-64 or Arm), a GPU optional.
+export function transformersEngine(recipe: { engine: string }, task: string): boolean {
+  return recipe.engine === "forgeyard-vision" && (task === "embed" || task === "classify");
+}
+
+// The estimate's part for weights a CPU holds in float32 (forgeyard/models/estimate.py, method files, cpu_float32).
+export const FLOAT32_PART = "Model weights in float32";
+
 // The media parameters (1.3) only mean something for a model that takes media: hidden for one that
 // is known to take none of them (a catalog entry from before 1.3 is unknown, so they show).
 export function paramApplies(name: string, model: CatalogModel | undefined): boolean {
@@ -325,6 +335,7 @@ export function EstimatePanel({ est, error, pending }: { est: { estimate: Estima
         ))}
       </ul>
       {e.notes.map((n) => <p key={n} className="small muted">{n}</p>)}
+      {e.parts.some((p) => p.label === FLOAT32_PART) && <p className="small muted est-float32">{t("deploy.est.float32")}</p>}
       <PlacementView p={est.placement} />
     </section>
   );
