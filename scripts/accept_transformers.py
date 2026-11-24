@@ -37,9 +37,9 @@ then removes what it created (deployments, keys, routes it changed, the catalog 
     FORGEYARD_PASSWORD=… python3 scripts/accept_transformers.py --server https://<server>:7860 --cacert forgeyard-ca.pem \\
         --user <admin> --cpu-machine <cpu machine> [--gpu-machine <gpu machine>] [--only …] [--out r.json]
 
-Until the built-in recipe's image moves to a 1.5.4 vision image (right after the 1.5.4 release), deploying on it
-answers 422 vision_image_too_old: the script says so and SKIPs every deployment with that reason. To accept an image
-before that, make a custom recipe (an engine copy) naming it and pass --transformers-recipe <its name>.
+On a recipe whose vision image is older than 1.5.4, deploying answers 422 vision_image_too_old: the script says so
+and SKIPs every deployment with that reason. The built-in recipe pins a 1.5.4 image; to accept another image, make a
+custom recipe (an engine copy) naming it and pass --transformers-recipe <its name>.
 
 Models it knows (--only; the default runs the first four on the CPU machine, --gpu-only the CUDA ones):
   clip-vit-b-32-laion-embed, dinov2-small-embed, distilbert-sentiment, bge-m3-zeroshot-v2.0-c (defaults),

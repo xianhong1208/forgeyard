@@ -26,7 +26,7 @@ from tests.gateway_helpers import FakeEngine, api_client, make_ready, new_key
 from tests.model_helpers import FIX, FakeHF, Repo, add_catalog, safetensors_bytes
 from tests.test_multimodal import PNG, MediaServer
 from tests.test_scheduler import deploy, seed_catalog
-from tests.test_transformers_recipe import FEATURES, NEW_CPU, NEW_CUDA, copy_on
+from tests.test_transformers_recipe import FEATURES
 from tests.workload_helpers import make_node
 
 KINDS = FIX / "kinds"
@@ -372,7 +372,7 @@ def gw(owner, monkeypatch):
         add_catalog(name, meta_of(conf, task), task=task, fmt="safetensors", source=f"hf://acme/{conf}")
     cpu = make_node("cpu-a", features=FEATURES)
     gpu = make_node("a100", allowlist=[4], features=FEATURES)
-    tf = copy_on(owner, NEW_CPU, NEW_CUDA, "transformers-154")
+    tf = "transformers"
     engines = {"clip": FakeTransformers("s-clip"), "dino": FakeTransformers("s-dino", image_only=True),
                "nli": FakeTransformers("s-nli", zero_shot=True)}
     vllm = {"emb": FakeEngine("emb", "s-emb"), "stars": FakeEngine("stars", "s-stars")}
@@ -630,7 +630,7 @@ def test_fy_tgw_013_deployments_carry_what_the_playground_shows(owner):
         add_catalog(name, meta_of(conf, task, **({"languages": langs} if langs else {})), task=task, fmt="safetensors",
                     source=f"hf://acme/{conf}")
     cpu = make_node("cpu-a", features=FEATURES)
-    tf = copy_on(owner, NEW_CPU, NEW_CUDA, "transformers-154")
+    tf = "transformers"
     for name in ("clip", "dino", "nli"):
         deploy(owner, name, name, tf, params={"gpus": 0}, machine_id=cpu)
     deploy(owner, "emb", "qwen3-embedding-0.6b", "vllm-pooling")
