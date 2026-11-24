@@ -115,6 +115,14 @@ def films(recipe, params: dict, meta: Optional[dict] = None) -> Films:
                  max_input_side=_int(params.get("max_input_side"), DEFAULT_INPUT_SIDE, 1))
 
 
+def start_image(fs: list[Films]) -> tuple[str, int]:
+    """(none | optional | required, the largest side) of a start image over a route's deployments (1.5.5): required
+    only when every one needs it, optional when any takes it, and the largest side any of those takes (0: none does)."""
+    takers = [f for f in fs if f.image_input != "none"]
+    kind = "required" if fs and all(f.image_input == "required" for f in fs) else "optional" if takers else "none"
+    return kind, max((f.max_input_side for f in takers), default=0)
+
+
 def frames_of(seconds: int, f: Films) -> int:
     from forgeyard.models.estimate import frames_for
 

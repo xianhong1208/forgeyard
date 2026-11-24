@@ -446,11 +446,7 @@ def video_options(model: Optional[str], caller: KeyCaller) -> dict:
             "seconds": first.seconds, "max_seconds": max(f.max_seconds for f in fs), "fps": first.fps,
             "max_steps": max(f.max_steps for f in fs), "max_prompt_chars": max(f.max_prompt for f in fs),
             "keep_minutes": max(f.keep for f in fs) // 60,
-            # 1.5.5 (#143): whether a start image may be sent (optional), must be (required: every deployment needs
-            # one) or is refused (none), and its largest side
-            "image_input": "required" if all(f.image_input == "required" for f in fs) else
-                           "optional" if any(f.image_input != "none" for f in fs) else "none",
-            "max_input_side": max((f.max_input_side for f in fs if f.image_input != "none"), default=0)}
+            **dict(zip(("image_input", "max_input_side"), videogen.start_image(fs)))}   # 1.5.5 (#143)
 
 
 async def _console(request: Request):

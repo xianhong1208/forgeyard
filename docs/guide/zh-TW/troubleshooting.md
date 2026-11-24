@@ -505,7 +505,8 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 | `video_too_long` | `seconds` 超過部署的 *Longest video* | 要短一點的秒數，或調高它（記憶體會跟著變大） |
 | `video_too_large` | 某一邊超過 *Largest side*，或每格像素比預設尺寸放大到該邊時還多 | 要模型自己的尺寸（Wan2.1 為 832x480），或調高 *Largest side* |
 | `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Wan2.2-5B 為 32） | 使用訊息建議的尺寸 |
-| `input_reference_not_supported` | 帶了圖片或影片參考：1.3 只支援文字轉影片 | 改在提示裡描述 |
+| `input_reference_not_supported` | 只從文字做影片的模型收到起始圖片，或帶了推論引擎會自己下載的參考輸入（`image_reference`、`video_reference`、`audio_reference`） | 拿掉它，或改用接受起始圖片的模型（Wan2.2-TI2V-5B） |
+| `input_reference_required` | 圖片轉影片的模型沒有收到起始圖片 | 以 `input_reference` 附上 |
 | `too_many_steps`、`prompt_too_long` | 超過 *Most steps* 或 *Longest prompt* | 少一點步數，或縮短提示 |
 
 **429 `too_many_jobs`：** 你的金鑰（或在試用區裡的你）在那個部署上已經有 *Jobs per key* 段影片在等待或製作中。**429 `queue_full`：** 部署已經有 *Jobs at once* 個工作。等待 `Retry-After` 秒，或刪掉不再需要的工作。

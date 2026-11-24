@@ -213,6 +213,7 @@ def test_fy_i2v_004_json_start_images_and_urls_fetched_by_the_gateway(iv, monkey
     get_settings.cache_clear()
     r = iv.api.post("/v1/videos", json={"model": "ti2v", "prompt": "x", "input_reference": {"image_url": url}})
     assert r.status_code == 400 and err(r)["code"] == "media_url_refused" and len(iv.media.hits) == hits
+    assert err(r)["param"] == "input_reference"
     assert len(posts(iv, "ti2v")) == before
 
 
@@ -244,12 +245,12 @@ def test_fy_i2v_005_the_start_image_checks(iv, monkeypatch):
     monkeypatch.delenv("MEDIA_FETCH_MAX_MB")
     get_settings.cache_clear()
     assert start(iv.api, "ti2v", claims(2048, 64)).status_code == 200
-    f = videogen.films(recipes.builtin_recipes()["vllm-omni-video"][0], {"max_input_side": 8192}, ti2v_meta())
-    ask = videogen.check({"prompt": "x", "input_reference": {"file": "input_reference", "data": claims(60000, 60000)}})
     from forgeyard.gateway import imageedit
+    recipe = recipes.builtin_recipes()["vllm-omni-video"][0]
+    ask = videogen.check({"prompt": "x", "input_reference": {"file": "input_reference", "data": claims(4000, 64)}})
     imageedit.check(ask.inputs, videogen.START)
-    assert videogen.takes(f, ask) == "input_image_too_large" and \
-        videogen.takes(videogen.Films(image_input="optional", max_input_side=60000), ask) is None
+    assert videogen.takes(videogen.films(recipe, {}, ti2v_meta()), ask) == "input_image_too_large"
+    assert videogen.takes(videogen.films(recipe, {"max_input_side": 4096}, ti2v_meta()), ask) is None
 
 
 def test_fy_i2v_006_models_that_need_take_or_refuse_a_start_image(iv):
@@ -329,13 +330,19 @@ def test_fy_i2v_009_the_estimate(iv):
 
 def test_fy_i2v_010_the_playground_options(iv):
     """FY-I2V-010: the Playground's video options say whether a start image is optional, required or refused, and its
-    largest side."""
+    largest side; over a route's deployments: required only when every one needs it, optional when any takes it."""
     def opts(model):
         return iv.owner.get(f"/api/playground/videos/options?model={model}").json()
 
     assert (opts("ti2v")["image_input"], opts("ti2v")["max_input_side"]) == ("optional", 2048)
     assert opts("i2v")["image_input"] == "required"
     assert (opts("t2v")["image_input"], opts("t2v")["max_input_side"]) == ("none", 0)
+    F = videogen.Films
+    assert videogen.start_image([F(image_input="required"), F(image_input="required", max_input_side=4096)]) == \
+        ("required", 4096)
+    assert videogen.start_image([F(image_input="required"), F(image_input="none")]) == ("optional", 2048)
+    assert videogen.start_image([F(image_input="optional", max_input_side=1024), F()]) == ("optional", 1024)
+    assert videogen.start_image([F(), F()]) == ("none", 0)
 
 
 def test_fy_i2v_011_nothing_of_the_start_image_is_kept(iv, caplog):
