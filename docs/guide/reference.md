@@ -62,7 +62,7 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 
 | Variable | Default | What it does |
 |---|---|---|
-| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets (Hugging Face tokens, provider keys, replica keys, app environment values). Back it up apart from the database |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets (Hugging Face tokens, provider keys, replica keys, workload environment values). Back it up apart from the database |
 | `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file. Set one of the two: with both, this one is used and the file is ignored |
 
 ### Accounts and sign-in
@@ -200,7 +200,7 @@ wrong type; a bad value).
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info, or debug for every message (-v). |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | Labels shown on the Machines page, e.g. { rack = "a" }. Environment: rack=a,room=2. Merged key by key: a flag wins over the environment, the environment over the file. |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false: only report hardware, run nothing. |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run` if it exists (as root) | The unprivileged account processes (apps and engines) run as when the agent runs as root. Default: forgeyard-run if that account exists (never created by the agent); without one, a root agent refuses process apps. |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run` if it exists (as root) | The unprivileged account processes (engines) run as when the agent runs as root. Default: forgeyard-run if that account exists (never created by the agent); without one, a root agent refuses process apps. |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | One directory per process replica. Default: next to the state directory (<state_dir>-work). |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | Host ports for services and model replicas. |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | The address published ports listen on. Default: this machine's address towards the server. |
@@ -767,7 +767,7 @@ Two more cases:
 | 403 `metrics_local_only` | `METRICS_TOKEN` is empty and the request comes from another address or through a proxy |
 | 421 | the request's host name is not one the server answers to (`ALLOWED_HOSTS`), as for every path |
 
-The gateway's metrics count the requests that the usage counts (`/v1`, the Playground, `/x/` and video jobs), when
+The gateway's metrics count the requests that the usage counts (`/v1`, the Playground and video jobs), when
 they end:
 
 | Metric | Type | Labels | What it is |
@@ -812,175 +812,161 @@ route for: a request for a model nobody serves counts as `_unknown`, never under
 `recipe` label is a recipe's name. No
 label holds an API key, a key's id or name, a person or a prompt. Counters start from 0 when the server restarts.
 
-## Apps (deprecated)
+## Apps (removed)
 
-Apps, the workloads that are not models (1.4, #88), left the console and are **removed in 1.5**, with a
-migration that removes the ones left. Until then they keep working through the API, and say so:
+**Removed in 1.5.3** (#89), after being deprecated in 1.4 (#88). An app was a workload that is not a model: your own
+container or process, made through `POST /api/workloads`, perhaps from a template, and perhaps exposed behind the
+gateway at `/x/<name>/`. Forgeyard is about running and managing models, so apps, the templates and `/x/` are gone.
+The upgrade to 1.5.3 removes the apps that are left and writes down each one in the audit log.
 
-| Deprecated | What |
+**Use instead:** deploy what you need as a model under **Serving**. A model that no built-in engine runs gets a
+custom engine (**Models → Engines**, a recipe). The [vision models](#vision) replace the 1.3 vision templates:
+detection, segmentation, depth and image classification models deployed from **Models**, called at
+`/v1/vision/<task>`.
+
+### What answers 410
+
+These addresses answer **410 Gone** for the rest of 1.5.x, so a script or program that still calls them learns why.
+From 1.6 they are ordinary 404s.
+
+| Address | Was |
 |---|---|
-| The apps part of `/api/workloads` | `POST /api/workloads`; and `GET`, `PUT …/gateway`, `POST …/stop`, `POST …/start`, `DELETE` and `GET …/replicas/<n>/logs` of an app; `GET /api/workloads` while it lists an app |
+| `POST /api/workloads` | Creating an app |
 | `GET /api/workloads/templates` | The 1.3 templates |
-| `/x/<name>/…` | The [passthrough](#the-passthrough-x), and the console's own `POST /api/playground/vision/<name>/<task>` to an exposed vision app |
-| A key's `workloads` and `workload_list` | Still taken and returned by `/api/keys`, but the console no longer shows them, and `GET /api/keys` no longer lists the apps a key could name |
+| `PUT /api/workloads/{id}/gateway` | Exposing an app at `/x/` |
+| `POST /api/workloads/{id}/stop`, `POST /api/workloads/{id}/start`, `DELETE /api/workloads/{id}` | Stopping, starting and deleting an app. For a model deployment's workload the answer names its deployment (`deployment: {id, name}`): stop, start or delete the deployment instead |
+| `/x` and `/x/…`, any method | The passthrough to apps |
+| `POST /api/playground/vision/<name>/<task>` | The console's route to an exposed vision app |
 
-- **Headers.** Every answer of these, errors included, carries `Deprecation` (RFC 9745: the date it was
-  announced, `@<epoch>`) and a `Link` with `rel="deprecation"` to this section. There is no `Sunset`
-  header: 1.5 has no date yet.
-- **Log.** The server logs a warning for each of the three kinds (apps, templates, `/x/`) at most once
-  an hour, naming the request.
-- **Setup health.** `apps-deprecated` (a warning) names the apps while any exists.
+The console's API answers in its usual shape, with `code` `apps_removed`:
 
-A model deployment's workload (runtime `model`) is not deprecated: it is how models run, and reading it
-(`GET /api/workloads/<id>`, its logs) carries no header.
-
-```http
-HTTP/1.1 200 OK
-Deprecation: @1794787200
-Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
+```json
+{"detail": {"code": "apps_removed",
+            "message": "Apps (workloads that are not models) and their part of /api/workloads were removed in Forgeyard 1.5.3: deploy a model instead (…). See /guide/en/reference#apps-removed and the release notes, https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3",
+            "removed_in": "1.5.3", "see": "/guide/en/reference#apps-removed",
+            "release_notes": "https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3"}}
 ```
 
-Instead: deploy what you run as a model under **Serving**; for a model that no built-in engine runs, add a
-custom engine (**Models → Engines**, a recipe). Then delete each app with `DELETE /api/workloads/<id>`.
-The [Playground's vision models](#vision) replace the 1.3 vision templates.
+`/x/` answers in the gateway's (OpenAI's) error shape, as it always did:
 
-## The passthrough (/x/)
+```json
+{"error": {"message": "The gateway's /x/<name>/ passthrough to apps was removed in Forgeyard 1.5.3: call a model deployment at /v1 instead. …",
+           "type": "invalid_request_error", "param": null, "code": "apps_removed", "removed_in": "1.5.3",
+           "see": "/guide/en/reference#apps-removed",
+           "release_notes": "https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3"}}
+```
 
-**Deprecated in 1.4, removed in 1.5** ([Apps (deprecated)](#apps-deprecated)). Programs call an exposed app at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
-whose **Apps** setting allows it. Like `/v1`, it takes `Authorization: Bearer fyk_…` only: no
-cookies, no key in the query string, no CORS headers.
+Every 410 carries these headers: `Deprecation` (RFC 9745, the date the removal was announced) and a `Link` to this
+section and to the release notes.
 
-### Paths and methods
+```http
+HTTP/1.1 410 Gone
+Deprecation: @1794787200
+Link: </guide/en/reference#apps-removed>; rel="deprecation"; type="text/html", <https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3>; rel="help"
+```
 
-| What | Rule |
-|---|---|
-| Methods | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
-| Prefix | `/x/<name>` is removed: `/x/<name>/a/b?c=1` reaches the app as `/a/b?c=1`, and `/x/<name>` alone as `/` |
-| Path | Passed on byte for byte, as it came. Refused with 400 `invalid_path`, never normalised: `.` or `..` segments, an encoded `.`, `/` or `\` (`%2e`, `%2f`, `%5c`), a backslash, control characters (raw or encoded) and non-ASCII bytes |
-| Query | Passed on as it came |
-| Not passed on | WebSockets (`Upgrade` is removed), gRPC, HTTP/2 to the app |
+### What stays
 
-### Request and answer headers
+Reading the workloads stays: `GET /api/workloads`, `GET /api/workloads/{id}` and
+`GET /api/workloads/{id}/replicas/{n}/logs`. Every workload is now a model deployment's (runtime `model`, an engine
+trial's too); the console reads them to show what runs where and a replica's output. A workload no longer has a
+`gateway` field, and `GET /api/workloads/{id}` no longer returns `gateway_base` or `trust_url`.
+`GET /api/playground/vision/options` returns `models` only (no `tasks`).
 
-| Header | Direction | What happens |
-|---|---|---|
-| `Authorization` | request | Your API key is checked and removed; the app gets the replica's internal key, which the agent's key guard checks and removes |
-| `Cookie`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard`, `X-Forgeyard-*` | request | Removed |
-| `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` | request | Set fresh: the client's address, `https` or `http`, and the host it called |
-| `X-Forwarded-Prefix` | request | `/x/<name>` |
-| `X-Request-Id` | both | A new id per request, sent to the app and back to the client |
-| Hop-by-hop headers (`Connection` and what it names, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Expect`, `Proxy-*`) | both | Removed |
-| `Set-Cookie`, `Access-Control-*`, `Strict-Transport-Security`, `Clear-Site-Data`, `Alt-Svc`, `Service-Worker-Allowed`, `Report-To`, `NEL`, `Date`, `Server` | answer | Removed (the server sends its own `Date` and `Server`) |
-| `Content-Security-Policy` | answer | Always `sandbox; default-src 'none'; frame-ancestors 'none'` |
-| `X-Content-Type-Options`, `X-Frame-Options`, `Cache-Control`, `Cross-Origin-Resource-Policy`, `Referrer-Policy` | answer | Always `nosniff`, `DENY`, `no-store`, `same-origin` and `no-referrer` |
-| `Location`, `Content-Location` | answer | A path, or an address of the app itself, is rewritten under `/x/<name>`; other sites and relative references stay. Redirects are never followed |
-| `X-Forgeyard-Target` | answer | `workload:<name>#<replica>` |
-| `Content-Encoding`, `Content-Length` and the rest | answer | Passed on: the body is relayed as raw bytes as it arrives (compressed bodies stay compressed; SSE and chunked answers stream) |
+### API keys' workloads setting
 
-### Limits and timeouts
+A key no longer has the `workloads` setting (which apps at `/x/` it could call): `/api/keys` no longer returns
+`workloads`, `workload_list` or `workloads_locked_by`. A request that still sends `workloads` as `"none"` or `null`,
+or `workload_list` as `null` or `[]` (an older form or script sending its default), is taken as before, without
+them. Anything that asks for access to apps (`"listed"`, `"all"`, a list of names) is refused with 422
+`apps_removed`, with the same `removed_in`, `see` and `release_notes`. The key itself keeps working for models.
 
-| Limit | Default | Set on |
-|---|---|---|
-| Largest request body | 32 MiB (413 `request_too_large` above) | the app: **Largest request (MiB)**, 1 to 1,024 |
-| Wait for each piece of the answer | 600 s (504 `upstream_timeout` before the first byte) | the app: **Read timeout (s)**, 1 to 3,600 |
-| Connecting to a replica | `GATEWAY_CONNECT_TIMEOUT` (5 s); a replica that cannot be reached is skipped for the next one | the server |
-| Requests at once per replica | no limit (429 `workload_busy` when every replica is full) | the app |
-| Requests at once per key | no limit (429 `key_busy`); in the Playground, per person | the app |
-| Requests per minute | the key's own limit (429 `rate_limit_exceeded`); tokens per minute do not apply | the key |
+### What the upgrade does
 
-Every 429 carries `Retry-After`. A client that goes away closes the request to the app at once.
+When the 1.5.3 server starts, it migrates the database (migration `0019_remove_apps`) before it serves anything:
 
-**Usage** counts each request under the model `x:<name>`: requests, errors (an answer's own 5xx too),
-limited requests, bytes in (request bodies) and out (answer bodies as sent), busy time (from sending
-the request until the answer ended) and latency.
+1. **One audit entry per app**, action `workload.removed_in_upgrade`, by `forgeyard`, the app's name as the target.
+   Its details: `reason`, `workload_id`, `kind`, `runtime`, `desired_state`, `created_by`, `owner`, `created_at`,
+   `image` or `command`, `ports`, `env_names` (the names of its environment variables, never their values),
+   `replicas`, `gpus`, `machine` (when it was pinned), `exposed_at` (`/x/<name>`, when it was exposed) and `placed`
+   (where each replica ran: machine, state, GPUs, container or pid). A detail it did not have is left out.
+2. **The apps are deleted**, with their replicas and events. Nothing is force-killed: a deleted replica leaves the
+   work list its machine's agent is sent, and the agent stops and removes what it no longer wants as soon as it is
+   sent that list, as when an app was deleted before. Agents get it when they reconnect to the upgraded server; a
+   machine that is offline then stops its apps when it comes back.
+3. **One audit entry per API key** whose `/x/` setting was not *none*, action `api_key.x_access_removed`, the key's
+   name as the target: `reason`, `key`, `prefix`, `owner`, `workloads` (`listed` or `all`), `workload_list`,
+   `locked_by` and `revoked` (a revoked key is recorded too).
+4. The columns `api_keys.workloads`, `api_keys.workload_list`, `api_keys.workloads_locked_by` and `workloads.gateway`
+   are dropped.
 
-### Errors at /x/
+Model deployments, their workloads and engine trials are never touched. For 30 days after the upgrade, **Setup
+health** shows `apps-removed` (info) with what was removed and a link to the audit log, which keeps the entries
+for good (a revoked key's entry is only in the audit log: it lost nothing it could still use).
 
-Errors from the gateway have the same shape as at `/v1`. An answer from the app itself, also a
-401 or a 5xx, is passed on as it is.
+### Before you upgrade
 
-| Status | `code` | Means | What to do |
-|---|---|---|---|
-| 400 | `invalid_path` | The path has a dot segment, an encoded `.`, `/` or `\`, a backslash, a control character or non-ASCII bytes | Send the path without them |
-| 401 | `missing_api_key`, `invalid_api_key`, `revoked_api_key`, `expired_api_key`, `account_disabled` | As at `/v1` | As at `/v1` |
-| 403 | `workloads_not_allowed` | The key's **Apps** setting is *None* | Change the key's setting |
-| 404 | `workload_not_found` | No such exposed app for this key: it does not exist, is not exposed, or is not on the key's list | Check the name and the key's list |
-| 413 | `request_too_large` | The body is larger than the app's **Largest request** | Send less, or raise the limit |
-| 429 | `rate_limit_exceeded` | Over the key's requests per minute | Wait `Retry-After` seconds |
-| 429 | `workload_busy` | Every replica has as many requests in flight as **Requests at once per replica** | Wait `Retry-After` seconds, or add replicas |
-| 429 | `key_busy` | The key has as many requests in flight to this app as **Requests at once per key** | Wait for one to finish |
-| 502 | `upstream_unreachable` | No replica could be connected to (its program is down or restarting) | Check the app's output |
-| 502 | `upstream_error` | The request to the replica failed | Retry |
-| 502 | `replica_refused_key` | The replica's key guard refused the gateway's internal key | Stop and start the app |
-| 503 | `no_ready_replica` | The app is stopped, or no replica is ready, or a replica is not behind the key guard yet; the message says which | Start it, wait, or update the agent |
-| 504 | `upstream_timeout` | No answer within the app's **Read timeout** | Raise the timeout, or check the app |
+See what the upgrade will remove, and deploy what you still need as a model first.
 
-An answer that breaks off after it started cannot change its status: the connection is closed before
-the body is complete, so a client never takes a cut-off body for a whole one.
+**On the running 1.5.2 server**, through its API as an admin (sign in once with a cookie jar; writes such as the
+sign-in send the `X-Forgeyard: 1` header):
 
-### From the Playground
+```bash
+SERVER=https://192.168.1.20:7860
+curl -s --cacert forgeyard-ca.pem -c fy.cookies -H "X-Forgeyard: 1" -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "…"}' "$SERVER/api/auth/login" > /dev/null
+# The apps: every workload that is not a model's
+curl -s --cacert forgeyard-ca.pem -b fy.cookies "$SERVER/api/workloads" \
+  | jq '.workloads[] | select(.runtime != "model") | {id, name, kind, runtime, desired_state, created_by, exposed: .gateway.exposed}'
+# The API keys that could call /x/
+curl -s --cacert forgeyard-ca.pem -b fy.cookies "$SERVER/api/keys?all=true" \
+  | jq '.keys[] | select(.workloads != "none") | {name, prefix, owner: .user.username, workloads, workload_list, status}'
+rm fy.cookies
+```
 
-Since 1.4 the console's Playground offers vision models only (in its one model picker; the Vision tab
-is gone), and `GET /api/playground/vision/options` no longer lists apps (`workloads`). The route below
-still reaches an exposed vision app until 1.5 (deprecated), the way 1.3's Vision tab did: through routes of its own,
-never through `/x/`: they take the console's sign-in (its cookie, and on `POST` the `X-Forgeyard: 1`
-header from the console's own origin), and `/x/` keeps taking API keys only. Anyone signed in may use
-them. A vision app is an exposed service started with `--task detect`, `--task segment` or
-`--task depth`, as every [template](#app-templates) is.
+**Or with the 1.5.3 code, before its server first starts** (it migrates at once): `forgeyard check-apps` reads the
+server's database with the same settings as the server (`DATA_DIR`, `DATABASE_URL`) and changes nothing. It lists
+the apps and keys the upgrade will remove and exits with 1 when there is any, 0 when there is nothing (`--json` for
+a script). Run on a database that is already upgraded, it lists what the upgrade removed, from the audit log.
 
-| Route | What it does |
-|---|---|
-| `GET /api/playground/vision/options` | `models`: the vision models (see [Vision](#vision)); `tasks`: the vision tasks |
-| `POST /api/playground/vision/<name>/<task>` | The body (the image, as multipart) to the app's own `POST /v1/<task>`, nothing else: no other path, method or query |
+```bash
+uv run --no-sync python -m forgeyard check-apps
+docker run --rm -v forgeyard-data:/data tonyhuang1101/forgeyard:1.5.3 python -m forgeyard check-apps
+```
 
-The request then follows the `/x/` rules above: the same replicas and key guard, request and answer
-headers (the cookie never reaches the app), the app's **Largest request**, **Requests at
-once per replica** and **Requests at once per key** (counted per person), its timeouts, and the same
-errors. Another task than the app's, or an app that is not an exposed vision app, is 404
-`workload_not_found`; a task the vision server does not have is 404 `unknown_task`. Usage is counted
-under `x:<name>` as *console*, for the person signed in.
+(With PostgreSQL, pass the same `DATABASE_URL` the server uses, e.g. `-e DATABASE_URL=…` for Docker.)
 
-## App templates
+Then **take a backup**, as in [Back up and restore](how-to.md#back-up-and-restore): the database and
+`data/secret.key`.
 
-**Deprecated in 1.4, removed in 1.5.** The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
-`X.Y.Z` (CPU, linux/amd64 and linux/arm64) or `X.Y.Z-cuda` (torch with CUDA 13.0, linux/amd64, NVIDIA
-driver 580 or newer). Built from `images/vision` in the repository, the dependencies pinned with hashes
-and the models baked in at their revisions; it runs as an unprivileged user. `GET /api/workloads/templates`
-lists the templates with the app spec each one makes.
+### The way back
 
-| Endpoint | Takes | Returns |
-|---|---|---|
-| `GET /` | | `task`, `model`, `revision`, `licence`, `device` (`cpu` or `cuda`), `endpoint` |
-| `GET /health` | | 200 once the model is loaded |
-| `POST /v1/detect` | `image`; `threshold` (0.5), `max_detections` (100) | `detections`: `label`, `score`, `box` `[x0, y0, x1, y1]` in pixels |
-| `POST /v1/segment` | `image`; `points` `[[x, y], …]` with `labels` (1 inside, 0 outside), or `box` `[x0, y0, x1, y1]`; `multimask` (true) | `masks`: `score`, `area`, `box`, `png` (a 1-bit PNG, base64), best first |
-| `POST /v1/depth` | `image` | `depth_png` (a 16-bit PNG, base64, the image's size, nearer is brighter), `min`, `max`: relative depth, not metres |
+Going back to 1.5.2 cannot bring the removed apps back: their rows are deleted, and the audit entries only say what
+they were. The migration's downgrade adds the dropped columns back (every key *none*, nothing exposed) and nothing
+else. The way back is the backup taken before the upgrade: stop the server, restore the database and
+`data/secret.key`, and run 1.5.2 again. The agents do not need to change: they run what the restored server sends
+them.
 
-An image is a multipart file field `image` (other fields as form fields, JSON values allowed) or a JSON
-body `{"image": "<base64 or a data: URI>", …}`; PNG, JPEG or WebP, at most 20 MiB and 40 megapixels.
-Every answer also has `model`, `revision`, `width`, `height` and `ms`. The server's errors are
-`{"error": {"message", "code"}}` with 400 (`invalid_image`, `missing_image`, `missing_prompt`,
-`invalid_option`, `invalid_json`) or 413 (`image_too_large`); through `/x/` they are passed on as they are.
+## A replica's environment
 
-## App environment
-
-An app's replica starts with an empty environment. It gets only what its spec declares, plus:
+A replica (an engine's process or container) starts with an empty environment. It gets only what its engine's spec
+declares, plus:
 
 | Variable | Value |
 |---|---|
-| `FORGEYARD_WORKLOAD` | The app's name |
+| `FORGEYARD_WORKLOAD` | The workload's name (its deployment's) |
 | `FORGEYARD_REPLICA` | The replica's id |
 | `FORGEYARD_REPLICA_INDEX` | The replica's number, from 0 |
 | `PORT`, `PORT_<NAME>` | For each declared port: a process gets the host port it must listen on; a container gets its own port (the engine maps the host port to it). `PORT` is the first one |
 | `CUDA_VISIBLE_DEVICES`, `NVIDIA_VISIBLE_DEVICES`, `CUDA_DEVICE_ORDER` | NVIDIA: the UUIDs of its cards only. A replica without GPUs sees none |
 | `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES` | AMD: its cards only |
-| `PATH`, `HOME`, `LANG`, `USER`, `LOGNAME` | A process only: a basic `PATH`, its own directory as `HOME`, `LANG=C.UTF-8`, and the app account |
+| `PATH`, `HOME`, `LANG`, `USER`, `LOGNAME` | A process only: a basic `PATH`, its own directory as `HOME`, `LANG=C.UTF-8`, and the workload account |
 
 A spec that sets a GPU variable (also `HIP_VISIBLE_DEVICES` and `GPU_DEVICE_ORDINAL`), `PORT`, or
 any name that starts with `FORGEYARD_` or `PORT_` is refused. In a process's arguments and in
 environment values, `${PORT}` and `${PORT_<NAME>}` become the port. In a process's arguments,
-`${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard
-(an app exposed at `/x/`), else the agent's address.
+`${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard,
+else the agent's address.
 
 ## Change a deployment through the API
 
@@ -1160,7 +1146,7 @@ older than 1.4, which lists only keys) and `remove_note` (why nothing can be rem
 | `bytes`, `files` | Its size and number of files. A file that two revisions share counts in both |
 | `parts` | For a revision with GGUF files: each file (a split model once, with all its parts) with its own `key`, `bytes`, `catalog` and `used_by`. Removing the last one removes the revision |
 | `catalog` | The catalog models it is |
-| `used_by` | The deployments (or apps) on that machine that use it |
+| `used_by` | The deployments on that machine that use it |
 
 `engines` lists the engine archives (`key` `engine/<first 16 hex digits of the archive's SHA-256>`,
 `name`, `bytes`, `used_by`). A removal answers `freed_bytes` (what was freed on the disk) and the
@@ -1486,7 +1472,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `replica-certificate` | error | A machine whose agent serves its replicas over TLS has no certificate from this server, or it expired or is not being renewed (fewer than 3 days left): its replicas cannot be reached ([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)) |
 | `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
 | `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
-| `apps-deprecated` | warning | Apps (workloads that are not models) exist: they, their API and `/x/` are removed in 1.5 |
+| `apps-removed` | info | The 1.5.3 upgrade removed apps or API keys' `/x/` access ([Apps (removed)](#apps-removed)); shown for 30 days after it, naming them, with a link to the audit log |
 | `process-workloads-off` | note | An online agent refuses to run processes; the finding gives its reason |
 | `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
 | `machine-simulated` | warning | A machine reports simulated hardware |
@@ -1525,6 +1511,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `uv run python main.py` | Start the server (same as `python -m forgeyard serve`, or `python -m forgeyard` alone). Database changes run on start |
 | `python -m forgeyard secrets reset --yes` | The secret key is lost: make a new one and drop what it encrypted (stop the server first). Without `--yes` it only says what it would drop |
 | `python -m forgeyard secrets restore FILE` | Put back the secret key and the CA from a key backup downloaded from the console (stop the server first). Asks for the passphrase. `--data-dir DIR`: another data folder; `--force`: replace a different key or CA already there (the old files are kept as `<name>.replaced-<time>`); `--passphrase-file PATH`: the passphrase from a file's first line. Exit 2, nothing written, on a wrong passphrase, a damaged file or a different key already there |
+| `python -m forgeyard check-apps` | Lists what upgrading to 1.5.3 removes (apps, API keys' `/x/` access), or removed, without changing anything ([Before you upgrade](#before-you-upgrade)). Exit 1: something will be removed; 0: nothing will, or the database is already upgraded. `--json`: machine-readable |
 | `python -m forgeyard --version` | The version |
 
 ### The key backup file
@@ -1563,7 +1550,7 @@ already `forgeyard agent`, so add only the rest (`… forgeyard-agent:<version> 
 | Command | What it does |
 |---|---|
 | `forgeyard agent` | Run the agent (the service runs `forgeyard agent --config /etc/forgeyard/agent.toml`). With a join token and no credential yet, it joins first; `--rejoin` joins again as a new machine |
-| `forgeyard agent init [--print] [--force]` | Write `/etc/forgeyard/agent.toml` from what is detected (GPUs, Docker or Podman, systemd, an app account), and print it. `--print` only prints. Flags given here (`--server`, `--ca-fingerprint`, `--model-cache`…) go into the file |
+| `forgeyard agent init [--print] [--force]` | Write `/etc/forgeyard/agent.toml` from what is detected (GPUs, Docker or Podman, systemd, a workload account), and print it. `--print` only prints. Flags given here (`--server`, `--ca-fingerprint`, `--model-cache`…) go into the file |
 | `forgeyard agent join --join-token fyj_…` | Join with the file's settings, save the credential and exit. Already joined: nothing to do; `--rejoin` joins again as a new machine |
 | `forgeyard agent config [--get KEY]` | Every setting in effect and where it came from; `--get models.cache` prints one value |
 | `forgeyard agent trust --server https://… [--ca-fingerprint …]` | Switch a joined machine to another address or CA, keeping its credential |
@@ -1904,14 +1891,14 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.5.2` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
+- **Tags**: `1.5.3` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with
   `DATA_DIR=/data` (a volume), `HOST=0.0.0.0` and `PORT=7860` (exposed), and a health check on
   `/api/health`. [Run the server in Docker](how-to.md#run-the-server-in-docker).
 - **The agent image** runs `forgeyard agent` behind `tini`, as root (it drives the host's Docker),
-  with `FORGEYARD_LIMITS=rlimit`, the app account `forgeyard-run` (uid 990) and a volume at
+  with `FORGEYARD_LIMITS=rlimit`, the workload account `forgeyard-run` (uid 990) and a volume at
   `/var/lib/forgeyard-agent`. [Run the agent in Docker](how-to.md#run-the-agent-in-docker).
 - **Which agent image a server names**: [`AGENT_IMAGE`](#machines), else the published one at the
   server's version. When nothing is published (the namespace in `forgeyard/install/images.py` is

@@ -51,7 +51,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰（Hugging Face 權杖、供應商金鑰、副本金鑰、應用程式環境變數的值）。請和資料庫分開備份 |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰（Hugging Face 權杖、供應商金鑰、副本金鑰、workload 環境變數的值）。請和資料庫分開備份 |
 | `FORGEYARD_SECRET_KEY` | — | 直接給金鑰本身（32 位元組的 base64），取代檔案。兩者只設一個：兩個都設的話，會使用這一個，並忽略檔案 |
 
 ### 帳號與登入
@@ -600,7 +600,7 @@ local_dirs = ["/data/models"]
 | 403 `metrics_local_only` | `METRICS_TOKEN` 留空，而請求來自其他位址或經過 proxy |
 | 421 | 請求的主機名稱不是伺服器會回應的名稱（`ALLOWED_HOSTS`），所有路徑都一樣 |
 
-閘道的指標計算的是用量統計所計算的請求（`/v1`、試用區、`/x/` 和影片工作），在請求結束時計入：
+閘道的指標計算的是用量統計所計算的請求（`/v1`、試用區和影片工作），在請求結束時計入：
 
 | 指標 | 類型 | 標籤 | 是什麼 |
 |---|---|---|---|
@@ -641,139 +641,119 @@ local_dirs = ["/data/models"]
 
 另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱；`recipe` 標籤是配方的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
 
-## 應用程式（已淘汰）
+## 應用程式（已移除）
 
-應用程式，也就是不是模型的 workload（1.4，#88），已經離開主控台，**1.5 會移除**，並以 migration 移除剩下的應用程式。在那之前，它們仍可透過 API 使用，並會明白告知：
+**1.5.3 移除**（#89），1.4 起已淘汰（#88）。應用程式是指不是模型的 workload：你自己的容器或行程，透過 `POST /api/workloads` 建立，可能來自範本，也可能公開在閘道的 `/x/<name>/` 後面。Forgeyard 的重點是執行和管理模型，所以應用程式、範本和 `/x/` 都已移除。升級到 1.5.3 時會移除剩下的應用程式，並把每一個都寫進稽核紀錄。
 
-| 已淘汰 | 內容 |
+**替代做法：**把需要的東西當成模型在 **服務中** 部署。內建推論引擎跑不了的模型，加一個自訂推論引擎（**模型 → 推論引擎**，一份 recipe）。[視覺模型](#vision)取代 1.3 的視覺範本：從 **模型** 部署偵測、分割、深度和圖片分類模型，在 `/v1/vision/<task>` 呼叫。
+
+### 回 410 的位址
+
+下面這些位址在 1.5.x 剩下的版本都回 **410 Gone**，讓還在呼叫它們的腳本或程式知道原因。從 1.6 起改回一般的 404。
+
+| 位址 | 原本是 |
 |---|---|
-| `/api/workloads` 裡屬於應用程式的部分 | `POST /api/workloads`；以及應用程式的 `GET`、`PUT …/gateway`、`POST …/stop`、`POST …/start`、`DELETE` 和 `GET …/replicas/<n>/logs`；清單裡有應用程式時的 `GET /api/workloads` |
+| `POST /api/workloads` | 建立應用程式 |
 | `GET /api/workloads/templates` | 1.3 的範本 |
-| `/x/<name>/…` | [直通](#the-passthrough-x)，以及主控台自己送到公開視覺應用程式的 `POST /api/playground/vision/<name>/<task>` |
-| 金鑰的 `workloads` 與 `workload_list` | `/api/keys` 仍會接受並回傳，但主控台不再顯示，`GET /api/keys` 也不再列出金鑰可以指定的應用程式 |
+| `PUT /api/workloads/{id}/gateway` | 把應用程式公開在 `/x/` |
+| `POST /api/workloads/{id}/stop`、`POST /api/workloads/{id}/start`、`DELETE /api/workloads/{id}` | 停止、啟動和刪除應用程式。如果是模型部署的 workload，回應會寫出它的部署（`deployment: {id, name}`）：請改為停止、啟動或刪除那個部署 |
+| `/x` 和 `/x/…`，任何方法 | 到應用程式的直通 |
+| `POST /api/playground/vision/<name>/<task>` | 主控台送到公開視覺應用程式的路由 |
 
-- **標頭。** 這些路由的每個回應（包括錯誤）都帶 `Deprecation`（RFC 9745：宣布淘汰的日期，`@<epoch>`），以及一個 `rel="deprecation"` 的 `Link`，指向這一節。沒有 `Sunset` 標頭：1.5 還沒有日期。
-- **紀錄。** 伺服器對三類（應用程式、範本、`/x/`）各自最多每小時記一次警告，並寫出是哪個請求。
-- **設定健康檢查。** 只要還有任何應用程式，`apps-deprecated`（警告）就會列出它們的名稱。
+主控台的 API 以它平常的格式回應，`code` 是 `apps_removed`：
 
-模型部署的 workload（runtime 為 `model`）沒有淘汰：模型就是這樣跑的，讀取它（`GET /api/workloads/<id>`、它的紀錄）不會帶這些標頭。
-
-```http
-HTTP/1.1 200 OK
-Deprecation: @1794787200
-Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
+```json
+{"detail": {"code": "apps_removed",
+            "message": "Apps (workloads that are not models) and their part of /api/workloads were removed in Forgeyard 1.5.3: deploy a model instead (…). See /guide/en/reference#apps-removed and the release notes, https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3",
+            "removed_in": "1.5.3", "see": "/guide/en/reference#apps-removed",
+            "release_notes": "https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3"}}
 ```
 
-替代做法：把要跑的東西當成模型在 **服務中** 部署；內建推論引擎跑不了的模型，加一個自訂推論引擎（**模型 → 推論引擎**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[試用區的視覺模型](#vision)取代 1.3 的視覺範本。
+`/x/` 和以前一樣，以閘道（OpenAI）的錯誤格式回應：
 
-## 直通（/x/）
+```json
+{"error": {"message": "The gateway's /x/<name>/ passthrough to apps was removed in Forgeyard 1.5.3: call a model deployment at /v1 instead. …",
+           "type": "invalid_request_error", "param": null, "code": "apps_removed", "removed_in": "1.5.3",
+           "see": "/guide/en/reference#apps-removed",
+           "release_notes": "https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3"}}
+```
 
-**1.4 起淘汰，1.5 移除**（[應用程式（已淘汰）](#apps-deprecated)）。程式以 **Apps** 設定允許的 API 金鑰，在 `https://<server>:7860/x/<name>/<path>?<query>` 呼叫公開的應用程式。和 `/v1` 一樣只接受 `Authorization: Bearer fyk_…`：不接受 cookie、不接受放在查詢字串裡的金鑰、不送 CORS 標頭。
+每個 410 都帶這些標頭：`Deprecation`（RFC 9745，宣布移除的日期），以及一個 `Link`，指向這一節和版本說明。
 
-### 路徑與方法
+```http
+HTTP/1.1 410 Gone
+Deprecation: @1794787200
+Link: </guide/en/reference#apps-removed>; rel="deprecation"; type="text/html", <https://github.com/xianhong1208/forgeyard/releases/tag/v1.5.3>; rel="help"
+```
 
-| 項目 | 規則 |
-|---|---|
-| 方法 | `GET`、`HEAD`、`POST`、`PUT`、`PATCH`、`DELETE`、`OPTIONS` |
-| 前綴 | `/x/<name>` 會被拿掉：`/x/<name>/a/b?c=1` 到應用程式那邊是 `/a/b?c=1`，只有 `/x/<name>` 則是 `/` |
-| 路徑 | 原封不動、逐位元組轉送。以下情況回 400 `invalid_path` 拒絕，絕不正規化：`.` 或 `..` 路徑段、編碼過的 `.`、`/` 或 `\`（`%2e`、`%2f`、`%5c`）、反斜線、控制字元（原始或編碼過的）以及非 ASCII 位元組 |
-| 查詢字串 | 原封不動轉送 |
-| 不轉送 | WebSocket（`Upgrade` 會被拿掉）、gRPC、到應用程式的 HTTP/2 |
+### 保留的部分
 
-### 請求與回應標頭
+讀取 workload 的 API 保留：`GET /api/workloads`、`GET /api/workloads/{id}` 和 `GET /api/workloads/{id}/replicas/{n}/logs`。現在每個 workload 都屬於某個模型部署（runtime 為 `model`，試跑的也是）；主控台讀取它們來顯示什麼在哪裡跑，以及副本的輸出。workload 不再有 `gateway` 欄位，`GET /api/workloads/{id}` 也不再回傳 `gateway_base` 或 `trust_url`。`GET /api/playground/vision/options` 只回傳 `models`（沒有 `tasks`）。
 
-| 標頭 | 方向 | 會怎樣 |
-|---|---|---|
-| `Authorization` | 請求 | 檢查你的 API 金鑰後拿掉；應用程式收到的是副本的內部金鑰，由 agent 的金鑰守門員檢查後拿掉 |
-| `Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP`、`X-Forgeyard`、`X-Forgeyard-*` | 請求 | 拿掉 |
-| `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host` | 請求 | 重新設定：用戶端的位址、`https` 或 `http`，以及它呼叫的主機 |
-| `X-Forwarded-Prefix` | 請求 | `/x/<name>` |
-| `X-Request-Id` | 雙向 | 每個請求一個新 id，送給應用程式，也回給用戶端 |
-| 逐跳標頭（`Connection` 和它列出的標頭、`Keep-Alive`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`、`Expect`、`Proxy-*`） | 雙向 | 拿掉 |
-| `Set-Cookie`、`Access-Control-*`、`Strict-Transport-Security`、`Clear-Site-Data`、`Alt-Svc`、`Service-Worker-Allowed`、`Report-To`、`NEL`、`Date`、`Server` | 回應 | 拿掉（伺服器會送它自己的 `Date` 和 `Server`） |
-| `Content-Security-Policy` | 回應 | 一律是 `sandbox; default-src 'none'; frame-ancestors 'none'` |
-| `X-Content-Type-Options`、`X-Frame-Options`、`Cache-Control`、`Cross-Origin-Resource-Policy`、`Referrer-Policy` | 回應 | 一律是 `nosniff`、`DENY`、`no-store`、`same-origin` 和 `no-referrer` |
-| `Location`、`Content-Location` | 回應 | 路徑，或指向應用程式自己的位址，會改寫到 `/x/<name>` 底下；其他網站和相對參照不變。絕不跟隨轉址 |
-| `X-Forgeyard-Target` | 回應 | `workload:<name>#<replica>` |
-| `Content-Encoding`、`Content-Length` 和其他標頭 | 回應 | 照樣轉送：本文以原始位元組、一到就轉送（壓縮的本文維持壓縮；SSE 和 chunked 回應會串流） |
+### API 金鑰的 workloads 設定
 
-### 限制與逾時
+金鑰不再有 `workloads` 設定（它可以呼叫 `/x/` 上的哪些應用程式）：`/api/keys` 不再回傳 `workloads`、`workload_list` 或 `workloads_locked_by`。請求如果還是送 `workloads` 為 `"none"` 或 `null`，或 `workload_list` 為 `null` 或 `[]`（舊的表單或腳本送出它的預設值），會照常處理，忽略這兩個欄位。任何要求存取應用程式的值（`"listed"`、`"all"`、一串名稱）都會被拒絕，回 422 `apps_removed`，帶同樣的 `removed_in`、`see` 和 `release_notes`。金鑰本身仍可照常呼叫模型。
 
-| 限制 | 預設值 | 在哪裡設定 |
-|---|---|---|
-| 最大請求本文 | 32 MiB（超過回 413 `request_too_large`） | 應用程式：**Largest request (MiB)**，1 到 1,024 |
-| 等回應每一段的時間 | 600 秒（第一個位元組之前逾時回 504 `upstream_timeout`） | 應用程式：**Read timeout (s)**，1 到 3,600 |
-| 連到副本 | `GATEWAY_CONNECT_TIMEOUT`（5 秒）；連不到的副本會跳過，改試下一個 | 伺服器 |
-| 每個副本同時處理的請求 | 不限（每個副本都滿了時回 429 `workload_busy`） | 應用程式 |
-| 每把金鑰同時進行的請求 | 不限（429 `key_busy`）；在試用區裡以每個人計算 | 應用程式 |
-| 每分鐘請求數 | 金鑰自己的限制（429 `rate_limit_exceeded`）；每分鐘 token 數不適用 | 金鑰 |
+### 升級時會做什麼
 
-每個 429 都帶 `Retry-After`。用戶端離開時，到應用程式的請求會立刻關閉。
+1.5.3 的伺服器啟動時，會先遷移資料庫（migration `0019_remove_apps`），之後才開始服務：
 
-**用量** 把每個請求記在模型 `x:<name>` 底下：請求數、錯誤（包括回應本身的 5xx）、被限制的請求、送進的位元組（請求本文）和送出的位元組（實際送出的回應本文）、忙碌時間（從送出請求到回應結束）和延遲。
+1. **每個應用程式一筆稽核紀錄**，動作是 `workload.removed_in_upgrade`，執行者是 `forgeyard`，對象是應用程式的名稱。細節有：`reason`、`workload_id`、`kind`、`runtime`、`desired_state`、`created_by`、`owner`、`created_at`、`image` 或 `command`、`ports`、`env_names`（環境變數的名稱，絕不記錄值）、`replicas`、`gpus`、`machine`（有固定在某台機器時）、`exposed_at`（有公開時，`/x/<name>`）以及 `placed`（每個副本在哪裡跑：機器、狀態、GPU、容器或 pid）。它沒有的細節就不記。
+2. **刪除應用程式**，連同它們的副本和事件。不會強制終止任何東西：刪掉的副本會離開送給那台機器 agent 的工作清單，agent 一收到這份清單，就停止並移除不再需要的東西，和以前刪除應用程式時一樣。agent 重新連上升級後的伺服器時就會收到；當時離線的機器，回來時才停止它的應用程式。
+3. **每把 `/x/` 設定不是 *none* 的 API 金鑰一筆稽核紀錄**，動作是 `api_key.x_access_removed`，對象是金鑰的名稱：`reason`、`key`、`prefix`、`owner`、`workloads`（`listed` 或 `all`）、`workload_list`、`locked_by` 和 `revoked`（已撤銷的金鑰也會記錄）。
+4. 刪除 `api_keys.workloads`、`api_keys.workload_list`、`api_keys.workloads_locked_by` 和 `workloads.gateway` 這幾個欄位。
 
-### /x/ 的錯誤
+模型部署、它們的 workload 和試跑都不會被動到。升級後 30 天內，**設定健康檢查**會顯示 `apps-removed`（資訊），列出移除了什麼，並附上稽核紀錄的連結；稽核紀錄會一直保留這些紀錄（已撤銷金鑰的紀錄只在稽核紀錄裡：它沒有失去任何還能用的東西）。
 
-閘道產生的錯誤和 `/v1` 的格式相同。應用程式本身的回應，包括 401 或 5xx，會原樣轉送。
+### 升級之前
 
-| 狀態碼 | `code` | 意思 | 怎麼處理 |
-|---|---|---|---|
-| 400 | `invalid_path` | 路徑有 `.` 路徑段、編碼過的 `.`、`/` 或 `\`、反斜線、控制字元或非 ASCII 位元組 | 不要送這些 |
-| 401 | `missing_api_key`、`invalid_api_key`、`revoked_api_key`、`expired_api_key`、`account_disabled` | 和 `/v1` 相同 | 和 `/v1` 相同 |
-| 403 | `workloads_not_allowed` | 金鑰的 **Apps** 設定是 *None* | 修改金鑰的設定 |
-| 404 | `workload_not_found` | 對這把金鑰來說沒有這個公開的應用程式：不存在、沒有公開，或不在金鑰的清單裡 | 檢查名稱和金鑰的清單 |
-| 413 | `request_too_large` | 本文超過應用程式的 **Largest request** | 少送一點，或調高限制 |
-| 429 | `rate_limit_exceeded` | 超過金鑰的每分鐘請求數 | 等 `Retry-After` 秒 |
-| 429 | `workload_busy` | 每個副本進行中的請求都達到 **Requests at once per replica** | 等 `Retry-After` 秒，或增加副本 |
-| 429 | `key_busy` | 這把金鑰對這個應用程式進行中的請求達到 **Requests at once per key** | 等其中一個完成 |
-| 502 | `upstream_unreachable` | 連不到任何副本（它的程式停了或正在重新啟動） | 看應用程式的輸出 |
-| 502 | `upstream_error` | 送到副本的請求失敗 | 重試 |
-| 502 | `replica_refused_key` | 副本的金鑰守門員拒絕了閘道的內部金鑰 | 停止再啟動應用程式 |
-| 503 | `no_ready_replica` | 應用程式已停止、沒有副本就緒，或有副本還不在金鑰守門員後面；訊息會說是哪一種 | 啟動它、等一下，或更新 agent |
-| 504 | `upstream_timeout` | 在應用程式的 **Read timeout** 內沒有回應 | 調高逾時，或檢查應用程式 |
+先看看升級會移除什麼，並把還需要的東西先當成模型部署好。
 
-已經開始的回應如果中斷，狀態碼就無法再改：連線會在本文完整之前關閉，所以用戶端絕不會把被截斷的本文當成完整的。
+**在執行中的 1.5.2 伺服器上**，以管理員身分透過它的 API 查詢（用 cookie jar 登入一次；登入這類寫入要送 `X-Forgeyard: 1` 標頭）：
 
-### 從試用區呼叫
+```bash
+SERVER=https://192.168.1.20:7860
+curl -s --cacert forgeyard-ca.pem -c fy.cookies -H "X-Forgeyard: 1" -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "…"}' "$SERVER/api/auth/login" > /dev/null
+# The apps: every workload that is not a model's
+curl -s --cacert forgeyard-ca.pem -b fy.cookies "$SERVER/api/workloads" \
+  | jq '.workloads[] | select(.runtime != "model") | {id, name, kind, runtime, desired_state, created_by, exposed: .gateway.exposed}'
+# The API keys that could call /x/
+curl -s --cacert forgeyard-ca.pem -b fy.cookies "$SERVER/api/keys?all=true" \
+  | jq '.keys[] | select(.workloads != "none") | {name, prefix, owner: .user.username, workloads, workload_list, status}'
+rm fy.cookies
+```
 
-1.4 起，console 的試用區只提供視覺模型（在它唯一的模型選單裡；Vision 分頁已移除），`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的 Vision 分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
+**或用 1.5.3 的程式，在它的伺服器第一次啟動之前**（伺服器一啟動就會遷移）：`forgeyard check-apps` 用和伺服器相同的設定（`DATA_DIR`、`DATABASE_URL`）讀取伺服器的資料庫，不做任何變更。它會列出升級會移除的應用程式和金鑰，有任何一項就以 1 結束，沒有就以 0 結束（腳本可以用 `--json`）。在已經升級的資料庫上執行時，它會從稽核紀錄列出升級移除了什麼。
 
-| 路由 | 做什麼 |
-|---|---|
-| `GET /api/playground/vision/options` | `models`：視覺模型（見[視覺](#vision)）；`tasks`：視覺任務 |
-| `POST /api/playground/vision/<name>/<task>` | 把本文（圖片，multipart）送到應用程式自己的 `POST /v1/<task>`，不會送到別處：沒有其他路徑、方法或查詢字串 |
+```bash
+uv run --no-sync python -m forgeyard check-apps
+docker run --rm -v forgeyard-data:/data tonyhuang1101/forgeyard:1.5.3 python -m forgeyard check-apps
+```
 
-之後請求依照上面 `/x/` 的規則：同樣的副本和金鑰守門員、請求與回應標頭（cookie 絕不會送到應用程式）、應用程式的 **Largest request**、**Requests at once per replica** 和 **Requests at once per key**（以每個人計算）、它的逾時，以及同樣的錯誤。任務和應用程式的不同，或應用程式不是公開的視覺應用程式，回 404 `workload_not_found`；視覺伺服器沒有的任務回 404 `unknown_task`。用量記在 `x:<name>` 底下，來源是 *console*，算在登入的人身上。
+（使用 PostgreSQL 時，傳入伺服器用的同一個 `DATABASE_URL`，例如 Docker 用 `-e DATABASE_URL=…`。）
 
-## 應用程式範本
+然後**做一次備份**，做法見[備份與還原](how-to.md#back-up-and-restore)：資料庫和 `data/secret.key`。
 
-**1.4 起淘汰，1.5 移除。**範本執行伺服器版本的 `docker.io/tonyhuang1101/forgeyard-vision`：tag `X.Y.Z`（CPU，linux/amd64 與 linux/arm64）或 `X.Y.Z-cuda`（CUDA 13.0 的 torch，linux/amd64，NVIDIA 驅動 580 或更新）。它由儲存庫裡的 `images/vision` 建置，相依套件以雜湊值固定，模型以固定的 revision 包在裡面，並以無特權的使用者執行。`GET /api/workloads/templates` 會列出範本，以及每個範本產生的應用程式規格。
+### 回到原本的版本
 
-| 端點 | 接受 | 回傳 |
-|---|---|---|
-| `GET /` | | `task`、`model`、`revision`、`licence`、`device`（`cpu` 或 `cuda`）、`endpoint` |
-| `GET /health` | | 模型載入後回 200 |
-| `POST /v1/detect` | `image`；`threshold`（0.5）、`max_detections`（100） | `detections`：`label`、`score`、`box` `[x0, y0, x1, y1]`（像素） |
-| `POST /v1/segment` | `image`；`points` `[[x, y], …]` 加上 `labels`（1 在裡面，0 在外面），或 `box` `[x0, y0, x1, y1]`；`multimask`（true） | `masks`：`score`、`area`、`box`、`png`（1 位元 PNG，base64），最好的在前 |
-| `POST /v1/depth` | `image` | `depth_png`（16 位元 PNG，base64，和圖片同樣大小，越近越亮）、`min`、`max`：相對深度，不是公尺 |
+回到 1.5.2 無法把移除的應用程式帶回來：它們的資料列已經刪除，稽核紀錄只記下它們原本是什麼。migration 的 downgrade 只會加回刪掉的欄位（每把金鑰都是 *none*，沒有任何公開），其他什麼都不做。要回去，就用升級前的備份：停止伺服器，還原資料庫和 `data/secret.key`，再執行 1.5.2。agent 不需要變更：它們會執行還原後的伺服器送來的東西。
 
-圖片以 multipart 檔案欄位 `image` 送出（其他欄位當表單欄位，可以是 JSON 值），或以 JSON 本文 `{"image": "<base64 或 data: URI>", …}` 送出；PNG、JPEG 或 WebP，最多 20 MiB、4000 萬像素。每個回應也都有 `model`、`revision`、`width`、`height` 和 `ms`。伺服器的錯誤是 `{"error": {"message", "code"}}`，狀態碼 400（`invalid_image`、`missing_image`、`missing_prompt`、`invalid_option`、`invalid_json`）或 413（`image_too_large`）；經過 `/x/` 時會原樣轉送。
+## 副本的環境變數
 
-## 應用程式的環境變數
-
-應用程式的副本從空的環境開始，只拿到它的規格宣告的變數，再加上：
+副本（推論引擎的行程或容器）從空的環境開始，只拿到推論引擎的規格宣告的變數，再加上：
 
 | 變數 | 值 |
 |---|---|
-| `FORGEYARD_WORKLOAD` | 應用程式的名稱 |
+| `FORGEYARD_WORKLOAD` | workload 的名稱（它所屬部署的） |
 | `FORGEYARD_REPLICA` | 副本的 id |
 | `FORGEYARD_REPLICA_INDEX` | 副本的編號，從 0 開始 |
-| `PORT`、`PORT_<NAME>` | 每個宣告的連接埠：行程拿到它必須監聽的主機連接埠；容器拿到它自己的連接埠（推論引擎會把主機連接埠對應過去）。`PORT` 是第一個 |
+| `PORT`、`PORT_<NAME>` | 每個宣告的連接埠：行程拿到它必須監聽的主機連接埠；容器拿到它自己的連接埠（容器引擎會把主機連接埠對應過去）。`PORT` 是第一個 |
 | `CUDA_VISIBLE_DEVICES`、`NVIDIA_VISIBLE_DEVICES`、`CUDA_DEVICE_ORDER` | NVIDIA：只有它自己的卡的 UUID。沒有 GPU 的副本看不到任何卡 |
 | `ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES` | AMD：只有它自己的卡 |
 | `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及執行行程的帳號 |
 
-規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面（公開在 `/x/` 的應用程式）是 `127.0.0.1`，否則是 agent 自己的位址。
+規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面是 `127.0.0.1`，否則是 agent 自己的位址。
 
 ## 透過 API 修改部署
 
@@ -899,7 +879,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `bytes`、`files` | 大小和檔案數。兩個 revision 共用的檔案兩邊都會算 |
 | `parts` | 有 GGUF 檔的 revision：每個檔案（分割的模型只算一次，包含所有部分）各有自己的 `key`、`bytes`、`catalog` 和 `used_by`。刪掉最後一個就會刪掉整個 revision |
 | `catalog` | 它對應的目錄模型 |
-| `used_by` | 那台機器上使用它的部署（或應用程式） |
+| `used_by` | 那台機器上使用它的部署 |
 
 `engines` 列出推論引擎的壓縮檔（`key` 為 `engine/<壓縮檔 SHA-256 的前 16 個十六進位數字>`、`name`、`bytes`、`used_by`）。刪除的回應有 `freed_bytes`（磁碟上釋出的空間）和刪除後的清單（`cache`）。
 
@@ -1094,7 +1074,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `replica-certificate` | 錯誤 | 某台機器的 agent 以 TLS 提供副本，卻沒有這台伺服器簽發的憑證，或憑證已過期、沒有在更新（剩不到 3 天）：連不到它的副本（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)） |
 | `gpus-shared-no-allowlist` | 警告 | 某台機器的顯示卡佔用的記憶體比 Forgeyard 在那裡保留的多出至少 1 GiB，而且沒有人選擇它的 GPU 存取 |
 | `machine-no-models` | 提示 | 某個上線的 agent 沒有模型快取，所以不會有模型放到那裡。如果它有 GPU，則是警告 |
-| `apps-deprecated` | 警告 | 有應用程式（不是模型的 workload）：它們、它們的 API 和 `/x/` 會在 1.5 移除 |
+| `apps-removed` | 資訊 | 1.5.3 的升級移除了應用程式或 API 金鑰的 `/x/` 存取權（[應用程式（已移除）](#apps-removed)）；升級後 30 天內顯示，列出名稱，並附上稽核紀錄的連結 |
 | `process-workloads-off` | 提示 | 某個上線的 agent 拒絕行程；檢查結果會說明原因 |
 | `model-cache-full` | 警告 | 某台機器的模型快取磁碟剩餘空間不到 10% |
 | `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |
@@ -1133,6 +1113,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`，或單獨的 `python -m forgeyard`）。資料庫的變更會在啟動時執行 |
 | `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器）。沒有 `--yes` 時只說明會捨棄什麼 |
 | `python -m forgeyard secrets restore FILE` | 從主控台下載的金鑰備份放回機密金鑰和 CA（請先停止伺服器）。會詢問通關密語。`--data-dir DIR`：寫到另一個資料夾；`--force`：取代那裡已有的不同金鑰或 CA（舊檔案保留為 `<名稱>.replaced-<時間>`）；`--passphrase-file PATH`：從檔案的第一行讀取通關密語。通關密語錯誤、檔案損壞或那裡已有不同的金鑰時，結束代碼為 2，什麼都不寫入 |
+| `python -m forgeyard check-apps` | 列出升級到 1.5.3 會移除（或已移除）的東西（應用程式、API 金鑰的 `/x/` 存取權），不做任何變更（[升級之前](#before-you-upgrade)）。以 1 結束：有東西會被移除；以 0 結束：沒有，或資料庫已經升級。`--json`：機器可讀的輸出 |
 | `python -m forgeyard --version` | 顯示版本 |
 
 ### 金鑰備份檔
@@ -1352,7 +1333,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.5.2`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.5.3`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**加入機器** 會說明怎麼建置。

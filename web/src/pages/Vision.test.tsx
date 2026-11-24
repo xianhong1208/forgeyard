@@ -247,12 +247,12 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
     expect(await within(panel).findByText("The model could not read this image. Send a PNG, JPEG or WebP picture.")).toBeTruthy();
     expect(calls).toBe(1);
-    expect(visionError(413, { error: { code: "request_too_large", message: "x" } }, 4)).toBe("The image is too large for this app: it takes at most 4 MiB.");
+    expect(visionError(413, { error: { code: "request_too_large", message: "x" } }, 4)).toBe("The image is too large for this model: it takes at most 4 MiB.");
     expect(visionError(400, { error: { code: "invalid_image", message: "x" } }, 4)).toMatch(/could not read this image/);
-    expect(visionError(503, { error: { code: "no_ready_replica", message: "The workload 'd' is stopped." } }, 4)).toBe("The app is not ready: The workload 'd' is stopped.");
+    expect(visionError(503, { error: { code: "no_ready_replica", message: "The workload 'd' is stopped." } }, 4)).toBe("The model is not ready: The workload 'd' is stopped.");
     expect(visionError(500, null, 4)).toBe("500: the server had a problem.");
-    expect(visionError(404, { error: { code: "model_not_found", message: "x" } }, 4, "model")).toMatch(/no longer deployed/);
-    expect(visionError(504, { error: { code: "upstream_timeout", message: "x" } }, 4, "model")).toMatch(/^The model did not answer in time/);
+    expect(visionError(404, { error: { code: "model_not_found", message: "x" } }, 4)).toMatch(/no longer deployed/);
+    expect(visionError(504, { error: { code: "upstream_timeout", message: "x" } }, 4)).toMatch(/^The model did not answer in time/);
   });
 
   it("FY-WEB-194: a vision model opens from the Playground's address with no tab, and the overlay geometry", async () => {
@@ -326,8 +326,8 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
     await within(panel).findByRole("list", { name: "Detected objects" });
     expect(sent[0].get("labels")).toBeNull();
-    expect(visionError(400, { error: { code: "labels_required", message: "x" } }, 20, "model")).toMatch(/^This model finds what you name/);
-    expect(visionError(400, { error: { code: "labels_not_supported", message: "x" } }, 20, "model")).toMatch(/fixed set of classes/);
+    expect(visionError(400, { error: { code: "labels_required", message: "x" } }, 20)).toMatch(/^This model finds what you name/);
+    expect(visionError(400, { error: { code: "labels_not_supported", message: "x" } }, 20)).toMatch(/fixed set of classes/);
   });
 
   it("FY-WEB-502: the names typed are checked before anything is sent", () => {
@@ -395,9 +395,9 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     expect(sent[0].get("top_k")).toBeNull();
     expect(within(list).getAllByRole("listitem")).toHaveLength(3);
     expect(within(panel).getByText(/Each label is scored on its own/)).toBeTruthy();
-    expect(visionError(400, { error: { code: "labels_required", message: "This model classifies into the labels you send" } }, 20, "model"))
+    expect(visionError(400, { error: { code: "labels_required", message: "This model classifies into the labels you send" } }, 20))
       .toMatch(/chooses among the labels you give/);
-    expect(visionError(400, { error: { code: "labels_not_supported", message: "This classifier knows a fixed set" } }, 20, "model"))
+    expect(visionError(400, { error: { code: "labels_not_supported", message: "This classifier knows a fixed set" } }, 20))
       .toMatch(/cannot be given labels/);
   });
 });

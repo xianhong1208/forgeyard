@@ -6,6 +6,104 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.3] — 2026-11-24
+
+Apps are removed (#89): their API, the app templates and the gateway's `/x/` passthrough. They were deprecated in
+1.4 (#88). Forgeyard runs and manages models, and that does not change: model deployments, their routes, the API
+keys, `/v1` and the console work as before. **This is a breaking change in a patch release**, announced in 1.4:
+before you upgrade a server, read the breaking changes below and run the check they describe.
+
+**The agents need no update.** No agent code changed since 1.5.2 (`git diff v1.5.2..v1.5.3 -- forgeyard/agent` is
+empty, and so are the shared modules the agent imports), so a 1.5.x agent works with a 1.5.3 server as it is: the
+agent a machine already runs stops the removed apps there, as it always did for a deleted app. Setup health lists a
+1.5.2 agent as older than the server; its **Update the agent** command can wait.
+
+**One migration runs on start**, `0019_remove_apps`, and it deletes the apps that are left: going back to 1.5.2
+means restoring the backup taken before the upgrade, so **back up before upgrading**
+([how](docs/guide/how-to.md#back-up-and-restore)).
+
+### Breaking changes
+
+- **Apps, their API, the app templates and the gateway's `/x/` are removed (#89).** An app was a workload that is
+  not a model deployment's: your own container or process, made with `POST /api/workloads` (perhaps from a
+  template) and perhaps exposed at `/x/<name>/`. They were deprecated in 1.4 (#88): every answer carried a
+  `Deprecation` header, and Setup health warned while any app existed. The workload engine stays, since every model
+  deployment and engine trial runs on it; only apps go.
+  - **Does it affect you?** Only if your server still has apps, a program calls `/x/`, the templates or
+    `POST /api/workloads`, or an API key has an `/x/` setting other than `none`. Model deployments, their routes,
+    the API keys themselves, `/v1` and the console are not affected.
+  - **Check before you upgrade.** Either way reads only and changes nothing:
+    - **With the 1.5.3 code, before its server first starts** (the server migrates at once):
+      `python -m forgeyard check-apps` reads the server's database with the server's own settings, lists what the
+      upgrade will remove and exits with 1 when there is anything, 0 when there is nothing (`--json` for scripts).
+      In Docker: `docker run --rm -v <data volume>:/data tonyhuang1101/forgeyard:1.5.3 python -m forgeyard
+      check-apps`, with the same `DATABASE_URL` as the server for PostgreSQL.
+    - **On the running 1.5.2 server**, through its API as an admin: `GET /api/workloads` lists every workload, and
+      an app is one whose `runtime` is not `model`; `GET /api/keys?all=true` shows each key's `workloads`, and a
+      key with anything but `none` loses its `/x/` access.
+
+    The guide's reference has both, with the `curl` and `jq` commands for a running 1.5.2
+    ([Apps (removed)](docs/guide/reference.md#apps-removed)).
+  - **Use instead:** a model deployment. A model that no built-in engine runs gets a custom engine (**Models →
+    Engines**). For the vision templates, use vision models from **Models**: the built-in vision engine runs
+    detection, segmentation, depth and image classification, called at `/v1/vision/<task>`.
+  - **What the upgrade does.** Migration `0019_remove_apps` runs at the first start of 1.5.3:
+    - it writes one audit entry per app, `workload.removed_in_upgrade` (actor `forgeyard`), with its name, kind,
+      runtime, image or command, ports, the **names** of its environment variables (never their values), GPUs,
+      machine, who made it and when, where it was exposed at `/x/`, and where its replicas ran;
+    - it then deletes the apps with their replicas and events. Nothing is killed by force: a machine's agent stops
+      and removes an app's container or process as soon as it is next sent its work list, as for any deleted app.
+      That happens when the agent reconnects to the upgraded server; a machine that is offline then does it when
+      it comes back;
+    - it writes one audit entry per API key whose `/x/` setting was not `none`, `api_key.x_access_removed` (revoked
+      keys included). The key keeps working for models;
+    - it drops the columns `api_keys.workloads`, `api_keys.workload_list`, `api_keys.workloads_locked_by` and
+      `workloads.gateway`.
+
+    A model deployment's workload and an engine trial's are never touched. For 30 days, **Setup health** says what
+    was removed (`apps-removed`, info, on Machines, with a link to the audit log; revoked keys are in the audit log
+    only).
+  - **Calls to what was removed answer 410 Gone**, not 404, for the rest of 1.5.x (404 from 1.6):
+    - `POST /api/workloads`, `GET /api/workloads/templates`, `PUT /api/workloads/{id}/gateway`,
+      `POST /api/workloads/{id}/stop|start` and `DELETE /api/workloads/{id}` (for a deployment's workload the
+      answer names the deployment to use instead), and the console's `POST /api/playground/vision/<name>/<task>`:
+      code `apps_removed`, in `detail`;
+    - `/x` and `/x/…` with any method: in the gateway's OpenAI error shape, `error.code` `apps_removed`.
+
+    Each carries `Deprecation: @1794787200`, `Link: </guide/en/reference#apps-removed>; rel="deprecation"` and a
+    link to these release notes. In `/api/keys`, a key's `workloads` sent as `none` or `null`, or `workload_list`
+    as `null` or an empty list, is accepted and means nothing; asking for any `/x/` access is 422 `apps_removed`.
+  - **The way back.** The migration's downgrade adds the four columns back (every key `none`) but cannot bring the
+    apps back; the audit log says what they were. To keep using apps, restore the backup taken before the upgrade
+    (the database and `data/secret.key`) and run 1.5.2.
+
+### Removed
+
+- **Apps (#89)**, as above: the apps part of `/api/workloads` (create, expose, stop, start, delete), the templates
+  (`forgeyard/workloads/templates.py`), the `/x/` passthrough (`forgeyard/gateway/passthrough.py`,
+  `forgeyard/workloads/expose.py`), the console's route to exposed vision apps, the keys' `workloads`,
+  `workload_list` and `workloads_locked_by`, and the deprecation headers and log lines of 1.4
+  (`forgeyard/deprecation.py`). `GET /api/workloads`, `GET /api/workloads/{id}` and a replica's logs stay (the
+  console reads them to show the model deployments' workloads). A workload no longer has `gateway`, and
+  `GET /api/workloads/{id}` no longer returns `gateway_base` or `trust_url`. `GET /api/playground/vision/options`
+  no longer lists the templates' tasks (`tasks`). The vision image does not change: its baked-in models, which only
+  the templates used, stay in it for now (the `vision` engine always passes its own model).
+- **`scripts/accept_x.py`**, and the `workloads` and `passthrough` groups of `scripts/accept_all.py`.
+
+### Added
+
+- **`forgeyard check-apps` (#89)**: what upgrading to 1.5.3 removes (apps, keys' `/x/` access), or, on a database
+  already upgraded, what it removed (from the audit log). Read only, with the server's own settings; it never
+  creates a database file where there is none. Exit code 1 when something will be removed.
+- **Setup health `apps-removed`** (info, for 30 days after the upgrade, on Machines): what the upgrade removed, with
+  a link to the audit log. It replaces the 1.4 warning `apps-deprecated`.
+
+### Changed
+
+- **The console no longer speaks of apps.** Machines names a workload that no deployment lists (now only for a
+  moment) as a workload, not an app, and the texts that said "models and apps" say models. The audit log names the
+  two new actions in both languages.
+
 ## [1.5.2] — 2026-11-23
 
 Engine updates (#95): Forgeyard pins each built-in engine to one version and moves it only in its own releases, and

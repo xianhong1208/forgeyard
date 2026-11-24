@@ -11,7 +11,7 @@ from forgeyard.db import Accelerator, Node, Replica, new_session, utcnow
 from forgeyard.models import recipes, scheduler
 from forgeyard.models.scheduler import Option
 from tests.model_helpers import FIX, GGUF_REV, QWEN4B_REV, RERANK_REV, WHISPER_REV, add_catalog
-from tests.workload_helpers import PROCESS_OK, make_node, task
+from tests.workload_helpers import PROCESS_OK, create_workload, delete_workload, make_node, task
 
 GIB = 1024**3
 MODELS = ("workloads", "models")
@@ -304,22 +304,21 @@ def test_fy_sch_010_m2_workloads_and_model_replicas_respect_each_other(fleet):
     """FY-SCH-010: an M2 GPU task (exclusive, no VRAM declared) blocks #4 for model replicas; an M2
     workload that declares VRAM and sharing shares #4 with them, inside the free memory."""
     c, a100, rtx = fleet
-    w = c.post("/api/workloads", json=task("probe", machine_id=a100, resources={"gpus": {"count": 1}})).json()["workload"]
+    w = create_workload(c, task("probe", machine_id=a100, resources={"gpus": {"count": 1}}))["workload"]
     assert w["replica_list"][0]["gpus"][0]["index"] == 4
     r = c.post("/api/deployments", json={"name": "embed", "model": "qwen3-embedding-0.6b", "recipe": "vllm-pooling"})
     assert r.status_code == 409 and "probe" in r.text
-    c.delete(f"/api/workloads/{w['id']}")
+    delete_workload(w["id"])
     shared = task("shared", machine_id=a100, resources={"gpus": {"count": 1, "share": "vram", "vram": "40Gi"}})
-    w = c.post("/api/workloads", json=shared).json()["workload"]
+    w = create_workload(c, shared)["workload"]
     assert w["replica_list"][0]["gpus"][0]["index"] == 4
     deploy(c, "embed", "qwen3-embedding-0.6b", "vllm-pooling")  # 3.4 GiB still fits beside it
     r = c.post("/api/deployments", json={"name": "chat", "model": "qwen3-4b", "recipe": "vllm",
                                          "params": {"share": "vram"}})
     assert r.status_code == 409 and "short" in r.text
-    w2 = c.post("/api/workloads", json=task("more", machine_id=a100,
-                                             resources={"gpus": {"count": 1, "share": "vram", "vram": "10Gi"}}))
-    assert w2.status_code == 201
-    rep = w2.json()["workload"]["replica_list"][0]
+    w2 = create_workload(c, task("more", machine_id=a100,
+                                 resources={"gpus": {"count": 1, "share": "vram", "vram": "10Gi"}}))
+    rep = w2["workload"]["replica_list"][0]
     assert rep["machine"] is None and "short" in rep["reason"]
 
 

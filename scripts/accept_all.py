@@ -16,11 +16,9 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
 
   server     HTTPS with the CA, /api/health, security headers, a foreign Host (421), the CSRF rule,
              sign-in back-off on a throwaway account (never the admin), /guide, /trust, /install.sh
-  machines   each given machine is online with the hardware it should have; its GPU allowlist is
-             enforced; a join command pins the CA
-  workloads  on each given machine: a process service (healthy, output, stop, start), tasks (ok,
-             retries, max_duration), a container task when it has a container engine; GPU isolation
-             on the GPU machine (scripts/gpu_probe.py, also in a container on NVIDIA)
+  machines   each given machine is online with the hardware it should have (its GPU allowlist is
+             reported; the models group checks that a model is placed on an allowed card); a join command
+             pins the CA
   models     deploys MODELS (below), waiting with progress: Qwen3-1.7B GGUF on the CPU machine(s);
              a chat, an embedding, a rerank, a text classification (1.4.4) and a speech model on the GPU
              machine, each skipped when
@@ -48,12 +46,6 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              (size, frames, length), the caps, image-to-video refused, another key's 404, the per-key job cap,
              deleting a job at work, usage (media_ms, busy time), expiry (--video-no-expiry skips its wait),
              the key guard, and a job failing when its deployment is stopped under it
-  passthrough  workloads at /x/<name> (1.3, scripts/accept_x.py's checks): a small HTTP app exposed as a
-             process on the CPU machine and in a container on the GPU machine: keys (none, listed), the path
-             as sent and refused paths, credentials and forwarded headers replaced, the forced sandbox,
-             redirects, streaming, a client that hangs up, the body limit, rpm, concurrency, the read
-             timeout, the replica's port behind the key guard, usage (bytes, busy time), turning it off; with
-             --x-templates, the ready-made templates on the GPU machine (an image in, boxes, masks, depth out)
   vision     vision models (1.4, scripts/accept_vision.py's checks): RT-DETRv2 R18, SAM 2.1 tiny and Depth
              Anything V2 Small with the built-in vision recipe, on the GPU machine (the CUDA build) and the
              detector also on the CPU machine: two cats found in the COCO photo (multipart and JSON), the mask
@@ -90,14 +82,14 @@ chosen. A machine that is not given skips what would run on it, saying so.
 Waiting has two limits (1.4.5): --timeout (40 minutes) for a deployment or workload to download and start, and
 --place-timeout (5 minutes) for one the server cannot place at all (no machine has the room: "Cannot be placed:
 GPU #4 has 1.8 GiB available, needs 3 GiB"), after which its checks are a SKIP naming that shortage. Before each
-group that deploys on the GPU machine (tts, img, video, passthrough, vision: GPU_GROUPS) the run stops what earlier
+group that deploys on the GPU machine (tts, img, video, vision, scale: GPU_GROUPS) the run stops what earlier
 groups left on a GPU and no later group needs, waits until it is stopped and the machine has reported its memory
 again, and removes it; the models group's deployments are only stopped (the console shows one, the cleanup removes
 them), and its speech-to-text one stays while the tts group may use it. So on a card shared with other people's
 work each group has the run's share of it.
 
 Everything the run creates is named accept-<run>-… (the run id is printed first) and removed at the
-end, also after a failure or Ctrl-C: deployments, workloads, routes, API keys, the throwaway user,
+end, also after a failure or Ctrl-C: deployments, routes, API keys, the throwaway user,
 the catalog entries it added (models it found in the catalog stay), the relay group's model in the
 machines' caches and their fetch_via, the images group's image (accept-<run>-image:1, a few KB) and its
 custom recipe. When a machine's agent cannot remove images (older than 1.4.2), that tiny image stays
@@ -110,7 +102,7 @@ The official SDK (and, with --install-playwright, Playwright): when they cannot 
 script makes its own virtual environment (--venv; with uv when it is installed, else python -m venv
 and pip), installs them there and runs itself again with it. Nothing else is installed anywhere.
 
-Adding a group (a 1.3 feature: multimodal, tts, images, passthrough, video): write a function that
+Adding a group (a 1.3 feature: multimodal, tts, images, video): write a function that
 takes the Run, calls run.check(name, ok, detail) / run.skip(name, reason) for each check, registers
 everything it creates with run.cleanup.add(label, fn, …), and decorate it with
 @group("<name>", "<title>", needs=("models",)). Groups run in the order they are defined. Useful:
@@ -146,7 +138,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -156,7 +147,6 @@ sys.modules.setdefault("accept_all", sys.modules[__name__])
 
 HERE = Path(__file__).resolve().parent
 CLIP = HERE.parent / "forgeyard" / "models" / "assets" / "jfk-ask-not.mp3"
-GPU_PROBE = HERE / "gpu_probe.py"
 GIB = 1024**3
 # How long a workload or deployment may wait for room on a machine before its checks are skipped (--place-timeout).
 PLACE_TIMEOUT = 300
@@ -164,7 +154,7 @@ PLACE_TIMEOUT = 300
 # no group still to run needs is stopped, and then removed (the models group's deployments only stopped: the
 # console shows one), so that a card shared with other people's work has room for the next group's models. The
 # models group's speech-to-text deployment stays while the tts group (--tts-asr) may still use it.
-GPU_GROUPS = ("tts", "img", "video", "passthrough", "vision", "scale")
+GPU_GROUPS = ("tts", "img", "video", "vision", "scale")
 FREE_WAIT = 120
 SDK_SPEC = "openai>=2,<4"
 PLAYWRIGHT_SPEC = "playwright>=1.48,<2"
@@ -207,9 +197,6 @@ RELAY_MODEL = {"model": "accept-stories15m-gguf", "source": "hf://ggml-org/tiny-
 # What the relay and images groups need of an agent (protocol features, forgeyard/machines/protocol.py).
 RELAY_FEATURES = ("models", "prefetch", "relay", "cache_admin")
 IMAGE_FEATURES = ("image_load", "image_save", "image_remove")
-# Images for container workloads (pulled by the machine's container engine when missing).
-CONTAINER_IMAGE = "busybox:1.37"
-CUDA_IMAGE = "nvidia/cuda:12.4.1-base-ubuntu22.04"
 # The only text ever sent to a cloud provider, in the one request that reaches it.
 CLOUD_PROMPT = "Count from 1 to 20, separated by spaces."
 # Pages the console group opens: (path, the tab title it must have; None: the page's own name).
@@ -438,8 +425,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     ap.add_argument("--server", default="https://127.0.0.1:7860", help="the server's address")
     ap.add_argument("--ca", "--cacert", dest="ca", help="the server's CA (forgeyard-ca.pem) when it uses Forgeyard's own CA")
     ap.add_argument("--user", default="owner", help="an admin account (password from FORGEYARD_PASSWORD, or asked)")
-    ap.add_argument("--gpu-machine", help="a machine with GPUs: GPU workloads and GPU models run there")
-    ap.add_argument("--cpu-machine", help="a machine for CPU workloads and the CPU model (may be the GPU machine)")
+    ap.add_argument("--gpu-machine", help="a machine with GPUs: the GPU models run there")
+    ap.add_argument("--cpu-machine", help="a machine for the CPU models (may be the GPU machine)")
     ap.add_argument("--second-cpu-machine", help="another machine for the CPU model: balancing and failover")
     ap.add_argument("--relay-machine", help="the relay group's machine (default: --cpu-machine)")
     ap.add_argument("--relay-second-machine", help="the machine the relay group copies the model to from the first "
@@ -466,9 +453,6 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                     "own); fewer is faster")
     ap.add_argument("--video-no-expiry", action="store_true", help="the video group skips its expiry check (a wait of "
                     "about two minutes)")
-    ap.add_argument("--x-templates", default="", help="the passthrough group also deploys these workload templates "
-                    "(object-detection,segmentation,depth or all) on the GPU machine's NVIDIA card (a multi-GB image "
-                    "pull the first time)")
     ap.add_argument("--shots", help="save the console group's screenshots in this directory")
     ap.add_argument("--chrome", default="/opt/google/chrome/chrome", help="Chrome for the console group")
     ap.add_argument("--install-playwright", action="store_true",
@@ -568,13 +552,6 @@ def multipart(fields: dict, file_field: str, path: Path, ctype: str = "audio/mpe
                   f"Content-Type: {ctype}\r\n\r\n").encode() + path.read_bytes() + b"\r\n")
     parts.append(f"--{b}--\r\n".encode())
     return b"".join(parts), f"multipart/form-data; boundary={b}"
-
-
-def probe_source() -> str:
-    """scripts/gpu_probe.py as a `python3 -c` program (compressed: one argument holds at most 4096
-    characters), so it runs on a machine without a copy of this repository."""
-    blob = base64.b64encode(zlib.compress(GPU_PROBE.read_bytes(), 9)).decode()
-    return f"import base64,zlib;exec(zlib.decompress(base64.b64decode('{blob}')))"
 
 
 # ------------------------------------------------------------------ HTTP
@@ -921,11 +898,10 @@ def leftovers(run: Run) -> None:
     pat = re.compile(r"^accept-[a-z0-9]{4}-")
     found = []
     for kind, path, key, field_ in (("deployment", "/api/deployments", "deployments", "name"),
-                                    ("workload", "/api/workloads", "workloads", "name"),
                                     ("route", "/api/routes", "routes", "served_name"),
                                     ("user", "/api/users", "users", "username")):
         for x in run.admin.ok("GET", path).get(key) or []:
-            if pat.match(str(x.get(field_, ""))) and not (kind == "workload" and x.get("runtime") == "model"):
+            if pat.match(str(x.get(field_, ""))):
                 found.append(f"{kind} {x[field_]}")
     for k in run.admin.ok("GET", "/api/keys").get("keys") or []:
         if pat.match(k["name"]) and k["status"] == "active":
@@ -1076,27 +1052,8 @@ def group_machines(run: Run) -> None:
             run.check(f"{name}: the inventory shows its CPU and memory", bool(cpu) and bool(cpu[0].get("vram_total")),
                       f"{cpu[0]['model']}, {cpu[0]['vram_total'] / GIB:.1f} GiB" if cpu else "no cpu entry")
         allowed = [x for x in gpus if x.get("allowed")]
-        outside = [x for x in gpus if not x.get("allowed")]
-        if gpus and outside:
-            x = outside[0]
-            body = {"name": run.name("refused"), "kind": "task", "machine_id": m["id"],
-                    "runtime": {"type": "process", "command": "true"}, "resources": {"gpus": {"indices": [x["index"]]}}}
-            r = c.request("POST", "/api/workloads", body)
-            if r.status == 201:
-                wid = (r.data or {})["workload"]["id"]
-                c.request("DELETE", f"/api/workloads/{wid}")
-            run.check(f"{name}: a workload asking for GPU #{x['index']} (not allowed) is refused",
-                      r.status == 422 and r.code() == "cannot_place", f"{r.status} {((r.data or {}).get('detail') or {}).get('message', '')}")
-        elif gpus:
-            run.skip(f"{name}: the GPU allowlist is enforced", "every GPU there may be used (no allowlist): nothing to refuse")
-        else:
-            body = {"name": run.name("refused"), "kind": "task", "machine_id": m["id"],
-                    "runtime": {"type": "process", "command": "true"}, "resources": {"gpus": {"indices": [0]}}}
-            r = c.request("POST", "/api/workloads", body)
-            if r.status == 201:
-                c.request("DELETE", f"/api/workloads/{(r.data or {})['workload']['id']}")
-            run.check(f"{name}: a workload asking for a GPU on a machine without one is refused",
-                      r.status == 422, f"{r.status} {((r.data or {}).get('detail') or {}).get('message', '')}")
+        # (Until 1.5.3 an app asking for a card outside the allowlist checked here that it was refused; apps were
+        # removed (#89): the models group checks that each model is placed on an allowed card.)
         if "gpu" in roles:
             run.report.info.setdefault("gpu_allowlist", {})[name] = (
                 "all" if m.get("gpu_allowlist") is None else [f"#{x['index']}" for x in allowed])
@@ -1116,34 +1073,12 @@ def group_machines(run: Run) -> None:
     run.check("an unused join token can be cancelled", r.status == 200, f"{r.status}")
 
 
-# ------------------------------------------------------------------ group: workloads
-def workload(run: Run, body: dict) -> dict:
-    c = run.admin
-    w = c.ok("POST", "/api/workloads", body)["workload"]
-    item = run.cleanup.add(f"workload {w['name']}", lambda: _delete_workload(c, w["id"]))
-    gpus = ((body.get("resources") or {}).get("gpus") or {}).get("count") or 0
-    item.update(group=run.current, gpu=gpus > 0, path=f"/api/workloads/{w['id']}")
-    return w
-
-
-def _delete_workload(c: Client, wid: int) -> None:
-    delete(c, f"/api/workloads/{wid}")
-
-
+# ------------------------------------------------------------------ helpers
 def delete(c: Client, path: str) -> None:
     """DELETE something the run made; gone already is fine."""
     r = c.request("DELETE", path)
     if r.status not in (200, 404):
         raise Fail(f"{r.status or r.error} {r.code()}")
-
-
-def get_workload(run: Run, wid: int) -> dict:
-    return run.admin.ok("GET", f"/api/workloads/{wid}")["workload"]
-
-
-def replicas_text(w: dict) -> str:
-    return "; ".join(f"#{r['ordinal']} {r['state']}" + (f" ({r['reason']})" if r.get("reason") else "")
-                     for r in w["replica_list"]) or "no replicas"
 
 
 def unplaced(w: dict) -> Optional[str]:
@@ -1157,177 +1092,6 @@ def unplaced(w: dict) -> Optional[str]:
 def dep_poll(run: Run, dep_id: int) -> tuple[bool, str, Optional[str]]:
     ready, text, d = deployment_state(run, dep_id)
     return ready, text, unplaced(d["workload"])
-
-
-def wait_status(run: Run, wid: int, statuses: tuple, timeout: float) -> dict:
-    holder = {}
-
-    def poll():
-        w = get_workload(run, wid)
-        holder["w"] = w
-        return w["status"] in statuses, f"{w['status']}: {replicas_text(w)}", unplaced(w)
-
-    run.wait(f"workload #{wid}", poll, timeout)
-    return holder["w"]
-
-
-def output_of(run: Run, wid: int, lines: int = 400) -> str:
-    r = run.admin.request("GET", f"/api/workloads/{wid}/replicas/0/logs?lines={lines}")
-    return (r.data or {}).get("text", "") if r.status == 200 else ""
-
-
-def task(run: Run, m: dict, what: str, command: str, args: list, **spec) -> tuple[dict, str]:
-    body = {"name": run.name(what), "kind": "task", "machine_id": m["id"],
-            "runtime": {"type": "process", "command": command, "args": args}, **spec}
-    w = workload(run, body)
-    w = wait_status(run, w["id"], ("succeeded", "failed"), spec.get("max_duration", 0) + 120)
-    time.sleep(1)  # the agent sends the last lines with the final state
-    return w, output_of(run, w["id"])
-
-
-@group("workloads", "services and tasks on the given machines, GPU isolation")
-def group_workloads(run: Run) -> None:
-    roles = [r for r in ("cpu", "gpu") if run.machine(r)]
-    if not roles:
-        run.skip("workloads", "no --cpu-machine or --gpu-machine given")
-        return
-    if len(roles) == 2 and run.machine("cpu")["id"] == run.machine("gpu")["id"]:
-        roles = ["gpu"]  # one machine in both roles: once
-    for role in roles:
-        m = run.fresh_machine(role)
-        if m["status"] != "online":
-            run.skip(f"{m['name']}: workloads", f"the machine is {m['status']}")
-            continue
-        workloads_on(run, role, m)
-    if run.machine("gpu") and run.machine("gpu")["status"] == "online":
-        try:
-            gpu_isolation(run, run.machine("gpu"))
-        except Unplaced as e:
-            run.skip(f"{run.machine('gpu')['name']}: GPU isolation", str(e))
-    else:
-        run.skip("GPU isolation", "no --gpu-machine given (or it is offline)")
-
-
-def workloads_on(run: Run, role: str, m: dict) -> None:
-    c, name, t = run.admin, m["name"], role[0]
-    info = m.get("runtime_info") or {}
-    if not (info.get("process") or {}).get("ok"):
-        run.skip(f"{name}: process workloads", f"no process runtime: {(info.get('process') or {}).get('reason')}")
-    else:
-        # A service: python3's http.server on the assigned port (loopback only), health-checked over HTTP.
-        body = {"name": run.name(f"svc-{t}"), "kind": "service", "machine_id": m["id"],
-                "runtime": {"type": "process", "command": "python3",
-                            "args": ["-m", "http.server", "--bind", "127.0.0.1", "${PORT}"]},
-                "ports": [{"name": "http"}], "health": {"type": "http", "path": "/", "interval": 2},
-                "restart": "always"}
-        w = workload(run, body)
-        t0 = time.monotonic()
-        try:
-            w = wait_status(run, w["id"], ("running", "failed"), 120)
-            rep = w["replica_list"][0]
-            run.check(f"{name}: a process service starts and becomes healthy", w["status"] == "running" and rep["state"] == "healthy",
-                      f"{rep['state']} after {time.monotonic() - t0:.0f} s, pid {rep.get('pid')}, port "
-                      f"{(rep.get('ports') or [{}])[0].get('host_port')}")
-            time.sleep(3)
-            out = output_of(run, w["id"])
-            run.check(f"{name}: its output is readable (the health checks' requests)", "GET / HTTP" in out,
-                      f"{len(out.splitlines())} lines" if out else "no output")
-            c.ok("POST", f"/api/workloads/{w['id']}/stop")
-            w2 = wait_status(run, w["id"], ("stopped",), 60)
-            run.check(f"{name}: Stop stops it", all(r["state"] in ("stopped", "exited") for r in w2["replica_list"]),
-                      replicas_text(w2))
-            c.ok("POST", f"/api/workloads/{w['id']}/start")
-            w3 = wait_status(run, w["id"], ("running", "failed"), 120)
-            run.check(f"{name}: Start runs it again (a new generation)", w3["status"] == "running"
-                      and w3["generation"] == w2["generation"] + 1, f"generation {w3['generation']}, {replicas_text(w3)}")
-        except Fail as e:
-            run.not_ready(f"{name}: the process service", e)
-        # Tasks: one that succeeds (and shows its environment), one that retries, one killed at max_duration.
-        w, out = task(run, m, f"ok-{t}", "sh", ["-c", "echo accept-hello; echo user=$(id -un); env | sort"])
-        env = {ln.split("=", 1)[0]: ln.split("=", 1)[1] for ln in out.splitlines() if "=" in ln and not ln.startswith("user=")}
-        leaked = sorted(k for k in env if k.startswith(("SUDO_", "SSH_", "FORGEYARD_PASSWORD", "OPENAI_", "HF_TOKEN")))
-        user = next((ln[5:] for ln in out.splitlines() if ln.startswith("user=")), "?")
-        run.check(f"{name}: a task runs to the end (succeeded)", w["status"] == "succeeded" and "accept-hello" in out,
-                  f"{w['status']}, exit {w['replica_list'][0].get('exit_code')}")
-        run.check(f"{name}: it runs as the unprivileged workload account, from an empty environment",
-                  user not in ("root", "?") and not leaked and env.get("NVIDIA_VISIBLE_DEVICES") == "void",
-                  f"user {user}, {len(env)} variables, NVIDIA_VISIBLE_DEVICES={env.get('NVIDIA_VISIBLE_DEVICES')}"
-                  + (f", leaked {leaked}" if leaked else ""))
-        w, out = task(run, m, f"retry-{t}", "sh", ["-c", "echo accept-try; exit 3"], retries=2, retry_backoff=1)
-        rep = w["replica_list"][0]
-        run.check(f"{name}: a failing task is retried, then fails (attempt 3 of 3)",
-                  w["status"] == "failed" and rep.get("attempt") == 3 and out.count("accept-try") == 3,
-                  f"{w['status']}: {rep.get('reason')}; {out.count('accept-try')} tries in the output")
-        w, out = task(run, m, f"max-{t}", "sleep", ["600"], max_duration=5)
-        rep = w["replica_list"][0]
-        run.check(f"{name}: a task over max_duration is stopped and fails", w["status"] == "failed"
-                  and "max_duration" in (rep.get("reason") or ""), f"{w['status']}: {rep.get('reason')}")
-    cinfo = info.get("container") or {}
-    if not cinfo.get("ok"):
-        run.skip(f"{name}: a container workload", f"no container engine there ({cinfo.get('reason') or 'not available'})")
-        return
-    body = {"name": run.name(f"ctr-{t}"), "kind": "task", "machine_id": m["id"],
-            "runtime": {"type": "container", "image": CONTAINER_IMAGE, "command": ["sh", "-c"],
-                        "args": ["echo accept-container; ls /dev | grep -ci nvidia || true"]}}
-    w = workload(run, body)
-    try:
-        w = wait_status(run, w["id"], ("succeeded", "failed"), 600)
-        time.sleep(1)
-        out = output_of(run, w["id"])
-        run.check(f"{name}: a container task runs ({CONTAINER_IMAGE})", w["status"] == "succeeded" and "accept-container" in out,
-                  f"{w['status']}: {replicas_text(w)}")
-    except Fail as e:
-        run.not_ready(f"{name}: a container task runs ({CONTAINER_IMAGE})", e)
-
-
-def gpu_isolation(run: Run, m: dict) -> None:
-    m = run.fresh_machine("gpu")
-    name = m["name"]
-    gpus = [x for x in m["accelerators"] if x["vendor"] != "cpu" and x.get("allowed")]
-    if not gpus:
-        run.skip(f"{name}: GPU isolation", "no GPU there may be used by Forgeyard")
-        return
-    vendor = gpus[0]["vendor"]
-    by_key = {x["key"]: x for x in m["accelerators"]}
-    gpu_spec = {"gpus": {"count": 1, "vendor": vendor, "share": "vram", "vram": "1Gi"}}
-    if vendor == "nvidia":
-        w, out = task(run, m, "gpu-probe", "python3", ["-c", probe_source(), "--expect", "1", "--gib", "0.25", "--hold", "2"],
-                      resources=gpu_spec)
-        card = by_key.get(((w["replica_list"][0].get("gpus") or [{}])[0]).get("key"), {})
-        seen = [ln for ln in out.splitlines() if ln.startswith("device ")]
-        run.check(f"{name}: a process sees only its card (gpu_probe.py: one device, the assigned one)",
-                  w["status"] == "succeeded" and "visible devices: 1" in out and len(seen) == 1
-                  and card.get("uuid", "?") in seen[0] and card.get("allowed"),
-                  f"{w['status']}, given #{card.get('index')}, {seen[0][:60] if seen else out[-160:]}")
-    else:
-        w, out = task(run, m, "gpu-env", "sh", ["-c", "echo ROCR=$ROCR_VISIBLE_DEVICES; echo HIP=$HIP_VISIBLE_DEVICES"],
-                      resources=gpu_spec)
-        card = by_key.get(((w["replica_list"][0].get("gpus") or [{}])[0]).get("key"), {})
-        rocr = next((ln[5:] for ln in out.splitlines() if ln.startswith("ROCR=")), "")
-        run.check(f"{name}: a process is given only its card (ROCR_VISIBLE_DEVICES)",
-                  w["status"] == "succeeded" and rocr and "," not in rocr and card.get("allowed"),
-                  f"{w['status']}, given #{card.get('index')}, ROCR_VISIBLE_DEVICES={rocr}")
-    cinfo = (m.get("runtime_info") or {}).get("container") or {}
-    if vendor != "nvidia":
-        run.skip(f"{name}: a container sees only its card", "checked on NVIDIA only (no small AMD image to probe with)")
-    elif not cinfo.get("ok") or not cinfo.get("nvidia"):
-        run.skip(f"{name}: a container sees only its card", "its container engine cannot pass NVIDIA GPUs (or there is none)")
-    else:
-        body = {"name": run.name("gpu-ctr"), "kind": "task", "machine_id": m["id"],
-                "runtime": {"type": "container", "image": CUDA_IMAGE, "command": ["nvidia-smi"], "args": ["-L"]},
-                "resources": gpu_spec}
-        w = workload(run, body)
-        try:
-            w = wait_status(run, w["id"], ("succeeded", "failed"), 900)
-            time.sleep(1)
-            out = output_of(run, w["id"])
-            card = by_key.get(((w["replica_list"][0].get("gpus") or [{}])[0]).get("key"), {})
-            lines = [ln for ln in out.splitlines() if ln.startswith("GPU ")]
-            run.check(f"{name}: a container sees only its card (nvidia-smi -L)", w["status"] == "succeeded"
-                      and len(lines) == 1 and card.get("uuid", "?") in lines[0],
-                      f"{w['status']}, given #{card.get('index')}, {len(lines)} GPU line(s)")
-        except Fail as e:
-            run.not_ready(f"{name}: a container sees only its card (nvidia-smi -L)", e)
 
 
 # ------------------------------------------------------------------ group: models
@@ -2316,81 +2080,6 @@ def group_video(run: Run) -> None:
                               key=run.new_key(f"video-{role}"))
         accept_video.restart_check(c, d, d["name"], spec["size"], args, check, httpx, openai)
         run.report.info.setdefault("video", {})[d["name"]] = report["deployments"][d["name"]]
-
-
-# ------------------------------------------------------------------ group: passthrough (1.3)
-# Workloads at /x/<name>: scripts/accept_x.py's app and checks, as a process on the CPU machine and in a
-# container on the GPU machine (when it has a container engine).
-X_ROLES = (("cpu", "process"), ("gpu", "container"))
-
-
-@group("passthrough", "workloads at /x/<name>: keys, paths, headers, streaming, limits, the key guard, usage")
-def group_passthrough(run: Run) -> None:
-    sys.path.insert(0, str(HERE))
-    import accept_m3
-    import accept_x
-
-    accept_m3.TLS = run.tls
-    c = run.admin
-    for role, kind in X_ROLES:
-        m = run.machine(role)
-        if m is None:
-            run.skip(f"/x/ {kind} workload", f"no --{role}-machine given")
-            continue
-        m = run.fresh_machine(role)
-        if "workload_guard" not in (m.get("features") or []):
-            run.skip(f"{m['name']}: /x/ {kind} workload", "its agent does not list workload_guard (older than 1.3)")
-            continue
-        if not ((m.get("runtime_info") or {}).get(kind) or {}).get("ok"):
-            run.skip(f"{m['name']}: /x/ {kind} workload", f"no {kind} runtime there")
-            continue
-        w = workload(run, accept_x.spec_for(kind, run.name(f"x-{kind}"), m))
-        t0 = time.monotonic()
-        try:
-            w = wait_status(run, w["id"], ("running", "failed"), run.args.timeout)
-        except Fail as e:
-            run.not_ready(f"{w['name']}: ready on {m['name']}", e)
-            continue
-        if not run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running",
-                         f"{replicas_text(w)} after {fmt_seconds(time.monotonic() - t0)}"):
-            continue
-
-        def new_key(what: str, body: dict, kind=kind) -> str:
-            return run.new_key(f"x-{kind}-{what}", **body)["key"]
-
-        out = accept_x.exercise(c, run.args.server, w, run.check, new_key)
-        run.report.info.setdefault("passthrough", {})[w["name"]] = out.get("usage")
-    wanted = names_list(run.args.x_templates)
-    if not wanted:
-        run.skip("workload templates", "not asked for (--x-templates)")
-        return
-    m = run.fresh_machine("gpu")
-    if m is None or not ((m.get("runtime_info") or {}).get("container") or {}).get("ok"):
-        run.skip("workload templates", "no --gpu-machine with a container engine")
-        return
-    ts = {t["id"]: t for t in c.ok("GET", "/api/workloads/templates")["templates"]}
-    wanted = list(ts) if wanted == ["all"] else wanted
-    image, image_name = accept_x.photo(None)
-    key = run.new_key("x-templates", workloads="all")["key"]
-
-    def tcheck(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
-        if skip or info:
-            run.skip(label, ("information: " if info else "") + str(detail))
-        else:
-            run.check(label, ok, detail)
-
-    for tid in wanted:
-        if tid not in ts:
-            run.check(f"template {tid}", False, f"the server has no such template ({', '.join(ts)})")
-            continue
-        w = workload(run, dict(ts[tid]["specs"]["cuda"], name=run.name(f"x-{tid}"), machine_id=m["id"]))
-        try:
-            w = wait_status(run, w["id"], ("running", "failed"), run.args.timeout)
-        except Fail as e:
-            run.not_ready(f"{w['name']}: ready", e)
-            continue
-        if run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running", replicas_text(w)):
-            accept_x.exercise_template(c, run.args.server, w, ts[tid], tcheck, key, True, image, image_name)
 
 
 # ------------------------------------------------------------------ group: vision (1.4)

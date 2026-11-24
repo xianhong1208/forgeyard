@@ -41,12 +41,14 @@
 
 1.5.2 帶來**推論引擎更新**。管理員可以檢查內建推論引擎在上游有沒有較新的穩定版本，**試用這個版本** 會建立一個以 digest 釘選的複本，專案有提供簽章時（llama.cpp）會先驗證；內建推論引擎本身維持原樣。**試跑** 會用複本暫時執行一個模型幾分鐘，和金鑰、用量隔離，並把它的啟動、記憶體和回應拿來和內建推論引擎比較。之後就能在部署的 **編輯** 頁面把部署換到複本、也能換回來，名稱、金鑰和路由都不變（[作法](docs/guide/zh-TW/how-to.md#try-a-newer-version-of-an-engine)）。伺服器的資料庫會變更，升級前請先備份。從原始碼執行伺服器時改用 `uv sync --extra server` 安裝；agent 不必更新。
 
+1.5.3 **移除應用程式**（1.4 起已淘汰），這是修補版本裡的不相容變更：`POST /api/workloads`、範本和閘道的 `/x/` 都回 410，升級時會移除剩下的應用程式，並把每一個都寫進稽核紀錄。升級前請先執行 `python -m forgeyard check-apps` 看看會移除什麼，把還需要的東西改成模型部署，並做好備份（[版本說明](CHANGELOG.md#153--2026-11-24)（英文）、[怎麼檢查](docs/guide/zh-TW/reference.md#apps-removed)）。模型部署不受影響；agent 不必更新。
+
 ## 1.4 的新功能
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
 Catalog、Engines、Sources；用量與費用有折線圖；視覺模型（物件偵測、影像分割、深度估計）像其他模型一樣部署。**Download to…**
 可以在部署前先把模型和推論引擎下載到機器上；連不上網際網路的機器會經由伺服器取得，管理員也能上傳映像檔給它。應用程式（Apps）離開了主控台，它們的
-API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器的快取取得模型檔，管理員也能把推論引擎的映像檔從一台機器複製到另一台，
+API 已標為淘汰（1.5.3 移除）。1.4.1 讓這種機器可以從另一台機器的快取取得模型檔，管理員也能把推論引擎的映像檔從一台機器複製到另一台，
 兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的推論引擎映像檔並能刪除舊的，
 安排副本時也會計算還有多少空的主機連接埠。1.4.3 讓目錄裡的每個模型和每個推論引擎都有自己的頁面：
 它在哪些機器上、每台機器放不放得下、誰在使用它。1.4.4 加入零樣本物件偵測（找出你指定的東西）、
@@ -66,7 +68,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.2
+  docker.io/tonyhuang1101/forgeyard:1.5.3
 sudo docker logs forgeyard
 ```
 
@@ -109,7 +111,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

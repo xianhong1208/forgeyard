@@ -102,7 +102,7 @@ export default {
   "keys.form.unlockCloud": "解除雲端鎖定",
   "keys.form.unlock.rpm": "解除請求數鎖定",
   "keys.form.unlock.tpm": "解除 token 數鎖定",
-  "keys.form.saved": "{name} 的限制、雲端、預算與應用程式設定已儲存。",
+  "keys.form.saved": "{name} 的限制、雲端與預算設定已儲存。",
   "keys.form.budgetRemoved": "{name} 的預算已移除並解除鎖定。",
   "keys.form.cloudUnlocked": "{name} 的雲端設定已解除鎖定，恢復為預設值。",
   "keys.form.unlocked.rpm": "{name} 的請求數限制已解除鎖定，恢復為預設值。",

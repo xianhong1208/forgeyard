@@ -27,18 +27,15 @@ const TASK_TITLE: Record<VisionTask, string> = labels({
 });
 
 // What went wrong, in plain words: the gateway's and the vision server's {"error": {code, message}}.
-export function visionError(status: number, body: unknown, limitMb: number, what: "app" | "model" = "app"): string {
+export function visionError(status: number, body: unknown, limitMb: number): string {
   const e = (body as { error?: { code?: string; message?: string } } | null)?.error;
-  const w = t(what === "model" ? "playground.vision.what.model" : "playground.vision.what.app");
+  const w = t("playground.vision.what.model");
   switch (e?.code) {
     case "request_too_large":
     case "image_too_large":
       return t("playground.vision.err.tooLarge", { what: w, mb: String(limitMb) });
     case "invalid_image":
       return t("playground.vision.err.invalid", { what: w });
-    case "workload_busy":
-    case "key_busy":
-      return t("playground.vision.err.busy", { what: w });
     case "no_ready_replica":
       return t("playground.vision.err.notReady", { what: w, message: e.message ?? t("playground.vision.err.noReplica") });
     case "upstream_timeout":
@@ -46,12 +43,10 @@ export function visionError(status: number, body: unknown, limitMb: number, what
     case "model_not_found":
       return t("playground.vision.err.gone");
     case "labels_required":
-      return what === "model" && e.message?.startsWith("This model classifies")
+      return e.message?.startsWith("This model classifies")
         ? t("playground.vision.err.labelsClassify") : t("playground.vision.err.labelsDetect");
     case "labels_not_supported":
       return e.message?.startsWith("This classifier") ? t("playground.vision.err.fixedClassifier") : t("playground.vision.err.fixedDetector");
-    case "workload_not_found":
-      return t("playground.vision.err.appGone");
   }
   return playError(status, body);
 }
@@ -129,7 +124,7 @@ function VisionPanel({ w }: { w: VisionTarget }) {
         return;
       }
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data) { setErr(visionError(res.status, data, limit, "model")); return; }
+      if (!res.ok || !data) { setErr(visionError(res.status, data, limit)); return; }
       const answer = data as VisionAnswer;
       const target = res.headers.get("X-Forgeyard-Target");
       const count = w.task === "detect" ? tr("playground.vision.objects", { count: String(answer.detections?.length ?? 0), floor: DETECT_FLOOR.toFixed(2) })

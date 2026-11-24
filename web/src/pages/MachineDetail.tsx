@@ -15,7 +15,7 @@ import { t as tNow } from "../i18n/core";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import {
-  MACHINE_KIND, appTitle, cardLine, cardMemory, cards, machineKind, machineMemory, memoryRows, uniqueHolders, whereOnMachine, type Placement,
+  MACHINE_KIND, workloadTitle, cardLine, cardMemory, cards, machineKind, machineMemory, memoryRows, uniqueHolders, whereOnMachine, type Placement,
 } from "../lib/fleet";
 import { exact } from "../lib/format";
 import { ageSeconds, ago, archLabel, bytes, replicaAddressNote } from "../lib/machines";
@@ -165,8 +165,8 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
                 <li key={h.key}>
                   <span className="runlist-k"><HolderIcon h={h} size={16} /></span>
                   <span className="runlist-name">
-                    {h.href ? <Link to={h.href}>{h.name}</Link> : <span className="strong" title={appTitle(h.name)}>{h.name}</span>}
-                    <small>{h.trial ? h.trial.model : h.kind === "workload" ? t("machine.appLine", { kind: String(h.workload.kind), runtime: String(h.workload.runtime) }) : h.deployment?.model.name}</small>
+                    {h.href ? <Link to={h.href}>{h.name}</Link> : <span className="strong" title={workloadTitle(h.name)}>{h.name}</span>}
+                    <small>{h.trial ? h.trial.model : h.kind === "workload" ? t("machine.workloadLine", { kind: String(h.workload.kind), runtime: String(h.workload.runtime) }) : h.deployment?.model.name}</small>
                   </span>
                   <span className="runlist-where">{all.map((x) => whereOnMachine(x.replica)).join(" ")}</span>
                 </li>
@@ -252,7 +252,7 @@ function MapRow({ m, a, p, restricted }: { m: Machine; a: Accelerator; p: Placem
               const inner = <><HolderIcon h={h} /><span>{h.name}</span>{h.reserved ? <em>{bytes(h.reserved)}</em> : null}</>;
               return h.href
                 ? <Link key={`${h.key}-${h.replica.ordinal}-${i}`} to={h.href} className="holder-chip">{inner}</Link>
-                : <span key={`${h.key}-${h.replica.ordinal}-${i}`} className="holder-chip" title={appTitle(h.name)}>{inner}</span>;
+                : <span key={`${h.key}-${h.replica.ordinal}-${i}`} className="holder-chip" title={workloadTitle(h.name)}>{inner}</span>;
             })}
           </span>
         )}

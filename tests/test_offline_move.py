@@ -17,7 +17,7 @@ from forgeyard.workloads import offline, placement, state
 from tests.gateway_helpers import FakeEngine, api_client, make_ready, new_key
 from tests.test_placement_fetch import cpu, events, rows, set_node
 from tests.test_scheduler import MODELS, deploy, reps, seed_catalog
-from tests.workload_helpers import make_node, service, task
+from tests.workload_helpers import create_workload, make_node, service, task
 
 SMALL = {"gpus": 0}
 MIN = timedelta(minutes=1)
@@ -223,11 +223,11 @@ def test_fy_move_006_the_setting(owner, poked, monkeypatch):
 
 
 def test_fy_move_007_tasks_stay_and_services_move(owner, poked):
-    """FY-MOVE-007: apps follow the same rules: an unpinned service moves, a pinned one waits; a task stays (it may
+    """FY-MOVE-007: plain workloads follow the same rules: an unpinned service moves, a pinned one waits; a task stays (it may
     still be running there, and running it again elsewhere could do its work twice)."""
     a = make_node("box-a")
     for spec in (service("web"), service("pinned-web", machine_id=a), task("job", script="sleep 600")):
-        assert owner.post("/api/workloads", json=spec).status_code == 201
+        create_workload(owner, spec)
     assert {r.node_id for name in ("web", "pinned-web", "job") for r in rows(name)} == {a}
     b = make_node("box-b")
     go_offline(a, 20 * MIN)
@@ -249,7 +249,7 @@ def test_fy_move_008_the_machine_back_stops_the_engine_it_no_longer_runs(owner, 
 
     a = make_node("box-a")
     sleeper = service("web", runtime={"type": "process", "command": "sleep", "args": ["600"]}, ports=[])
-    assert owner.post("/api/workloads", json=sleeper).status_code == 201
+    create_workload(owner, sleeper)
     db = new_session()
     try:
         before = state.desired_message(db, a, 1)

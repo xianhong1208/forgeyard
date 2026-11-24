@@ -502,17 +502,17 @@ def test_fy_pick_002_the_rules_of_not_picked_up():
 
 def test_fy_edit_009_a_plain_workload_also_restarts_where_it_ran(owner):
     """FY-EDIT-009: a service workload started again goes back to its machine, not the first by name."""
-    from tests.workload_helpers import service
+    from tests.workload_helpers import create_workload, service, start_workload, stop_workload
 
     a = make_node("box-a")
     b = make_node("box-b")
     node_field(a, status="offline")
-    w = owner.post("/api/workloads", json=service("web")).json()["workload"]
+    w = create_workload(owner, service("web"))["workload"]
     assert rows("web")[0].node_id == b
     node_field(a, status="online")
-    owner.post(f"/api/workloads/{w['id']}/stop")
+    stop_workload(w["id"])
     set_replica("web", 0, state="stopped")
-    owner.post(f"/api/workloads/{w['id']}/start")
+    start_workload(w["id"])
     assert rows("web")[0].node_id == b
     events = [e["message"] for e in owner.get(f"/api/workloads/{w['id']}").json()["events"]]
     assert "Replica 0 placed again, where it ran before, on box-b." in events

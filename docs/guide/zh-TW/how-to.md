@@ -77,7 +77,7 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
 - **那台機器上的模型目錄**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **機器名稱**（選填）：這台機器在 **機器** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
 - **伺服器位址（那台機器連過來用的）**（預設是這台伺服器的 `PUBLIC_URL`；`PUBLIC_URL` 空白時，則是你開啟這個頁面時使用的位址）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
-- **進階 → 連接埠範圍**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。應用程式每公開一個連接埠就佔用範圍內的一個連接埠；模型副本（或公開在 `/x/` 的應用程式）佔用兩個：一個給 agent 的金鑰守門員，一個給守門員後面的推論引擎。Forgeyard 會計算這些連接埠，所以 3 個連接埠的範圍只放得下一個模型：範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
+- **進階 → 連接埠範圍**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。模型副本佔用範圍內的兩個連接埠：一個給 agent 的金鑰守門員，一個給守門員後面的推論引擎。Forgeyard 會計算這些連接埠，所以 3 個連接埠的範圍只放得下一個模型：範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
 
 欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的 tag 就是伺服器自己的版本，所以 agent 和伺服器的版本永遠一致。管理員可以用 [`AGENT_IMAGE`](reference.md#machines) 讓指令改用鏡像站、私有 registry 或指定的 digest。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
 
@@ -98,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 `$(for d in …)` 那一行會再用 `--device` 傳入主機上每個 NVIDIA 裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm`、`/dev/nvidia-uvm-tools`、`/dev/nvidia-modeset` 和每個 `/dev/nvidiaN`），主機沒有的會跳過。Docker 可以同時接受它們和 `--gpus all`，而且這很重要：`--gpus` 給的裝置是在 Docker 和 systemd 不知道的情況下設定的，主機下一次執行 `systemctl daemon-reload` 時，容器裡的新行程就會失去它們；用 `--device` 給的則會留著（[機器上的新行程打不開它的 GPU](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)）。如果還沒有 `/dev/nvidia-uvm`（主機開機後還沒跑過 CUDA 程式），先執行 `sudo nvidia-modprobe -u -c=0`。設定好 CDI（`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）的話，可以改用 `--device nvidia.com/gpu=all` 取代這兩者：CDI 會宣告這些裝置，所以它們也會留著。
@@ -132,7 +132,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -143,7 +143,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3 inventory
 ```
 
 ### 純 CPU
@@ -157,26 +157,26 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 ### 為什麼要用這些選項
 
 - **`--network host`**：模型副本在主機的 `127.0.0.1` 上監聽，前面擋著 agent 的金鑰守門員，守門員則監聽副本對外公開的連接埠。只有 agent 和主機共用網路，這兩者才能運作。這也讓 agent 可以在機器自己的位址上公開連接埠。
 - **模型快取在容器內外使用相同路徑**（`-v /srv/forgeyard-models:/srv/forgeyard-models`）：agent 把模型下載到這裡，再請主機的 Docker 啟動推論引擎容器，並以*主機上的路徑*掛載模型。路徑不同的話，什麼都掛載不到。
-- **`/var/run/docker.sock`**：模型和容器類應用程式是在主機的 Docker 上以容器執行，和 agent 並列，而不是在 agent 裡面。這個 socket 等於完全掌控主機的 Docker，所以 agent 的容器要像 agent 本身一樣被信任。
+- **`/var/run/docker.sock`**：模型是在主機的 Docker 上以容器執行，和 agent 並列，而不是在 agent 裡面。這個 socket 等於完全掌控主機的 Docker，所以 agent 的容器要像 agent 本身一樣被信任。
 - **`forgeyard-agent` volume** 保存機器的憑據和釘選的 CA。請保留它：在重新啟動、升級或 `docker rm` 之後執行同一個 `docker run`，就會帶回同一台機器，而且不會再使用加入權杖（紀錄裡會寫明）。沒有它的話，機器就得重新加入。
 - 使用 **`FORGEYARD_*` 變數**而不是旗標：它們和 [agent.toml](reference.md#agent-settings) 裡的設定相同。你也可以掛載一個檔案：`-v /etc/forgeyard/agent.toml:/etc/forgeyard/agent.toml:ro`。
-- agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程時切換到無特權帳號 `forgeyard-run`。應用程式和推論引擎絕不會以 root 執行。
-- 容器裡沒有 systemd，所以行程用 rlimit 限制資源（映像檔已設定 `FORGEYARD_LIMITS=rlimit`）。行程在 agent 的容器裡執行，會隨容器一起停止；模型和容器類應用程式則會繼續在主機上執行。
+- agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程時切換到無特權帳號 `forgeyard-run`。推論引擎絕不會以 root 執行。
+- 容器裡沒有 systemd，所以行程用 rlimit 限制資源（映像檔已設定 `FORGEYARD_LIMITS=rlimit`）。行程在 agent 的容器裡執行，會隨容器一起停止；容器裡的模型則會繼續在主機上執行。
 
 ### 離線機器，或自己建置映像檔
 
 頁面把這些放在 **進階／離線** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -190,17 +190,17 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.2 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.3 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.2`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.3`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2`（或像上面那樣用檔案帶過去）。
-2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類應用程式和模型會繼續執行。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3`（或像上面那樣用檔案帶過去）。
+2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它在容器裡的模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
    ```bash
@@ -210,7 +210,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -279,8 +279,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 伺服器升級後，機器的頁面會在 **更新 agent** 顯示完整的指令（[更新 agent](#update-an-agent)）。設成 **一律經由伺服器** 的機器，指令會改為搬運 agent 映像檔，而不是拉取。在連得到 Docker Hub 的機器上執行第一步（把 `USER` 換掉；如果你用別的名稱連到那台機器，主機名稱也要換）：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 再到 `amd-01` 上執行第二步：`docker rm -f`，然後用載入的映像檔執行同樣的 `docker run`。沒有 `ssh` 連得到那台機器？把映像檔存成檔案帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。1.4.2 之前的 agent 不會回報它的執行方式：請先用這種方式手動更新一次，之後它的頁面就會顯示指令。
@@ -419,7 +419,7 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
 
 ## 在試用區試用視覺
 
-試用區的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **用量** 裡以 *主控台試用區*（`console`）記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在試用區唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
+試用區的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **用量** 裡以 *主控台試用區*（`console`）記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在試用區唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式已經不存在（[1.5.3 移除](reference.md#apps-removed)）：由視覺模型取代。
 
 1. 打開 **模型** 選單，在 **視覺** 底下選一個模型：每一個都標出任務。只會列出已就緒的模型；完全沒有時，試用區會這樣說明，管理員和操作員會看到前往目錄的連結。
 2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **選擇圖片**（最多 20 MiB）。
@@ -727,7 +727,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
    - **沒有其他機器放得下**時，副本也留下來等；之後某次檢查有機器放得下了，才會搬過去。
 3. **機器回來時**，它的 agent 收到的工作清單裡已經沒有搬走的副本，就會停掉它們的推論引擎。留下來等的副本會重新開始服務。搬走的副本不會自己搬回來：要放回去，請修改部署的機器。
 
-在 10 分鐘內回來的機器（重新開機、更新 agent、短暫斷線）什麼都不會被搬走；時間會從它下一次心跳重新起算。伺服器自己重新啟動後，每台機器在 agent 重新連線之前都會顯示離線，所以這 10 分鐘從伺服器啟動時才開始算。設定 `AGENT_OFFLINE_MOVE_SECONDS=0` 就永遠不搬移副本。應用程式（已淘汰）遵守同樣的規則，只有工作（task）會留在原地：它可能還在那裡執行，在別處再跑一次可能會把它的工作做兩次。
+在 10 分鐘內回來的機器（重新開機、更新 agent、短暫斷線）什麼都不會被搬走；時間會從它下一次心跳重新起算。伺服器自己重新啟動後，每台機器在 agent 重新連線之前都會顯示離線，所以這 10 分鐘從伺服器啟動時才開始算。設定 `AGENT_OFFLINE_MOVE_SECONDS=0` 就永遠不搬移副本。
 
 ## 讓副本數跟著負載變化
 
@@ -754,7 +754,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 從此之後：
 
-- 不管應用程式或部署要求什麼，Forgeyard 執行的任何東西都不會分配到其他卡；
+- 不管部署要求什麼，Forgeyard 執行的任何東西都不會分配到其他卡；
 - 其他卡會顯示 *not for Forgeyard*；
 - 記憶體以每張允許使用的卡回報的**可用**量計算，所以其他程式在同一張卡上的使用量會被考慮進去。
 
@@ -866,7 +866,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.2
+  docker.io/tonyhuang1101/forgeyard:1.5.3
 sudo docker logs forgeyard
 ```
 
@@ -884,7 +884,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.2 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -892,7 +892,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.2 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -914,12 +914,12 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.2
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.3
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**機器** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.2 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.3 .`
 
 ## 把伺服器當成服務執行
 
@@ -964,7 +964,9 @@ sudo systemctl enable --now forgeyard
    然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。用 Docker 的話：拉取新的 tag，再用它執行同一個 `docker run`（[做法](#run-the-server-in-docker)）。
 
    **升級到 1.4：** 1.3.1 標為淘汰的七個設定已經不再讀取（[清單](reference.md#removed-settings)）。重新啟動之前，如果你設了 `SECRET_KEY_FILE`，請把它改名為 `FORGEYARD_SECRET_KEY_FILE`（否則伺服器會拒絕啟動），其他的則移除；還留著的會列在設定健康檢查裡。
-3. **agent**：一台一台來。執行中的 agent 重新啟動時，會保留它的應用程式。
+
+   **升級到 1.5.3：** 應用程式已經移除。新版本第一次啟動之前，先用它執行 `python -m forgeyard check-apps`，看看升級會移除什麼（[應用程式（已移除）](reference.md#apps-removed)）。
+3. **agent**：一台一台來。執行中的 agent 重新啟動時，它的模型會繼續執行。
    - **用單行安裝裝的**：再執行一次，但不加 `--join`。它會安裝伺服器的新版本，並保留設定和憑據：
 
      ```bash
@@ -989,7 +991,7 @@ sudo systemctl enable --now forgeyard
 - **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1008,7 +1010,7 @@ sudo systemctl enable --now forgeyard
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
    ```
 
    在 NVIDIA 機器上，指令還會在 `--gpus` 旁邊用 `--device` 傳入 GPU 的裝置節點（1.4.5 起是 agent 回報的那些；較舊的 agent 則用一小段 shell 迴圈列出主機上的），所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。
@@ -1017,7 +1019,7 @@ sudo systemctl enable --now forgeyard
 - **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。
 - **從原始碼執行的**：`git checkout` 伺服器的版本並執行 `uv sync`，然後用你原本的方式重新啟動 agent。
 
-複製指令，在那台機器上執行。替換 agent 時，它的模型與應用程式會繼續執行；volume（或 install.sh 的狀態目錄）會保留這台機器，幾秒內它就會以原本的身分重新上線。
+複製指令，在那台機器上執行。替換 agent 時，它的模型會繼續執行；volume（或 install.sh 的狀態目錄）會保留這台機器，幾秒內它就會以原本的身分重新上線。
 
 agent 從不回報任何秘密：不回報 join token（已加入的機器不再需要它）、不回報它的憑據，也不回報名稱或值看起來像秘密的變數（`…TOKEN`、`…KEY`、`…PASSWORD`、Hugging Face 或 GitHub 的 token、含密碼的 URL）。這類變數會顯示為 `-e NAME="$NAME"`：請先在 shell 裡設定它（`export HF_TOKEN=…`），頁面上也會提醒。無法安全重現的值會被略過，並列出名稱。
 
@@ -1057,11 +1059,9 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 |---|---|
 | `server` | 用 CA 驗證的 HTTPS、安全性標頭、陌生的主機名稱（421）、CSRF 規則、用一次性帳號測試登入失敗後的等待、`/guide`、`/trust`、`/install.sh` |
 | `machines` | 每台機器都在線上、硬體正確；GPU 允許清單確實生效；加入指令會釘選 CA |
-| `workloads` | 行程類服務、任務（成功、重試、`max_duration`）、機器有 Docker 或 Podman 時的容器任務；在 GPU 機器上，應用程式只看得到分配給它的卡 |
 | `models` | 部署小模型並等它們就緒：每台 CPU 機器上的 Qwen3-1.7B GGUF；GPU 機器上的對話、embedding、rerank 和語音模型（估算放不下的會跳過）；部署頁面上的估算；**試試看** |
 | `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；試用區；用量 |
 | `cloud` | 給了 `--cloud-provider` 才會執行：溢出到雲端、設為 **永不** 的金鑰、只用本機、雲端上限、費用，以及預算和它的警示 |
-| `passthrough` | 一個公開在 `/x/` 的小型 HTTP 程式：在 CPU 機器上以行程執行，在 GPU 機器上以容器執行。金鑰（none、listed）、照原樣轉送的路徑、被拒絕的路徑、被替換的憑證與轉發標頭、強制的沙箱、轉址、串流、本文上限、rpm、同時請求數、讀取逾時、副本連接埠前的金鑰守門員、用量 |
 | `tts`、`img`、`video` | 在 GPU 機器上（有 CPU 推論引擎的也在 CPU 機器上）的語音、圖片和影片生成：SDK 的呼叫、格式、上限、佇列、用量和金鑰守門員 |
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
 | `relay` | 經由伺服器取得模型：把 CPU 機器的 **下載時的網路連線** 設為 **一律經由伺服器**，用 **下載到…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
@@ -1073,8 +1073,8 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 
 執行前要知道的事：
 
-- **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、應用程式、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣；relay 這組放進機器快取的模型、機器的取得設定，以及 images 這組的映像和 recipe 也會一併復原。這次執行留下的用量紀錄和稽核事件會保留。只有在 1.4.2 以前、無法移除映像的 agent 上，那個很小的映像 `accept-<run>-image:1` 會留下來，報告裡會說明。
-- **和別人共用的卡**（1.4.5）：伺服器因為沒有任何一張卡有足夠的可用記憶體而放不下的部署或應用程式，等了 `--place-timeout` 秒（5 分鐘）之後就會跳過，並附上伺服器給的原因（`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`），不會一直等到 `--timeout`（40 分鐘；下載和啟動仍然以它為上限）。每個會在 GPU 機器上部署的組別（`tts`、`img`、`video`、`passthrough`、`vision`、`scale`）開始之前，這次執行會先停止前面組別留在 GPU 上、後面組別也用不到的東西，再把它移除（`models` 組的部署只會停止，因為 console 組要顯示其中一個；`tts` 還可能用到的語音轉文字模型會保留），讓每一組都能用到這次執行在那張卡上的空間。報告的備註會列出釋放了哪些東西。
+- **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣；relay 這組放進機器快取的模型、機器的取得設定，以及 images 這組的映像和 recipe 也會一併復原。這次執行留下的用量紀錄和稽核事件會保留。只有在 1.4.2 以前、無法移除映像的 agent 上，那個很小的映像 `accept-<run>-image:1` 會留下來，報告裡會說明。
+- **和別人共用的卡**（1.4.5）：伺服器因為沒有任何一張卡有足夠的可用記憶體而放不下的部署，等了 `--place-timeout` 秒（5 分鐘）之後就會跳過，並附上伺服器給的原因（`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`），不會一直等到 `--timeout`（40 分鐘；下載和啟動仍然以它為上限）。每個會在 GPU 機器上部署的組別（`tts`、`img`、`video`、`passthrough`、`vision`、`scale`）開始之前，這次執行會先停止前面組別留在 GPU 上、後面組別也用不到的東西，再把它移除（`models` 組的部署只會停止，因為 console 組要顯示其中一個；`tts` 還可能用到的語音轉文字模型會保留），讓每一組都能用到這次執行在那張卡上的空間。報告的備註會列出釋放了哪些東西。
 - **只有一個請求會送到雲端供應商**，內容是固定的一小段提示，費用不到一美分。供應商的每月預算會被改動幾秒鐘再改回原值；其他預算檢查只用這次執行自己的金鑰和使用者。
 - **一次性使用者會有五次登入失敗**：伺服器允許每個位址在 15 分鐘內失敗 30 次，所以連續執行很多次時，中間要等一下。
 - **時間：**機器上已經有模型時大約 15 到 20 分鐘（沒有 GPU 機器時約 3 分鐘）；需要下載的話另外加上下載時間。
@@ -1168,7 +1168,7 @@ scrape_configs:
 | 項目 | 原因 |
 |---|---|
 | `data/forgeyard.db`（或你的 PostgreSQL 資料庫） | Forgeyard 知道的一切：使用者、機器、模型、部署、金鑰、用量 |
-| `data/secret.key` | 它負責加密儲存的機密資料（Hugging Face 權杖、副本的金鑰、應用程式的環境變數值）。請和資料庫備份**分開**存放 |
+| `data/secret.key` | 它負責加密儲存的機密資料（Hugging Face 權杖、副本的金鑰、供應商金鑰）。請和資料庫備份**分開**存放 |
 | `data/tls/` | 每台裝置和每個 agent 信任的 CA。少了它，每台裝置和每個 agent 都得重新信任一個新的 CA |
 | `.env` | 你的設定 |
 
@@ -1209,7 +1209,7 @@ uv run --no-sync python -m forgeyard secrets restore forgeyard-key-backup-ab12cd
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的應用程式則必須重新建立（它們的事件裡會說明）。
+它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動。
 
 ## 查看模型或推論引擎
 
@@ -1472,7 +1472,7 @@ Forgeyard 把每個內建推論引擎釘選在一個版本（vLLM 0.32.0、llama
 2. **機器** → 該機器 → **撤銷**。它的憑據會失效，agent 會被中斷連線並結束（安裝的服務不會再重新啟動它），它的副本也會從閘道上移除。
 3. **移除** 會把它從清單中移除。如果要把這台機器加回來，請用新的權杖重新加入（`forgeyard agent join --rejoin --join-token fyj_…`）。
 
-伺服器已經連不到被撤銷機器上的 agent，所以不會停止那台機器上仍在執行的應用程式。請在機器上自行停止它們：`docker ps --filter label=forgeyard.agent` 會列出這些容器。
+伺服器已經連不到被撤銷機器上的 agent，所以不會停止那台機器上仍在執行的模型。請在機器上自行停止它們：`docker ps --filter label=forgeyard.agent` 會列出這些容器。
 
 ## 解除安裝 agent
 

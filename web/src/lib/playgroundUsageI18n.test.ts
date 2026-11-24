@@ -84,18 +84,17 @@ describe("the Playground's helpers", () => {
 
   it("FY-WEB-784 the vision server's error codes in Chinese; English unchanged, and an unknown code as answerError says it", () => {
     const err = (code: string, message?: string) => ({ error: { code, message } });
-    expect(visionError(413, err("image_too_large"), 20, "model")).toBe("The image is too large for this model: it takes at most 20 MiB.");
-    expect(visionError(503, err("no_ready_replica"), 20, "model")).toBe("The model is not ready: no replica is running.");
-    expect(visionError(400, err("labels_required", "This model classifies among labels"), 20, "model"))
+    expect(visionError(413, err("image_too_large"), 20)).toBe("The image is too large for this model: it takes at most 20 MiB.");
+    expect(visionError(503, err("no_ready_replica"), 20)).toBe("The model is not ready: no replica is running.");
+    expect(visionError(400, err("labels_required", "This model classifies among labels"), 20))
       .toBe("This model chooses among the labels you give: type two or more, separated by commas.");
-    expect(visionError(418, err("teapot", "short and stout"), 20, "model")).toBe("418: short and stout");
+    expect(visionError(418, err("teapot", "short and stout"), 20)).toBe("418: short and stout");
     setLang("zh-TW");
-    expect(visionError(413, err("image_too_large"), 20, "model")).toBe("圖片對這個模型來說太大：最多只能 20 MiB。");
-    expect(visionError(503, err("key_busy"), 20, "app")).toBe("這個應用程式正忙著處理其他圖片。請稍後再試。");
-    expect(visionError(503, err("no_ready_replica"), 20, "model")).toBe("這個模型尚未就緒：沒有執行中的副本。");
-    expect(visionError(400, err("labels_not_supported", "This classifier has fixed classes"), 20, "model")).toBe("這個分類器只認得固定的類別，不能指定標籤。");
-    expect(visionError(400, err("labels_not_supported", "This detector has fixed classes"), 20, "model")).toBe("這個偵測器只認得固定的類別，不能指定要找什麼。");
-    expect(visionError(404, err("model_not_found"), 20, "model")).toBe("這個模型已不再部署。重新載入頁面即可看到目前部署的模型。");
+    expect(visionError(413, err("image_too_large"), 20)).toBe("圖片對這個模型來說太大：最多只能 20 MiB。");
+    expect(visionError(503, err("no_ready_replica"), 20)).toBe("這個模型尚未就緒：沒有執行中的副本。");
+    expect(visionError(400, err("labels_not_supported", "This classifier has fixed classes"), 20)).toBe("這個分類器只認得固定的類別，不能指定標籤。");
+    expect(visionError(400, err("labels_not_supported", "This detector has fixed classes"), 20)).toBe("這個偵測器只認得固定的類別，不能指定要找什麼。");
+    expect(visionError(404, err("model_not_found"), 20)).toBe("這個模型已不再部署。重新載入頁面即可看到目前部署的模型。");
   });
 });
 

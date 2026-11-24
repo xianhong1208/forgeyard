@@ -82,7 +82,6 @@ export default {
   "fleet.legend.free": "free",
   "fleet.nothingHere": "Nothing runs here yet.",
   "fleet.more": "+{count} more",
-  "fleet.appTitle": "App {name}: apps are deprecated and removed in 1.5 (API only until then)",
   "fleet.cpu": "CPU",
   "fleet.layers": "{done} of {total} layers",
   "fleet.pull.relayLoading": "Pulling the image via the server: loading it",
@@ -121,4 +120,5 @@ export default {
   "fleet.behind.version": "agent {agent}, server {server}: update",
   "fleet.behind.lacks": "agent {agent} lacks {missing}: update",
   "fleet.behind.title": "Open the command that updates this agent",
+  "fleet.workloadTitle": "Workload {name}: it runs here, but no deployment lists it",
 } as const;

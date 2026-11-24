@@ -72,17 +72,29 @@ workloads (runtime `model`); fine-tuning (1.8) will too.
 
 **Apps leave Forgeyard** (#88, #89). A workload people run themselves, not a model's, was an *app*:
 in the console under **Apps** (1.4, #81), made with `POST /api/workloads`, optionally exposed at
-`/x/`. Forgeyard is about running and managing models, so 1.4 removes apps from the console (pages,
-templates, a key's *Apps at /x/* setting, the Playground's vision apps) and deprecates the rest: the
-apps part of `/api/workloads`, `GET /api/workloads/templates` and `/x/` keep working until 1.5 and say
-so (forgeyard/deprecation.py: a `Deprecation` header, RFC 9745, and a `Link` to the guide on every
-answer, errors included; a server log warning per kind at most once an hour; the Setup health finding
-`apps-deprecated` while any app exists). `GET /api/keys` and the Playground's vision options no
-longer list apps. 1.5 removes the API, `/x/`, the templates and the keys' settings, with a migration
-that removes the apps left. Old console links (`/apps…`, 1.3's `/workloads…`) open a model's
-deployment or Machines. **Machines** still names an app that holds a card (not linked), so a card in
-use is never shown free. A model deployment's workload is seen under **Serving** only, and the API
-still refuses stop, start and delete of it (409 `managed_by_deployment`). The spec:
+`/x/`. Forgeyard is about running and managing models, so 1.4 removed apps from the console (pages,
+templates, a key's *Apps at /x/* setting, the Playground's vision apps) and deprecated the rest, with a
+`Deprecation` header on every answer, a log warning and a Setup health finding. **1.5.3 removes them**
+(#89): creating, exposing, stopping, starting and deleting one through `/api/workloads`,
+`GET /api/workloads/templates`, `/x/` and the console's route to an exposed vision app answer **410
+Gone** for the rest of 1.5.x (`forgeyard/removed.py`: code `apps_removed`, the release and the guide's
+section named in the body, `Deprecation` and `Link` headers; `/x/` keeps the gateway's error shape), and
+404 from 1.6. A 410 rather than a 404 so that a script that still calls them learns why. Migration
+`0019_remove_apps` writes one audit entry per remaining app (`workload.removed_in_upgrade`: its spec
+without environment values, where its replicas ran) and per API key that could call `/x/`
+(`api_key.x_access_removed`), deletes the apps, and drops `workloads.gateway` and the keys' `workloads`,
+`workload_list` and `workloads_locked_by`. Deleting rather than archiving: the audit log is where an
+admin or an auditor already looks for what changed, it is kept for good, and an archive table would be a
+second, half-working copy of a feature that is gone; the way back is the backup taken before the
+upgrade. The agents stop the removed replicas the usual way (they leave the work list), never by a forced
+kill. Setup health says what was removed for 30 days (`apps-removed`), and `forgeyard check-apps` lists
+beforehand what an upgrade will remove. A key request that still sends `workloads: "none"` is taken;
+anything asking for app access is refused (422 `apps_removed`). Reading the workloads stays
+(`GET /api/workloads`, a replica's logs): every workload is now a model deployment's. Old console links
+(`/apps…`, 1.3's `/workloads…`) open a model's deployment or Machines. A model deployment's workload is
+seen under **Serving** only, and stopped, started and deleted through its deployment (the old
+`/api/workloads/{id}/stop|start` and `DELETE` answer 410 naming it). The workload engine itself stays:
+models run on it, and fine-tuning will. The spec:
 
 ```json
 {"name": "web", "kind": "service",
@@ -635,8 +647,8 @@ page contain these lines whenever the server uses its own CA.
     its `/v1` routes.
   - Replicas started by an older agent are restarted behind a guard once the new agent has their key
     (same published port); those from before M4 have no key until they are placed again (stop and
-    start the deployment). Plain workloads (not models) are guarded only when they are exposed at
-    `/x/` (below).
+    start the deployment). Plain workloads (not models) were guarded only when they were exposed at
+    `/x/` (below; removed in 1.5.3).
 
 Real-hardware check: `scripts/accept_m4.py`.
 
@@ -655,9 +667,13 @@ the same release and its digest is not known before; that left it unchecked when
 through the server. Since 1.4.1 (#113) the recipe pins it like every engine (`images.lock.json`), and a
 PR after a release that changed `images/vision` moves the pin: a server upgrade alone does not change
 it. `forgeyard_image` stays for custom recipes copied from 1.4.0. The server asks for `VISION_API_KEY` on every path but `/health`;
-the baked-in models stay for the apps made from templates until Apps go (#88).
+the baked-in models served the apps made from templates, removed in 1.5.3 (#89); the image still carries
+them (dropping them changes the image, so it is left to a release that moves the vision pin anyway).
 
-### Workloads at /x/ (1.3, generic passthrough; deprecated in 1.4, removed in 1.5)
+### Workloads at /x/ (1.3, generic passthrough; deprecated in 1.4, removed in 1.5.3)
+
+**Removed in 1.5.3** (#89, see *Apps leave Forgeyard* above): `/x/` answers 410 and the templates are gone. What
+follows is the record of what it was.
 
 Anything that is not a chat, embedding, speech or image model (detection, segmentation, depth, a
 Triton or KServe model, a FastAPI or BentoML service) runs as a service workload and is **exposed**

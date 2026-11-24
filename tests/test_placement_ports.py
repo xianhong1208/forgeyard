@@ -12,7 +12,7 @@ from forgeyard.machines import agent_api, store
 from forgeyard.machines.messages import HelloIn, StatusIn
 from forgeyard.workloads import placement
 from tests.test_scheduler import deploy, reps, seed_catalog
-from tests.workload_helpers import PROCESS_OK, make_node, service, task
+from tests.workload_helpers import PROCESS_OK, create_workload, make_node, service, task
 
 GUARDED = ("workloads", "models", "replica_keys", "replica_guard", "workload_guard")
 LLAMA = {"model": "qwen3-1.7b-gguf", "recipe": "llama-cpp", "params": {"gpus": 0, "threads": 2}}
@@ -22,10 +22,8 @@ def ranged(low, high):
     return {**PROCESS_OK, "ports": {"low": low, "high": high}}
 
 
-def create(c, spec, status=201):
-    r = c.post("/api/workloads", json=spec)
-    assert r.status_code == status, r.text
-    return r.json()["workload"]
+def create(c, spec):
+    return create_workload(c, spec)["workload"]
 
 
 def rows(name):
@@ -118,17 +116,13 @@ def test_fy_port_002_a_guarded_model_replica_takes_two_ports_and_the_plan_says_w
     assert three["machines"][0]["reason"] == "no free port: 6 of 6 in use (host ports 33000-33005)"
 
 
-def test_fy_port_003_plain_workloads_take_one_port_each_and_two_when_exposed(owner):
+def test_fy_port_003_plain_workloads_take_one_port_each(owner):
     """FY-PORT-003: a service takes one port per published port; with the range used up the next one waits
-    unplaced with the reason (not in backoff on the machine); a task without ports still goes there; a workload
-    exposed at /x/ (behind the guard) needs two."""
+    unplaced with the reason (not in backoff on the machine); a task without ports still goes there. (A workload
+    exposed at /x/ needed two until /x/ was removed in 1.5.3, #89.)"""
     nid = make_node("tunnel", "nvidia-rtx4090x2", features=GUARDED, runtime_info=ranged(33000, 33002))
     for name in ("a", "b"):
         assert create(owner, service(name))["replica_list"][0]["machine"]["name"] == "tunnel"
-    exposed = create(owner, {**service("x", machine_id=nid), "gateway": {"expose": True}})["replica_list"][0]
-    assert exposed["machine"] is None
-    assert exposed["reason"] == ("Cannot be placed: tunnel: not enough free ports: 2 of 3 in use, it needs 2 "
-                                 "(host ports 33000-33002)")
     assert create(owner, service("c"))["replica_list"][0]["machine"]["name"] == "tunnel"
     waits = create(owner, service("d"))["replica_list"][0]
     assert waits["machine"] is None and waits["state"] == "pending"

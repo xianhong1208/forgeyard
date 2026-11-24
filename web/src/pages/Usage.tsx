@@ -57,7 +57,7 @@ export function UsagePage() {
   const speech = (sum?.characters ?? 0) > 0;
   // Images: how many, their megapixels and the time replicas spent making them (GPU time on a GPU).
   const images = (sum?.images ?? 0) > 0;
-  // Workloads at /x/ (1.3): request and answer bodies, and the time replicas spent on them.
+  // Apps at /x/ (1.3, removed in 1.5.3): request and answer bodies; shown while past months still have them.
   const traffic = (sum?.bytes_in ?? 0) + (sum?.bytes_out ?? 0) > 0;
   // Video (1.3): the length made (media_ms on rows without characters spoken) and the GPU time.
   const video = (data?.rows ?? []).some((r) => (r.media_ms ?? 0) > 0 && !(r.characters ?? 0));

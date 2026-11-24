@@ -11,6 +11,7 @@
     python -m forgeyard secrets reset --yes        # the secret key is lost: start over (see docs)
     python -m forgeyard secrets restore FILE [--data-dir DIR] [--force]
                                                    # put back a key backup downloaded from the console
+    python -m forgeyard check-apps [--json]        # what the 1.5.3 upgrade removes (apps, /x/ key access), read only
     python -m forgeyard agent inventory [--json] [--raw]                           # what it detects
     python -m forgeyard agent runtimes [--workload-user nobody]                     # what it can run
 """
@@ -604,6 +605,10 @@ def build_parser() -> argparse.ArgumentParser:
                                             "CA, keeping the credential (agents that joined over http)")
     _agent_args(tr, sub=True)
 
+    chk = sub.add_parser("check-apps", help="list what upgrading to 1.5.3 removes (apps, API keys' /x/ access), or "
+                                            "removed, without changing anything (exit 1: something will be removed)")
+    chk.add_argument("--json", action="store_true", help="machine-readable output")
+
     sec = sub.add_parser("secrets", help="manage the key that encrypts stored secrets")
     sec_sub = sec.add_subparsers(dest="secrets_command")
     reset = sec_sub.add_parser("reset", help="the key is lost: make a new one and drop what it encrypted")
@@ -688,6 +693,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return commands.get(args.agent_command, _agent_cmd)(args)
     if args.command == "secrets":
         return _secrets_cmd(args)
+    if args.command == "check-apps":
+        from forgeyard import apps_check
+
+        return apps_check.run(as_json=args.json)
     return _serve()
 
 

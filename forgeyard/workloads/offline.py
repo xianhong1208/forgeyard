@@ -10,8 +10,8 @@ machine that fits, by the deployment's own rules (spread, fits, the estimate as 
   say so.
 - **Nothing else fits:** the replica stays where it is and waits for the machine (it would only wait unplaced
   otherwise, and the machine may well come back first), saying so; it moves on a later sweep once something fits.
-- **Apps** (workloads that are not model deployments, deprecated since 1.4) follow the same rules for services.
-  A task stays: it may still be running there, cut off from the network, and running it again elsewhere could do
+- **Plain workloads** (not a model deployment's; since apps were removed in 1.5.3 only tests make them) follow the
+  same rules for services. A task stays: it may still be running there, cut off from the network, and running it again elsewhere could do
   its work twice.
 
 The replica that moves is the same row (one copy, never two counted): it gets a new id, so the machine, when it
@@ -114,7 +114,7 @@ def _model_alternative(db: DbSession, r: Replica, node: Node) -> tuple[Optional[
 
 
 def _app_alternative(db: DbSession, r: Replica, node: Node) -> tuple[Optional[bool], Optional[str]]:
-    from forgeyard.workloads import expose, placement
+    from forgeyard.workloads import placement
     from forgeyard.workloads.spec import WorkloadSpec
 
     try:
@@ -123,11 +123,10 @@ def _app_alternative(db: DbSession, r: Replica, node: Node) -> tuple[Optional[bo
         return None, None
     if spec.machine_id is not None:
         return True, None
-    exposed = expose.of(r.workload) is not None
     for other in placement._candidates(db, spec):  # online machines, by name
         if other.id == node.id:
             continue
-        gpus, _ = placement.fit(db, other, spec, exclude=r.id, exposed=exposed)
+        gpus, _ = placement.fit(db, other, spec, exclude=r.id)
         if gpus is not None:
             return False, other.name
     return False, None

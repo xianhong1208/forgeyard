@@ -174,7 +174,7 @@ On each machine, in its Forgeyard folder:
 
    It checks the fingerprint, talks to the server through the pinned CA, then saves the new
    address and the CA. The machine **keeps its credential**: it needs no new join token, and its
-   models, apps and history stay.
+   models and history stay.
 3. Start the agent as before (without `--server`). It connects over `wss://`.
 
 A wrong fingerprint changes nothing. If the server's CA ever has to change (`data/tls` lost or
@@ -309,7 +309,7 @@ setup: add `add_header Strict-Transport-Security "max-age=31536000" always;` in 
 
 ## Between the gateway and the replicas
 
-From 1.4.5 the gateway reaches every model replica (and every app exposed at `/x/`) over TLS too, so the replica's
+From 1.4.5 the gateway reaches every model replica over TLS too, so the replica's
 internal key, the prompts and the answers never cross the network in clear between the server and a machine.
 Nothing has to be set or trusted for it, whatever `TLS`, `TLS_CERT_FILE` or the reverse proxy say:
 
@@ -352,7 +352,7 @@ Forgeyard encrypts the secrets it has to read back:
 
 - Hugging Face tokens on deployments;
 - model replicas' internal keys;
-- the values of apps' environment variables (the names stay readable);
+- the values of workloads' environment variables (the names stay readable);
 - cloud providers' API keys (1.2).
 
 They are encrypted with AES-256-GCM under a server key that is **not in the database**:
@@ -385,8 +385,6 @@ It makes a new key (the old file, if any, is kept as `secret.key.lost-<time>`) a
 
 - drops the Hugging Face tokens: enter them again on each deployment of a gated model;
 - places model replicas again, so they restart with new internal keys;
-- empties lost apps' environment values (the names stay), and says so in each app's
-  events: delete such an app and create it again with its values;
 - drops cloud providers' keys: enter them again on **Cloud → Providers**.
 
 It refuses to run when the key is not actually lost.

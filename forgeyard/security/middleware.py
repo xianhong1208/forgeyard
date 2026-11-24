@@ -11,8 +11,8 @@
 4. Security headers on every answer; Strict-Transport-Security only with your own certificate
    (see hsts()).
 
-The gateway (`/v1/*`, M4, and the passthrough `/x/*`, 1.3) gets only the host check: it takes API keys,
-never cookies, so a cross-site page cannot use a browser's credentials there.
+The gateway (`/v1/*`, M4, and `/x/*`, the passthrough to apps of 1.3, which answers 410 since 1.5.3) gets only the
+host check: it takes API keys, never cookies, so a cross-site page cannot use a browser's credentials there.
 
 GuardMiddleware only sees HTTP requests; WebSocketHostGuard applies the same host check to
 WebSocket handshakes (the agent stream), answering 421 before anything else runs.
@@ -89,7 +89,7 @@ def same_origin(request: Request) -> bool:
 
 
 def is_gateway(path: str) -> bool:
-    """The gateway's paths: /v1 (models) and /x (exposed workloads, 1.3)."""
+    """The gateway's paths: /v1 (models) and /x (the passthrough to apps, 410 since 1.5.3)."""
     return path in ("/v1", "/x") or path.startswith(("/v1/", "/x/"))
 
 

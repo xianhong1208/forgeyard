@@ -350,9 +350,9 @@ def test_fy_rport_014_accept_all_guard_checks_over_tls(rp, guards, engine, monke
 
 def test_fy_rport_015_every_direct_port_check_uses_the_helper(rp):
     """FY-RPORT-015: no acceptance script builds a replica URL with http:// itself or calls a replica's endpoint URL
-    with its own HTTP client any more: every direct-port check goes through replica_port (accept_all, accept_x,
-    accept_m4, accept_mm, accept_img, accept_tts, accept_video, accept_vision)."""
-    for name in ("accept_all", "accept_x", "accept_m4", "accept_mm", "accept_img", "accept_tts", "accept_video",
+    with its own HTTP client any more: every direct-port check goes through replica_port (accept_all,
+    accept_m4, accept_mm, accept_img, accept_tts, accept_video, accept_vision; accept_x went with /x/ in 1.5.3)."""
+    for name in ("accept_all", "accept_m4", "accept_mm", "accept_img", "accept_tts", "accept_video",
                  "accept_vision"):
         text = (SCRIPTS / f"{name}.py").read_text()
         assert "replica_port.Replicas.of(" in text and ("rp.endpoint(" in text or "rp.published(" in text), name

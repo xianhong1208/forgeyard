@@ -48,7 +48,7 @@ What it shows for each card:
   serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
   1.1.0 or older keeps its GPU allowlist when the key changes.
 
-Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process (an app or an engine) gets
+Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process (an engine) gets
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
@@ -136,9 +136,8 @@ the next machine:
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
 - **Advanced → Port range** (`FORGEYARD_PORT_RANGE`, default `30000-32767`): the host ports for
   services and model replicas. Set it when only some ports reach the machine, for example
-  `40000-40099` opened in a firewall. The server must be able to reach these ports. Each port an app
-  publishes takes one port of the range, and a model replica (or an app exposed at `/x/`) takes two: one
-  for the agent's key guard and one for the engine behind it. Forgeyard counts them, so a range of 3
+  `40000-40099` opened in a firewall. The server must be able to reach these ports. A model replica
+  takes two ports of the range: one for the agent's key guard and one for the engine behind it. Forgeyard counts them, so a range of 3
   ports holds one model: a machine whose range is full is skipped, and a replica with nowhere else to go
   waits ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
 
@@ -166,7 +165,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -208,7 +207,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -223,7 +222,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3 inventory
 ```
 
 ### CPU only
@@ -237,7 +236,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.3
 ```
 
 ### Why these options
@@ -248,7 +247,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 - **The model cache at the same path inside and outside** (`-v /srv/forgeyard-models:/srv/forgeyard-models`):
   the agent downloads models into it, then asks the host's Docker to start the engine container
   with the model mounted *by its path on the host*. Different paths would mount nothing.
-- **`/var/run/docker.sock`**: models and container apps run as containers on the host's Docker,
+- **`/var/run/docker.sock`**: models run as containers on the host's Docker,
   next to the agent, not inside it. That socket gives full control of the host's Docker, which is
   why the agent's container is trusted like the agent itself.
 - **The `forgeyard-agent` volume** keeps the machine's credential and the pinned CA. Keep it: the
@@ -258,10 +257,10 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   [agent.toml](reference.md#agent-settings). You can also mount a file:
   `-v /etc/forgeyard/agent.toml:/etc/forgeyard/agent.toml:ro`.
 - The agent runs as **root** inside the container: it needs the Docker socket and switches to the
-  unprivileged account `forgeyard-run` for processes. Apps and engines never run as root.
+  unprivileged account `forgeyard-run` for processes. Engines never run as root.
 - There is no systemd in the container, so processes are limited with rlimits (the image
   sets `FORGEYARD_LIMITS=rlimit`). Processes run inside the agent's container and stop
-  with it; models and apps in containers keep running on the host.
+  with it; models in containers keep running on the host.
 
 ### Offline machines, or build it yourself
 
@@ -270,8 +269,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -290,21 +289,21 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.2 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.3 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.5.2`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.5.3`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
-   process you started. Its models and apps in containers keep running.
+   process you started. Its models in containers keep running.
 3. Start the container with the old state directory and the same model cache, and **without** the
    join variables:
 
@@ -315,7 +314,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -442,8 +441,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -641,9 +640,8 @@ without `labels` answers 400 `labels_required`; a classifier with fixed classes 
 The Playground's vision panel sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
 as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
 model in **Usage**. There is no Vision tab since 1.4: vision models are in the Playground's one model
-picker, and 1.3's address (`/playground?tab=vision`) opens the first one. Apps made from the 1.3
-templates are not offered here (apps left the console in 1.4 and are
-[removed in 1.5](reference.md#apps-deprecated)).
+picker, and 1.3's address (`/playground?tab=vision`) opens the first one. The apps made from the 1.3
+templates are gone ([removed in 1.5.3](reference.md#apps-removed)): vision models replace them.
 
 1. Open the **Model** picker and choose a model under **Vision**: each is listed with its task. Only
    ready models are listed; with none at all, the Playground says so and admins and operators get a link
@@ -1157,8 +1155,7 @@ A machine is *offline* once nothing has been heard from it for 30 seconds (`AGEN
 A machine back within the 10 minutes (a reboot, an agent update, a short network drop) keeps everything; the time
 starts again from its next heartbeat. After the server itself restarts, every machine shows offline until its
 agent reconnects, so the 10 minutes count from the server's start. Set `AGENT_OFFLINE_MOVE_SECONDS=0` to never
-move replicas. Apps (deprecated) follow the same rules, except that a task stays where it is: it may still be
-running there, and running it again elsewhere could do its work twice.
+move replicas.
 
 ## Let the number of replicas follow the load
 
@@ -1197,7 +1194,7 @@ To see a replica added under load and drained on your own machines, run `scripts
 
 From then on:
 
-- nothing Forgeyard runs is given another card, whatever an app or deployment asks;
+- nothing Forgeyard runs is given another card, whatever a deployment asks;
 - the other cards show *not for Forgeyard*;
 - memory is counted from what each allowed card reports **free**, so what other programs use on the
   same card is respected.
@@ -1338,7 +1335,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.2
+  docker.io/tonyhuang1101/forgeyard:1.5.3
 sudo docker logs forgeyard
 ```
 
@@ -1372,7 +1369,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.2 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1381,7 +1378,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.2 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1406,7 +1403,7 @@ right after it ([how](#upgrade-the-server-and-the-agents)).
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.2
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.3
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1414,7 +1411,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.2 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.3 .`
 
 ## Run the server as a service
 
@@ -1466,7 +1463,10 @@ the journal: `journalctl -u forgeyard -f`.
    ([the list](reference.md#removed-settings)). Before you restart, rename `SECRET_KEY_FILE` to
    `FORGEYARD_SECRET_KEY_FILE` if you set it (otherwise the server refuses to start), and remove
    the others; Setup health lists any that are left.
-3. **The agents**, one by one. Running agents keep their models and apps running while they restart.
+
+   **To 1.5.3:** apps are removed. Before the new version first starts, run `python -m forgeyard check-apps` with
+   it to see what the upgrade will remove ([Apps (removed)](reference.md#apps-removed)).
+3. **The agents**, one by one. Running agents keep their models running while they restart.
    - **Installed** with the one-line install: run it again, without `--join`. It installs the
      server's new version and keeps the settings and the credential:
 
@@ -1504,7 +1504,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.2 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.3 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1523,7 +1523,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.2
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.3
    ```
 
    On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
@@ -1538,7 +1538,7 @@ that machine's agent to the server's version, made from what the agent reported 
 - **From a checkout**: `git checkout` of the server's version and `uv sync`; then restart the agent the way you
   started it.
 
-Copy the command and run it on that machine. Its models and apps keep running while the agent is replaced, and
+Copy the command and run it on that machine. Its models keep running while the agent is replaced, and
 the volume (or install.sh's state directory) keeps the machine: it comes back online as itself within seconds.
 
 The agent never reports a secret: not the join token (a joined machine does not need it again), not its
@@ -1601,11 +1601,9 @@ saying so. The groups, in the order they run:
 |---|---|
 | `server` | HTTPS with the CA, security headers, a foreign host name (421), the CSRF rule, sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh` |
 | `machines` | each machine is online with its hardware; its GPU allowlist is enforced; join commands pin the CA |
-| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that an app sees only its card |
 | `models` | deploys small models and waits for them: Qwen3-1.7B GGUF on each CPU machine; a chat, an embedding, a rerank and a speech model on the GPU machine (each skipped if its estimate does not fit); the estimate on the deployment page; **Try it** |
 | `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
 | `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
-| `passthrough` | a small HTTP app exposed at `/x/`: as a process on the CPU machine, in a container on the GPU machine. Keys (none, listed), the path as sent, refused paths, credentials and forwarded headers replaced, the forced sandbox, redirects, streaming, the body limit, rpm, concurrency, the read timeout, the replica's port behind the key guard, usage |
 | `tts`, `img`, `video` | speech, image and video generation on the GPU machine (and the CPU machine where a CPU engine exists): the SDK's calls, formats, caps, the queue, usage and the key guard |
 | `vision` | detection, segmentation and depth models with the vision recipe: the results, refusals, keys and usage |
 | `relay` | models through the server: with the CPU machine's **Internet access for downloads** set to **Always through the server**, **Download to…** of a small GGUF (26 MB) arrives through the server; then a second machine (`--relay-second-machine`, default the second CPU machine, else the GPU machine) gets it from the first machine's cache. Both machines' setting goes back, and the model leaves their caches |
@@ -1620,12 +1618,12 @@ failed, 2 when the run could not start.
 What to know before you run it:
 
 - **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
-  apps, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
+  routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
   at the end, also after a failure or **Ctrl-C**, with the relay group's model in the machines'
   caches, their fetch setting, and the images group's image and recipe. Usage rows and audit events
   of the run stay. Only on an agent older than 1.4.2, which cannot remove images, the tiny image
   `accept-<run>-image:1` stays, and the report says so.
-- **A card shared with other work** (1.4.5): a deployment or app the server cannot place, because no
+- **A card shared with other work** (1.4.5): a deployment the server cannot place, because no
   card has the memory free, is skipped after `--place-timeout` seconds (5 minutes) with the server's
   reason (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`), instead of waiting for
   `--timeout` (40 minutes, which stays the limit for downloads and starts). Before each group that
@@ -1791,7 +1789,7 @@ machines, memory, spend) is read from the database at each scrape: scrape every 
 | What | Why |
 |---|---|
 | `data/forgeyard.db` (or your PostgreSQL database) | everything Forgeyard knows: users, machines, models, deployments, keys, usage |
-| `data/secret.key` | it encrypts stored secrets (Hugging Face tokens, replicas' keys, apps' environment values). Keep it **apart** from the database backup |
+| `data/secret.key` | it encrypts stored secrets (Hugging Face tokens, replicas' keys, provider keys). Keep it **apart** from the database backup |
 | `data/tls/` | the CA every device and agent trusts. Without it, every device and agent has to trust a new one |
 | `.env` | your settings |
 
@@ -1856,8 +1854,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
 It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
-(and any deployment's own), model replicas restart with new internal keys, and apps with lost
-environment values have to be created again (their events say so).
+(and any deployment's own), and model replicas restart with new internal keys.
 
 ## Look at a model or an engine
 
@@ -2372,7 +2369,7 @@ and `FORGEYARD_MODEL_CACHE`, then recreate the container.
 3. **Remove** takes it off the list. To bring the machine back, join it again with a new token
    (`forgeyard agent join --rejoin --join-token fyj_…`).
 
-Models and apps still running on a revoked machine are not stopped by the server, which can no longer
+Models still running on a revoked machine are not stopped by the server, which can no longer
 reach the agent. Stop them on the machine: `docker ps --filter label=forgeyard.agent` lists the
 containers.
 

@@ -4,19 +4,17 @@ removes."""
 
 from __future__ import annotations
 
-import base64
 import importlib.util
 import json
 import sys
-import zlib
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "accept_all.py"
-ORDER = ["server", "machines", "workloads", "models", "gateway", "cloud", "tts", "img", "video", "passthrough",
-         "vision", "relay", "images", "scale", "console"]
+ORDER = ["server", "machines", "models", "gateway", "cloud", "tts", "img", "video", "vision", "relay", "images", "scale",
+         "console"]
 
 
 @pytest.fixture(scope="module")
@@ -30,13 +28,13 @@ def acc():
 
 
 def test_fy_acc_001_groups_in_order_and_their_needs(acc):
-    """FY-ACC-001: the fifteen groups run in this order (1.3 adds tts, img, video and passthrough, 1.4 vision,
-    relay and images); gateway and cloud need the models group, the others make their own."""
+    """FY-ACC-001: the thirteen groups run in this order (1.3 adds tts, img and video, 1.4 vision, relay and images,
+    1.5 scale; the workloads and passthrough groups went with apps in 1.5.3, #89); gateway and cloud need the models
+    group, the others make their own."""
     assert list(acc.GROUPS) == ORDER
     assert acc.GROUPS["gateway"].needs == ("models",) and acc.GROUPS["cloud"].needs == ("models",)
-    assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "workloads", "models", "tts", "img", "video",
-                                                  "passthrough", "vision", "relay", "images", "scale",
-                                                  "console"))
+    assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "models", "tts", "img", "video", "vision", "relay",
+                                                  "images", "scale", "console"))
 
 
 def test_fy_acc_002_arguments(acc):
@@ -71,8 +69,8 @@ def test_fy_acc_003_plan_keeps_what_a_chosen_group_needs(acc):
     otherwise); the plan stays in the groups' order."""
     needs = {"gateway": ("models",), "cloud": ("models",)}
     plan = acc.plan_groups([], ["models", "console"], ORDER, needs)
-    assert plan == [("server", ""), ("machines", ""), ("workloads", ""), ("models", "needed by gateway"),
-                    ("gateway", ""), ("cloud", ""), ("tts", ""), ("img", ""), ("video", ""), ("passthrough", ""),
+    assert plan == [("server", ""), ("machines", ""), ("models", "needed by gateway"),
+                    ("gateway", ""), ("cloud", ""), ("tts", ""), ("img", ""), ("video", ""),
                     ("vision", ""), ("relay", ""), ("images", ""), ("scale", "")]
     assert acc.plan_groups(["cloud", "gateway"], [], ORDER, needs) == [
         ("models", "needed by gateway"), ("gateway", ""), ("cloud", "")]
@@ -172,20 +170,6 @@ def test_fy_acc_007_ca_fingerprint_as_the_server_prints_it(acc, tmp_path):
     assert acc.ca_fingerprint("junk\n" + pem).startswith("sha256:")
 
 
-def test_fy_acc_008_gpu_probe_travels_as_one_argument(acc):
-    """FY-ACC-008: scripts/gpu_probe.py goes to the machine inside one `python3 -c` argument (a workload
-    argument holds at most 4096 characters), unchanged."""
-    from forgeyard.workloads.spec import WorkloadSpec
-
-    src = acc.probe_source()
-    assert len(src) <= 4096
-    blob = src.split("b64decode('")[1].split("')")[0]
-    assert zlib.decompress(base64.b64decode(blob)) == (ROOT / "scripts" / "gpu_probe.py").read_bytes()
-    compile(src, "<probe>", "exec")
-    WorkloadSpec.model_validate({"name": "accept-x-probe", "kind": "task", "machine_id": 1,
-                                 "runtime": {"type": "process", "command": "python3", "args": ["-c", src, "--expect", "1"]}})
-
-
 def test_fy_acc_009_error_codes_and_headers(acc):
     """FY-ACC-009: an answer's error code is read from Forgeyard's shape and from the gateway's
     (OpenAI's); who served a request comes from X-Forgeyard-Target."""
@@ -260,7 +244,7 @@ def test_fy_acc_012_the_guide_explains_it_in_both_languages():
 
 def test_fy_acc_014_the_scripts_check_with_info_and_skip(acc):
     """FY-ACC-014: the per-feature scripts' exercise() functions call the check they are given with info=True
-    or skip=True (accept_x's container user, the templates' timings); Run.check takes both and records them
+    or skip=True; Run.check takes both and records them
     as SKIP with the reason, never as a pass or a failure, so a group handed run.check does not stop."""
     args = acc.parse_args(["--server", "https://127.0.0.1:9"])
     run = acc.Run(args, None)
@@ -589,12 +573,12 @@ def test_fy_acc_022_waiting_for_room_has_its_own_limit(acc, monkeypatch):
 
 def test_fy_acc_023_no_room_is_a_skip_not_a_failure(acc, monkeypatch):
     """FY-ACC-023: what waited for room records a SKIP with the shortage (not_ready), any other failed wait a FAIL;
-    an Unplaced that leaves a group ends it as a SKIP of the rest of the group; a workload's and a deployment's
-    waits pass the reason on (wait_status, dep_poll)."""
+    an Unplaced that leaves a group ends it as a SKIP of the rest of the group; a deployment's wait passes the reason
+    on (dep_poll)."""
     ft = FakeTime()
     monkeypatch.setattr(acc, "time", ft)
     run = acc.Run(acc.parse_args(["--place-timeout", "10"]), None)
-    run.current = "passthrough"
+    run.current = "vision"
     run.not_ready("accept-x-depth: ready", acc.Unplaced(f"workload #9: not placed within 10 s, {SHORT}"))
     run.not_ready("accept-x-seg: ready", acc.Fail("workload #8: not done within 2400 s"))
 
@@ -602,35 +586,18 @@ def test_fy_acc_023_no_room_is_a_skip_not_a_failure(acc, monkeypatch):
         r.check("one", True)
         raise acc.Unplaced(SHORT)
 
-    run.run_group(acc.Group("workloads", "W", group), "")
+    run.run_group(acc.Group("tts", "T", group), "")
     got = [(c.group, c.name, c.status) for c in run.report.checks]
-    assert got == [("passthrough", "accept-x-depth: ready", "SKIP"), ("passthrough", "accept-x-seg: ready", "FAIL"),
-                   ("workloads", "one", "PASS"), ("workloads", "workloads: the rest of the group", "SKIP")]
+    assert got == [("vision", "accept-x-depth: ready", "SKIP"), ("vision", "accept-x-seg: ready", "FAIL"),
+                   ("tts", "one", "PASS"), ("tts", "tts: the rest of the group", "SKIP")]
     assert SHORT in run.report.checks[0].detail and SHORT in run.report.checks[3].detail
 
     class Admin:
         def ok(self, method, path, body=None, **kw):
-            if path.startswith("/api/workloads/"):
-                return {"workload": {"status": "pending", "replica_list": [rep(reason=SHORT)]}}
             return {"deployment": {"name": "d", "workload": {"replica_list": [rep(reason=SHORT)]}}}
 
     run.admin = Admin()
-    with pytest.raises(acc.Unplaced):
-        acc.wait_status(run, 9, ("running", "failed"), 2400)
     assert acc.dep_poll(run, 7) == (False, f"#0 - pending ({SHORT})", SHORT)
-    # The GPU isolation checks of the workloads group: a SKIP of their own, after the machine's other checks.
-    gpu = {"id": 1, "name": "gpu-01", "status": "online"}
-    run.machines = {"gpu": gpu}
-    monkeypatch.setattr(run, "fresh_machine", lambda role: gpu)
-    monkeypatch.setattr(acc, "workloads_on", lambda r, role, m: r.check(f"{m['name']}: a task", True))
-
-    def no_room(r, m):
-        raise acc.Unplaced(f"workload #5: not placed within 10 s, {SHORT}")
-
-    monkeypatch.setattr(acc, "gpu_isolation", no_room)
-    run.run_group(acc.GROUPS["workloads"], "")
-    assert [(c.name, c.status) for c in run.report.checks[-2:]] == [("gpu-01: a task", "PASS"),
-                                                                     ("gpu-01: GPU isolation", "SKIP")]
 
 
 class GpuAdmin:
@@ -666,17 +633,16 @@ def acc_resp(status, data):
 
 
 def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, monkeypatch):
-    """FY-ACC-024: before each GPU group (tts, img, video, passthrough, vision) the run stops what earlier groups
+    """FY-ACC-024: before each GPU group (tts, img, video, vision, scale) the run stops what earlier groups
     deployed on a GPU, waits until that is stopped, removes it (the models group's deployments are only stopped:
     the console shows one; they are removed at the end like everything else), and notes it; the models group's
     speech-to-text deployment stays while the tts group may use it (--tts-asr), CPU work and the group's own stay;
     run_groups does this before the GPU groups only, and every object is still removed by the cleanup."""
     ft = FakeTime()
     monkeypatch.setattr(acc, "time", ft)
-    assert acc.GPU_GROUPS == ("tts", "img", "video", "passthrough", "vision", "scale")
+    assert acc.GPU_GROUPS == ("tts", "img", "video", "vision", "scale")
     run = acc.Run(acc.parse_args([]), None)
     objs = {f"/api/deployments/{i}": {"kind": "deployment", "state": "healthy"} for i in (1, 2, 3, 4, 5, 6)}
-    objs["/api/workloads/7"] = {"kind": "workload", "state": "healthy"}
     run.admin = admin = GpuAdmin(objs)
     deleted = []
 
@@ -692,20 +658,18 @@ def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, 
     made("tts", "deployment tts-gpu", "/api/deployments/4", True, dep_id=4)
     made("tts", "deployment tts-cpu", "/api/deployments/5", False, dep_id=5)
     made("img", "deployment img-gpu", "/api/deployments/6", True, dep_id=6)
-    made("passthrough", "workload x-depth", "/api/workloads/7", True)
     # Before tts: chat stops (asr stays: tts may use it); nothing of tts's own yet.
-    assert run.free_gpu("tts", ["img", "video", "passthrough", "vision", "console"]) == ["deployment chat"]
+    assert run.free_gpu("tts", ["img", "video", "vision", "console"]) == ["deployment chat"]
     assert ("POST", "/api/deployments/1/stop") in admin.calls and ("POST", "/api/deployments/2/stop") not in admin.calls
     assert objs["/api/deployments/1"]["state"] == "stopped" and "/api/deployments/1" in objs and not deleted
     # Before img: asr (tts is over) and tts's GPU deployment go; tts's CPU one and img's own stay.
     admin.calls.clear()
-    assert run.free_gpu("img", ["video", "passthrough"]) == ["deployment asr", "deployment tts-gpu"]
+    assert run.free_gpu("img", ["video", "vision"]) == ["deployment asr", "deployment tts-gpu"]
     assert deleted == ["deployment tts-gpu"] and "/api/deployments/2" in objs and "/api/deployments/5" in objs
     assert ("POST", "/api/deployments/1/stop") not in admin.calls          # stopped once
-    assert run.free_gpu("img", ["video", "passthrough"]) == []
-    # Before passthrough: img's GPU deployment; then vision: passthrough's GPU workload.
-    assert run.free_gpu("passthrough", ["vision"]) == ["deployment img-gpu"]
-    assert run.free_gpu("vision", []) == ["workload x-depth"] and "/api/workloads/7" not in objs
+    assert run.free_gpu("img", ["video", "vision"]) == []
+    # Before vision: img's GPU deployment.
+    assert run.free_gpu("vision", []) == ["deployment img-gpu"]
     assert any("before img, freed the GPU of: deployment asr, deployment tts-gpu" == n for n in run.report.notes)
     # --tts-asr none: the speech-to-text deployment is not kept for tts.
     r2 = acc.Run(acc.parse_args(["--tts-asr", "none"]), None)
@@ -715,7 +679,7 @@ def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, 
     assert r2.free_gpu("tts", []) == ["deployment asr"]
     # The cleanup still removes everything at the end, once.
     run.cleanup.run()
-    assert sorted(deleted) == sorted(["deployment tts-gpu", "deployment img-gpu", "workload x-depth", "deployment chat",
+    assert sorted(deleted) == sorted(["deployment tts-gpu", "deployment img-gpu", "deployment chat",
                                       "deployment asr", "deployment cpu", "deployment tts-cpu"])
     # run_groups: free_gpu before the GPU groups only, with the groups after it.
     order = []
@@ -728,8 +692,8 @@ def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, 
 
 
 def test_fy_acc_025_what_it_deploys_says_where_it_runs(acc):
-    """FY-ACC-025: a deployment or workload the run makes is registered for the cleanup with its group, its path
-    and whether it takes a GPU (a GPU model, a workload asking for GPUs), which is what free_gpu goes by."""
+    """FY-ACC-025: a deployment the run makes is registered for the cleanup with its group, its path and whether it
+    takes a GPU (a GPU model), which is what free_gpu goes by."""
     run = acc.Run(acc.parse_args([]), None)
     run.current = "tts"
 
@@ -738,7 +702,7 @@ def test_fy_acc_025_what_it_deploys_says_where_it_runs(acc):
             if path == "/api/deployments/estimate":
                 return {"placement": {"fits": True, "placed": [{"machine": "gpu-01", "gpus": [4], "variant": "cuda"}]},
                         "estimate": {"amount": 3 * 1024**3}}
-            return {"workload": {"id": 11, "name": body["name"]}}
+            raise AssertionError(path)
 
         def request(self, method, path, body=None, **kw):
             return acc_resp(201, {"deployment": {"id": 21, "name": body["name"]}})
@@ -748,10 +712,7 @@ def test_fy_acc_025_what_it_deploys_says_where_it_runs(acc):
     spec = {"model": "qwen3-tts-0.6b", "recipe": "vllm-omni-tts", "params": {"gpus": 1}, "device": "gpu"}
     assert acc.deploy(run, "tts-gpu", spec, m)["deployment"]["id"] == 21
     acc.deploy(run, "tts-cpu", {**spec, "params": {"gpus": 0}, "device": "cpu"}, {**m, "accelerators": []})
-    acc.workload(run, {"name": "x", "resources": {"gpus": {"count": 1, "vram": "3Gi"}}})
-    acc.workload(run, {"name": "y", "runtime": {"type": "process"}})
     got = [(i["label"], i["group"], i["gpu"], i["path"]) for i in run.cleanup.items()]
     assert got == [(f"deployment {run.name('tts-gpu')}", "tts", True, "/api/deployments/21"),
-                   (f"deployment {run.name('tts-cpu')}", "tts", False, "/api/deployments/21"),
-                   ("workload x", "tts", True, "/api/workloads/11"), ("workload y", "tts", False, "/api/workloads/11")]
+                   (f"deployment {run.name('tts-cpu')}", "tts", False, "/api/deployments/21")]
     assert run.cleanup.items()[0]["dep_id"] == 21

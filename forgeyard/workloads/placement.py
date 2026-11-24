@@ -61,7 +61,6 @@ from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, Workload, as_utc, utcnow
 from forgeyard.machines import gpu_access
 from forgeyard.machines.protocol import FEATURE_WORKLOADS
-from forgeyard.workloads import expose
 from forgeyard.workloads.spec import WorkloadSpec
 
 _lock = threading.Lock()
@@ -211,7 +210,7 @@ def port_range(node: Optional[Node]) -> Optional[tuple[int, int]]:
 
 def ports_for(spec: dict, guarded: bool) -> int:
     """Host ports one replica takes from its machine's range: one per published port, two when the agent's key
-    guard fronts it (a model replica on an agent with the guard, a workload exposed at /x/): the guard listens
+    guard fronts it (a model replica on an agent with the guard): the guard listens
     on the published port and the program on an internal one, both taken from the range (see the agent's
     supervisor). A replica is guarded exactly when it has an internal key (`Replica.secret`)."""
     count = len(spec.get("ports") or [])
@@ -291,15 +290,12 @@ def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[i
     return None
 
 
-def runtime_problem(node: Node, spec: WorkloadSpec, exposed: bool = False) -> Optional[str]:
-    """Why this machine can never run this workload as it is, or None. `exposed`: the workload is
-    exposed at /x/ (1.3) and needs an agent whose key guard fronts plain workloads."""
+def runtime_problem(node: Node, spec: WorkloadSpec) -> Optional[str]:
+    """Why this machine can never run this workload as it is, or None."""
     if node.revoked_at is not None or node.status == "revoked":
         return "revoked"
     if FEATURE_WORKLOADS not in (node.features or []):
         return "its agent does not run workloads yet (update it to this Forgeyard version)"
-    if exposed and not expose.can_guard(node):
-        return expose.guard_problem(node)
     info = (node.runtime_info or {}).get(spec.runtime_type) or {}
     if not info.get("ok"):
         why = info.get("reason") or "not available"
@@ -363,10 +359,10 @@ def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
     return None, f"needs {want.count} free {label}GPU{'s' if want.count > 1 else ''}, {best} free of the allowed ({allowed_text})"
 
 
-def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = None, exposed: bool = False
+def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = None
         ) -> tuple[Optional[list[Accelerator]], Optional[str]]:
     """The GPUs to give one replica of `spec` on `node` (possibly none), or why it does not fit."""
-    problem = runtime_problem(node, spec, exposed)
+    problem = runtime_problem(node, spec)
     if problem:
         return None, problem
     used = usage(db, node.id, exclude, node=node)
@@ -380,7 +376,7 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
         if used.memory + res.memory > cpu_row.vram_total:
             free = max(0, cpu_row.vram_total - used.memory)
             return None, f"needs {_size(res.memory)} memory, {_size(free)} free of {_size(cpu_row.vram_total)}"
-    problem = port_problem(node, used.ports, ports_for({"ports": spec.ports}, guarded=exposed))
+    problem = port_problem(node, used.ports, ports_for({"ports": spec.ports}, guarded=False))
     if problem:
         return None, problem
     container_nvidia = bool(((node.runtime_info or {}).get("container") or {}).get("nvidia"))
@@ -502,20 +498,17 @@ def place_pending(db: DbSession) -> set[int]:
                     changed.add(placed)
                 continue
             spec = WorkloadSpec.model_validate(r.workload.spec)
-            exposed = expose.of(r.workload) is not None
             reasons = []
             nodes = _candidates(db, spec)
             before = previous(r.id)
             nodes.sort(key=lambda n: n.id != before)  # where it ran last, if it still fits there
             for node in nodes:
-                gpus, why = fit(db, node, spec, exposed=exposed)
+                gpus, why = fit(db, node, spec)
                 if gpus is None:
                     reasons.append(f"{node.name}: {why}")
                     continue
                 r.node_id = node.id
                 r.gpus = [gpu_ref(a) for a in gpus]
-                if exposed:
-                    expose.give_key(r)  # the gateway's way in, through the agent's key guard
                 r.state = "pending"
                 r.reason = None if node.status == "online" else f"waiting for {node.name} to come online"
                 r.updated_at = utcnow()
