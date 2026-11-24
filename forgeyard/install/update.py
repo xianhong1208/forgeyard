@@ -20,7 +20,7 @@ from typing import Any, Optional
 from forgeyard import __version__
 from forgeyard.db import Node
 from forgeyard.install import images
-from forgeyard.install.commands import NVIDIA_DEVICES_SHELL
+from forgeyard.install.commands import NVIDIA_DEVICES_SHELL, nvidia_loop_finds
 from forgeyard.machines import protocol as p
 
 GUIDE = "/guide/en/how-to#update-an-agent"
@@ -37,9 +37,13 @@ MAX_LIST = 64
 # 1.4.5 (#202): an NVIDIA agent container also gets its device nodes with --device, next to --gpus. The NVIDIA runtime
 # hook behind --gpus sets up the container's device access without Docker or systemd knowing, and the host's next
 # `systemctl daemon-reload` takes it away from new processes (agent/gpu_check.py); a --device Docker records, so it
-# stays. The agent reports the nodes it has (how_it_runs.py `nvidia_devices`); for an older agent the shell lists the
-# host's when the command runs (commands.NVIDIA_DEVICES_SHELL).
-NVIDIA_NODE = re.compile(r"^/dev/nvidia(?:ctl|-uvm|-uvm-tools|-modeset|[0-9]{1,3})$")
+# stays. 1.5.4: an agent that has every GPU (`--gpus all`) gets the host's nodes listed by the shell when the command
+# runs (commands.NVIDIA_DEVICES_SHELL, as Add a machine does): a GPU installed after the agent started is passed too,
+# and the command is the same on a machine with 1 GPU or 8. The loop expands to plain --device words before
+# `docker run` starts, so Docker records each node and the #202 property holds. An agent limited to some GPUs
+# (`--gpus "device=0,2"`, a count, NVIDIA_VISIBLE_DEVICES) keeps the nodes it reported, by name: the loop would give it
+# every card. A reported node the loop would not find (another /dev/nvidia… name) is kept by name either way.
+NVIDIA_NODE = re.compile(r"^/dev/nvidia[A-Za-z0-9_-]{1,32}$")
 
 
 def version_tuple(v: Optional[str]) -> tuple[int, ...]:
@@ -127,8 +131,9 @@ def run_flags(c: dict, notes: list[str]) -> list[str]:
     if runtime:
         flags.append(f"--runtime {_q(runtime)}")
     nvidia = (isinstance(gpus, str) and GPUS.match(gpus) is not None) or runtime == "nvidia"
+    loop = nvidia and every_gpu(c)
     if nvidia:
-        flags += nvidia_device_flags(c, notes)
+        flags += nvidia_device_flags(c, notes, loop)
     for d in _list(c.get("devices")):
         host = _clean((d or {}).get("host"), 256) if isinstance(d, dict) else None
         if not host:
@@ -137,6 +142,8 @@ def run_flags(c: dict, notes: list[str]) -> list[str]:
         spec = host
         inside = _clean(d.get("container"), 256)
         perms = d.get("permissions")
+        if loop and nvidia_loop_finds(host) and not inside and not perms:
+            continue  # given by an earlier update command (or by hand): the shell line passes it, with any new GPU
         if inside or (isinstance(perms, str) and re.fullmatch(r"[rwm]{1,3}", perms)):
             spec += f":{inside or host}"
             if isinstance(perms, str) and re.fullmatch(r"[rwm]{1,3}", perms):
@@ -203,21 +210,31 @@ def run_flags(c: dict, notes: list[str]) -> list[str]:
     return flags
 
 
-def nvidia_device_flags(c: dict, notes: list[str]) -> list[str]:
-    """1.4.5 (#202): `--device` for each NVIDIA device node the container has and was not already given with --device:
-    the ones the agent reported, or (an agent before 1.4.5, with every GPU) the host's, listed by the shell."""
+def every_gpu(c: dict) -> bool:
+    """Whether the agent container has every GPU of the host: `--gpus all`, or `--runtime nvidia` without --gpus and
+    without an NVIDIA_VISIBLE_DEVICES that names some (one the image sets the same way is not reported: all)."""
+    gpus = c.get("gpus")
+    if gpus == "all":
+        return True
+    if gpus or c.get("runtime") != "nvidia":
+        return False
+    visible = [e.get("value") for e in _list(c.get("env"))
+               if isinstance(e, dict) and e.get("name") == "NVIDIA_VISIBLE_DEVICES"]
+    return not visible or visible[-1] in (None, "all")
+
+
+def nvidia_device_flags(c: dict, notes: list[str], loop: bool) -> list[str]:
+    """`--device` for the NVIDIA device nodes (1.4.5, #202). Every GPU: the host's, listed by the shell when the
+    command runs (1.5.4), plus any node the agent reported that the shell would not find. Some GPUs: the nodes the
+    agent reported, by name, or a note when it reported none."""
     given = {d.get("host") for d in _list(c.get("devices")) if isinstance(d, dict)}
-    reported = c.get("nvidia_devices")
-    nodes = [d for d in _list(reported) if isinstance(d, str) and NVIDIA_NODE.match(d)]
+    nodes = list(dict.fromkeys(d for d in _list(c.get("nvidia_devices")) if isinstance(d, str) and NVIDIA_NODE.match(d)))
+    if loop:
+        return [NVIDIA_DEVICES_SHELL] + [f"--device {_q(d)}" for d in nodes if not nvidia_loop_finds(d) and d not in given]
     if nodes:
-        return [f"--device {d}" for d in dict.fromkeys(nodes) if d not in given]
+        return [f"--device {_q(d)}" for d in nodes if d not in given]
     if any(isinstance(h, str) and NVIDIA_NODE.match(h) for h in given):
         return []  # already passed by hand
-    if c.get("gpus") == "all" or (c.get("runtime") == "nvidia" and not c.get("gpus")):
-        notes.append("The NVIDIA device nodes are listed by the shell when you run the command ($(for d in …), "
-                     "--device for each /dev/nvidia* node of the host), so that the agent keeps its GPUs when the host "
-                     "runs `systemctl daemon-reload`. From 1.4.5 on the agent reports them and this page names each.")
-        return [NVIDIA_DEVICES_SHELL]
     notes.append("Add --device for /dev/nvidiactl, /dev/nvidia-uvm and each /dev/nvidiaN of the GPUs it uses (ls "
                  "/dev/nvidia*), so that the agent keeps its GPUs when the host runs `systemctl daemon-reload`.")
     return []
@@ -230,6 +247,8 @@ def container_plan(node: Node, report: dict, image: images.AgentImage, version: 
     notes: list[str] = []
     flags = run_flags(c, notes)
     name = flags[1].split(" ", 1)[1]
+    devices = "host" if NVIDIA_DEVICES_SHELL in flags else ("listed" if any(
+        f.startswith("--device /dev/nvidia") for f in flags) else None)
     args = [_q(a) for a in (_clean(x, 1024) for x in _list(c.get("args"))) if a]
     hidden = [h for h in _list(c.get("hidden_args")) if isinstance(h, str)]
     if hidden:
@@ -267,9 +286,9 @@ def container_plan(node: Node, report: dict, image: images.AgentImage, version: 
              "command": carry},
             {"title": f"On {node.name}", "command": replace(image.local_tag)},
         ]}
-    notes.append("Its models and apps keep running while the agent is replaced"
+    notes.append("Its models keep running while the agent is replaced"
                  + (f"; the volume keeps the machine ({node.name})." if c.get("state_kept") is not False else "."))
-    return {"steps": steps, "alternative": alternative, "notes": notes}
+    return {"steps": steps, "alternative": alternative, "notes": notes, "nvidia_devices": devices}
 
 
 def install_plan(node: Node, report: dict, server: str, fingerprint: Optional[str]) -> dict:
@@ -284,7 +303,7 @@ def install_plan(node: Node, report: dict, server: str, fingerprint: Optional[st
                           "the agent by hand (see the guide)."]}
     notes = ["It installs the server's version and keeps the settings and the machine's credential."]
     if report.get("service"):
-        notes.append(f"It restarts the service {report['service']}; models and apps keep running.")
+        notes.append(f"It restarts the service {report['service']}; its models keep running.")
     return {"steps": [{"title": f"On {node.name}", "command": command}], "alternative": None, "notes": notes}
 
 
@@ -294,7 +313,7 @@ def manual_plan(node: Node, report: dict, version: str) -> dict:
         return {"steps": [{"title": f"On {node.name}, in the Forgeyard checkout the agent runs from",
                            "command": f"cd {_q(checkout)} && \\\ngit fetch --tags && git checkout v{version} && \\\nuv sync"}],
                 "alternative": None,
-                "notes": ["Then restart the agent the way you started it; models and apps keep running."]}
+                "notes": ["Then restart the agent the way you started it; its models keep running."]}
     return {"steps": [], "alternative": None,
             "notes": ["This agent was installed by hand, not with install.sh or the agent image. Install the server's "
                       "version the same way, or switch to install.sh or Docker (see the guide)."]}
@@ -310,7 +329,10 @@ def plan(node: Node, *, server: str, fingerprint: Optional[str], image: images.A
     out = {"machine_id": node.id, "name": node.name, "agent_version": node.agent_version, "server_version": version,
            "behind": behind(node, version), "method": report.get("method") if report else None,
            "known": bool(report and report.get("known")), "reason": None, "image": image.reference,
-           "offline": offline, "steps": [], "alternative": None, "notes": [], "guide": GUIDE}
+           "offline": offline, "steps": [], "alternative": None, "notes": [], "guide": GUIDE,
+           # 1.5.4: how an NVIDIA agent's device nodes are passed: "host" (the shell lists the host's when the command
+           # runs; the console explains it under the command), "listed" (by name: an agent limited to some GPUs), None
+           "nvidia_devices": None}
     if report is None:
         out["reason"] = ("This agent does not say how it runs (agents before 1.4.2 do not). Update it by hand once, "
                          "as the guide shows; from then on this page shows the exact command.")

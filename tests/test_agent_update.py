@@ -4,6 +4,7 @@ the update command its machine's page shows (install/update.py), and when an age
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -463,29 +464,33 @@ def _devices_given(nodes: list[str]) -> list[dict]:
     return [{"PathOnHost": d, "PathInContainer": d, "CgroupPermissions": "rwm"} for d in nodes]
 
 
-def test_fy_upd_019_reported_nvidia_nodes_are_passed_with_device_after_gpus():
-    """FY-UPD-019: an agent that reports its NVIDIA device nodes (1.4.5) gets one --device per node, in its order, right
-    after --gpus all; the rest of the command is exactly the one before (only the shell line is replaced by the
-    named nodes), and no note about the shell. AMD and CPU agents get nothing NVIDIA, whatever they report."""
+def test_fy_upd_019_an_agent_with_every_gpu_gets_the_hosts_nodes_from_the_shell():
+    """FY-UPD-019 (1.4.5, #202; 1.5.4): an agent with `--gpus all` that reported its NVIDIA device nodes gets the same
+    shell line as Add a machine right after --gpus all, not one --device per reported node: the command is exactly the
+    one an older agent gets, the plan says "host", and no English note repeats what the console says under it. AMD and
+    CPU agents get nothing NVIDIA, whatever they report."""
     rep = report("nvidia")
     rep["container"]["nvidia_devices"] = list(NODES)
     out = plan(node(rep))
     cmd = out["steps"][0]["command"]
-    named = " \\\n  ".join(f"--device {d}" for d in NODES)
-    assert cmd == NVIDIA_COMMAND.replace(update.NVIDIA_DEVICES_SHELL, named)
-    assert "--gpus all \\\n  --device /dev/nvidiactl \\\n  --device /dev/nvidia-uvm \\\n" in cmd
-    assert not any("listed by the shell" in n for n in out["notes"])
+    assert cmd == NVIDIA_COMMAND and out["nvidia_devices"] == "host"
+    assert f"--gpus all \\\n  {update.NVIDIA_DEVICES_SHELL} \\\n" in cmd
+    assert not re.search(r"--device /dev/nvidia(ctl|-uvm|[0-9])", cmd)
+    assert not any("nvidia" in n.lower() for n in out["notes"])
     assert out["alternative"]["steps"][1]["command"] == cmd.split(" && \\\n", 1)[1]
+    assert plan(node(report("nvidia")))["nvidia_devices"] == "host"
     for kind in ("amd", "cpu"):
         other = report(kind)
         other["container"]["nvidia_devices"] = list(NODES)
-        text = plan(node(other))["steps"][0]["command"]
-        assert "nvidia" not in text and "for d in" not in text, kind
+        o = plan(node(other))
+        text = o["steps"][0]["command"]
+        assert "nvidia" not in text and "for d in" not in text and o["nvidia_devices"] is None, kind
 
 
 def test_fy_upd_020_the_next_update_renders_the_same_command():
     """FY-UPD-020: once the agent runs with those --device flags, Docker reports them in HostConfig.Devices; the next
-    update command is the same, with each node once."""
+    update command is the same shell line, with no node named on top (one with its own container path or
+    permissions stays as given). The same for nodes given by hand to an agent before 1.4.5."""
     rep = report("nvidia")
     rep["container"]["nvidia_devices"] = list(NODES)
     first = plan(node(rep))["steps"][0]["command"]
@@ -495,52 +500,63 @@ def test_fy_upd_020_the_next_update_renders_the_same_command():
     rep2["engine"] = "docker"
     assert rep2["container"]["devices"] == [{"host": d} for d in NODES]
     second = plan(node(rep2))["steps"][0]["command"]
-    assert second == first
-    for d in NODES:
-        assert second.count(f"--device {d} ") == 1, d
-    # Given by hand earlier (an agent before 1.4.5 that reports no nodes): kept as given, no shell line on top.
+    assert second == first == NVIDIA_COMMAND
     old = inspect("nvidia")
-    old["HostConfig"]["Devices"] = _devices_given(NODES[:1] + ["/dev/nvidia0"])
+    old["HostConfig"]["Devices"] = _devices_given(NODES[:1] + ["/dev/nvidia0"]) + [
+        {"PathOnHost": "/dev/nvidia1", "PathInContainer": "/dev/gpu1", "CgroupPermissions": "rwm"}]
     rep3 = h.describe_container(old, image_inspect(), credential=CRED)
     rep3["engine"] = "docker"
     third = plan(node(rep3))["steps"][0]["command"]
-    assert "for d in" not in third and "--device /dev/nvidiactl" in third and "--device /dev/nvidia0" in third
+    assert update.NVIDIA_DEVICES_SHELL in third and "--device /dev/nvidiactl" not in third
+    assert "--device /dev/nvidia0 " not in third and "--device /dev/nvidia1:/dev/gpu1 " in third
 
 
 def test_fy_upd_021_device_lists_count_cdi_runtime_and_bad_paths():
-    """FY-UPD-021: `--gpus "device=0,2"` passes the nodes the agent reported (the container has only those cards'),
-    and without a report says to add them (no shell line, which would give every card); CDI devices get nothing more;
-    `--runtime nvidia` without --gpus gets the shell line; a reported path that is not an NVIDIA node is never used."""
+    """FY-UPD-021: `--gpus "device=0,2"` passes the nodes the agent reported (the container has only those cards': the
+    shell line would give it every card), and without a report says to add them; a count likewise; CDI devices get
+    nothing more; `--runtime nvidia` without --gpus gets the shell line unless NVIDIA_VISIBLE_DEVICES names some cards;
+    a reported path that is not an NVIDIA node is never used."""
     rep = report("nvidia")
     rep["container"].update(gpus="device=0,2", nvidia_devices=["/dev/nvidiactl", "/dev/nvidia-uvm", "/dev/nvidia0",
                                                                 "/dev/nvidia2"])
-    cmd = plan(node(rep))["steps"][0]["command"]
+    out = plan(node(rep))
+    cmd = out["steps"][0]["command"]
     assert '--gpus \'"device=0,2"\' \\\n  --device /dev/nvidiactl \\\n  --device /dev/nvidia-uvm \\\n  ' \
            '--device /dev/nvidia0 \\\n  --device /dev/nvidia2 \\\n' in cmd
+    assert "for d in" not in cmd and out["nvidia_devices"] == "listed"
     rep = report("nvidia")
     rep["container"]["gpus"] = "2"
     out = plan(node(rep))
     assert "for d in" not in out["steps"][0]["command"] and "--device" not in out["steps"][0]["command"]
-    assert any("Add --device for /dev/nvidiactl" in n for n in out["notes"])
+    assert any("Add --device for /dev/nvidiactl" in n for n in out["notes"]) and out["nvidia_devices"] is None
     rep = report("nvidia")
     rep["container"].update(gpus=None, devices=[{"host": "nvidia.com/gpu=all"}])
-    cmd = plan(node(rep))["steps"][0]["command"]
+    out = plan(node(rep))
+    cmd = out["steps"][0]["command"]
     assert "--device nvidia.com/gpu=all" in cmd and "for d in" not in cmd and "/dev/nvidia" not in cmd
+    assert out["nvidia_devices"] is None
     rep = report("nvidia")
     rep["container"].update(gpus=None, runtime="nvidia")
     cmd = plan(node(rep))["steps"][0]["command"]
     assert f"--runtime nvidia \\\n  {update.NVIDIA_DEVICES_SHELL} \\\n" in cmd
+    rep["container"]["env"].append({"name": "NVIDIA_VISIBLE_DEVICES", "value": "all"})
+    assert update.NVIDIA_DEVICES_SHELL in plan(node(rep))["steps"][0]["command"]
+    rep["container"]["env"][-1]["value"] = "1"
+    rep["container"]["nvidia_devices"] = ["/dev/nvidiactl", "/dev/nvidia1"]
+    cmd = plan(node(rep))["steps"][0]["command"]
+    assert "for d in" not in cmd and "--device /dev/nvidiactl \\\n  --device /dev/nvidia1 \\\n" in cmd
     rep = report("nvidia")
-    rep["container"]["nvidia_devices"] = ["/dev/nvidia0; reboot", "/dev/sda", "/dev/nvidia-caps", "/dev/nvidia0",
-                                          "/dev/nvidia0", 7]
+    rep["container"].update(gpus="device=0", nvidia_devices=["/dev/nvidia0; reboot", "/dev/sda", "/dev/nvidia/../sda",
+                                                             "/dev/nvidia0", "/dev/nvidia0", 7])
     cmd = plan(node(rep))["steps"][0]["command"]
     assert cmd.count("--device ") == 1 and "--device /dev/nvidia0 \\" in cmd and "reboot" not in cmd
-    assert "/dev/sda" not in cmd and "nvidia-caps" not in cmd
+    assert "/dev/sda" not in cmd and ".." not in cmd
 
 
 def test_fy_upd_022_the_agent_lists_its_nvidia_nodes(tmp_path):
-    """FY-UPD-022: the NVIDIA device nodes in the container's /dev, control nodes first then by number, character
-    devices only; collect() reports them with its container."""
+    """FY-UPD-022: the NVIDIA device nodes in the container's /dev, control nodes first then by number, then (1.5.4)
+    any other /dev/nvidia… character device by name; character devices only (nvidia-caps is a directory);
+    collect() reports them with its container."""
     import os
     import stat as st
 
@@ -549,9 +565,9 @@ def test_fy_upd_022_the_agent_lists_its_nvidia_nodes(tmp_path):
     for name in ("nvidia10", "nvidia1", "nvidia-uvm-tools", "nvidiactl", "nvidia-modeset", "nvidia0", "nvidia-uvm",
                  "nvidia-caps", "nvidiafoo", "sda", "nvidia2"):
         (dev / name).write_text("")
-    assert h.nvidia_devices(dev, is_device=lambda p: p.name != "nvidia2") == [
+    assert h.nvidia_devices(dev, is_device=lambda p: p.name not in ("nvidia2", "nvidia-caps")) == [
         str(dev / n) for n in ("nvidiactl", "nvidia-uvm", "nvidia-uvm-tools", "nvidia-modeset", "nvidia0", "nvidia1",
-                               "nvidia10")]
+                               "nvidia10", "nvidiafoo")]
     assert h.nvidia_devices(dev) == []  # plain files are not devices
     assert h.nvidia_devices(tmp_path / "missing") == []
     root = _proc(tmp_path / "root", (FIX / "mountinfo.docker.txt").read_text())
@@ -566,3 +582,105 @@ def test_fy_upd_022_the_agent_lists_its_nvidia_nodes(tmp_path):
     out = h.collect(engine_info={"ok": True, "engine": "docker"}, engine="docker", run=run, credential=CRED,
                     server=None, config_path=None, root=root)
     assert out["container"]["nvidia_devices"] == ([str(root / "dev" / "nvidiactl")] if os.geteuid() == 0 else [])
+
+
+# ------------------------------------------------------------------ 1.5.4: the host's NVIDIA nodes, found when it runs
+def _nvidia_nodes(gpus: int) -> list[str]:
+    return ["/dev/nvidiactl", "/dev/nvidia-uvm", "/dev/nvidia-uvm-tools", "/dev/nvidia-modeset"] + [
+        f"/dev/nvidia{i}" for i in range(gpus)]
+
+
+def _nvidia_plan(gpus: int, *, extra: tuple[str, ...] = (), name: str = "gpu-box") -> dict:
+    """An agent with `--gpus all` that was started with the 1.4.5 command: every node given with --device as well, and
+    reported."""
+    nodes = _nvidia_nodes(gpus) + list(extra)
+    c = inspect("nvidia")
+    c["HostConfig"]["Devices"] = _devices_given(_nvidia_nodes(gpus))
+    rep = h.describe_container(c, image_inspect(), credential=CRED, nvidia_nodes=nodes)
+    rep["engine"] = "docker"
+    return plan(node(rep, name=name))
+
+
+def test_fy_upd_023_one_command_for_every_nvidia_machine_whatever_its_gpu_count():
+    """FY-UPD-023: an 8-GPU agent's update command has the shell line and no per-index --device; a 1-GPU and a 4-GPU
+    agent get the very same command, so one command copied across a fleet fits every machine, and a GPU installed after
+    the agent started is found when it runs. Everything else is as before: mounts, environment, image."""
+    eight = _nvidia_plan(8)["steps"][0]["command"]
+    assert eight == NVIDIA_COMMAND
+    assert eight.count(update.NVIDIA_DEVICES_SHELL) == 1 and not re.search(r"--device /dev/nvidia[0-9]", eight)
+    for gpus in (1, 4):
+        assert _nvidia_plan(gpus)["steps"][0]["command"] == eight, gpus
+    for flag in ("--restart always", "--network host", "-v forgeyard-agent:/var/lib/forgeyard-agent",
+                 "-v /srv/forgeyard-models:/srv/forgeyard-models", "-e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models",
+                 '-e HF_TOKEN="$HF_TOKEN"'):
+        assert f"  {flag} \\\n" in eight, flag
+
+
+def test_fy_upd_024_a_reported_node_the_shell_would_not_find_is_kept_by_name():
+    """FY-UPD-024: a node the agent reported that the shell line does not list (another /dev/nvidia… name, say an
+    NVSwitch control node) is passed by name right after it, once, even when it was also given with --device before;
+    a name the line's glob matches (/dev/nvidia0foo) is not named again."""
+    out = _nvidia_plan(2, extra=("/dev/nvidia-nvswitchctl", "/dev/nvidia0foo"))
+    cmd = out["steps"][0]["command"]
+    assert f"{update.NVIDIA_DEVICES_SHELL} \\\n  --device /dev/nvidia-nvswitchctl \\\n" in cmd
+    assert cmd.count("--device /dev/nvidia-nvswitchctl") == 1 and "--device /dev/nvidia0foo" not in cmd
+    c = inspect("nvidia")
+    c["HostConfig"]["Devices"] = _devices_given(["/dev/nvidia-nvswitchctl"])
+    rep = h.describe_container(c, image_inspect(), credential=CRED, nvidia_nodes=["/dev/nvidia-nvswitchctl"])
+    again = plan(node(rep))["steps"][0]["command"]
+    assert again.count("--device /dev/nvidia-nvswitchctl") == 1
+    from forgeyard.install.commands import nvidia_loop_finds
+
+    assert all(nvidia_loop_finds(d) for d in _nvidia_nodes(12) + ["/dev/nvidia0foo"])
+    assert not any(nvidia_loop_finds(d) for d in ("/dev/nvidia-nvswitchctl", "/dev/nvidia-caps", "/dev/nvidia0/x",
+                                                   "/dev/nvidia", "/dev/sda"))
+
+
+def _run_args(command: str, dev: Path, shell: str) -> list[str]:
+    """The arguments `docker run` gets when the update command runs in `shell`, with the loop pointed at a stand-in
+    /dev: sudo is a function that prints them (and does nothing for pull and rm)."""
+    loop = update.NVIDIA_DEVICES_SHELL
+    script = ('sudo() { [ "$2" = run ] && printf "%s\\n" "$@"; return 0; }\n'
+              + command.replace(loop, loop.replace("/dev/", f"{dev}/")))
+    r = subprocess.run([shell, "-c", script], capture_output=True, text=True, check=True)
+    return r.stdout.splitlines()
+
+
+@pytest.mark.parametrize("shell", [s for s in ("/bin/sh", "/bin/bash") if Path(s).exists()])
+def test_fy_upd_025_the_command_runs_and_expands_to_one_device_per_host_node(tmp_path, shell):
+    """FY-UPD-025: the update command is valid shell (`sh -n`), and run over a stand-in /dev with 1, 4 and 8 GPUs it
+    gives `docker run` one --device per node there, as separate words before the image, the control nodes first;
+    a node the host lacks (nvidia-modeset, nvidia-uvm-tools) is skipped, a directory such as nvidia-caps is not a
+    match of the line; the rest of the run is untouched. Plain words are what Docker records (HostConfig.Devices), so
+    the nodes stay after the host's `systemctl daemon-reload` (#202)."""
+    command = _nvidia_plan(8)["steps"][0]["command"]
+    assert subprocess.run([shell, "-n", "-c", command], capture_output=True).returncode == 0
+    for gpus in (1, 4, 8):
+        dev = tmp_path / f"dev{gpus}"
+        dev.mkdir()
+        (dev / "nvidia-caps").mkdir()
+        for n in ["nvidiactl", "nvidia-uvm"] + [f"nvidia{i}" for i in range(gpus)]:
+            (dev / n).touch()
+        args = _run_args(command, dev, shell)
+        assert args[:2] == ["docker", "run"] and args[-1] == "docker.io/example/forgeyard-agent:1.4.2"
+        pairs = [args[i + 1] for i, a in enumerate(args) if a == "--device"]
+        assert pairs == [f"{dev}/nvidiactl", f"{dev}/nvidia-uvm"] + [f"{dev}/nvidia{i}" for i in range(gpus)], gpus
+        assert args[args.index("--gpus") + 1] == "all" and args.index("--gpus") < args.index("--device")
+        assert "-e" in args and "FORGEYARD_MODEL_CACHE=/srv/forgeyard-models" in args
+    empty = tmp_path / "none"
+    empty.mkdir()
+    assert "--device" not in _run_args(command, empty, shell)
+
+
+def test_fy_upd_026_amd_and_cpu_commands_are_unchanged():
+    """FY-UPD-026: the 1.5.4 change touches NVIDIA agents only: an AMD agent keeps its /dev/kfd, /dev/dri and numeric
+    group ids and a CPU agent its plain run, flag for flag, with no shell line and no NVIDIA note."""
+    amd = plan(node(report("amd"), name="apu-box"))
+    assert amd["nvidia_devices"] is None
+    lines = amd["steps"][0]["command"].split(" \\\n")
+    assert lines[3:9] == ["  --name forgeyard-agent", "  --restart always", "  --network host", "  --device /dev/kfd",
+                          "  --device /dev/dri", "  --group-add 44"]
+    assert "  --group-add 110" in lines and "for d in" not in amd["steps"][0]["command"]
+    cpu = plan(node(report("cpu"), name="cpu-box"))
+    assert cpu["nvidia_devices"] is None and "--device" not in cpu["steps"][0]["command"]
+    assert "for d in" not in cpu["steps"][0]["command"]

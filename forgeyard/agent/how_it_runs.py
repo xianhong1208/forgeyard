@@ -230,20 +230,26 @@ def devices(host_config: dict, cdi: list[str]) -> list[dict]:
 
 
 _NVIDIA_NODE = re.compile(r"^nvidia(ctl|-uvm|-uvm-tools|-modeset|[0-9]{1,3})$")
+_NVIDIA_OTHER = re.compile(r"^nvidia[A-Za-z0-9_-]{1,32}$")
 _NVIDIA_ORDER = {"ctl": 0, "-uvm": 1, "-uvm-tools": 2, "-modeset": 3}
 
 
 def nvidia_devices(dev: Path = Path("/dev"), is_device: Callable[[Path], bool] = Path.is_char_device) -> list[str]:
     """1.4.5 (#202): the NVIDIA device nodes this container has (what `--gpus` gave it), in the order a `docker run`
-    lists them: the control nodes, then /dev/nvidia0, 1, … The update command passes each with --device."""
+    lists them: the control nodes, then /dev/nvidia0, 1, … The update command passes them with --device. 1.5.4: any
+    other /dev/nvidia… character device too (after those, by name), so a node a newer driver or toolkit adds, which
+    the update command's shell loop would not find, is still passed by name."""
     try:
-        names = [p.name for p in dev.iterdir() if _NVIDIA_NODE.match(p.name) and is_device(p)]
+        names = [p.name for p in dev.iterdir() if _NVIDIA_OTHER.match(p.name) and is_device(p)]
     except OSError:
         return []
 
-    def order(name: str) -> tuple[int, int]:
-        rest = _NVIDIA_NODE.match(name).group(1)
-        return (0, _NVIDIA_ORDER[rest]) if rest in _NVIDIA_ORDER else (1, int(rest))
+    def order(name: str) -> tuple[int, int, str]:
+        m = _NVIDIA_NODE.match(name)
+        if m is None:
+            return (2, 0, name)
+        rest = m.group(1)
+        return (0, _NVIDIA_ORDER[rest], "") if rest in _NVIDIA_ORDER else (1, int(rest), "")
     return [str(dev / n) for n in sorted(names, key=order)][:MAX_ITEMS]
 
 
