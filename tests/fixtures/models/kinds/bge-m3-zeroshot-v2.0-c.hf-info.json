@@ -1,0 +1,27 @@
+{
+  "id": "MoritzLaurer/bge-m3-zeroshot-v2.0-c",
+  "sha": "705510dfe0f35d223a4bf6f5d2695ec5fd162341",
+  "pipeline_tag": "zero-shot-classification",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "safetensors",
+    "xlm-roberta",
+    "text-classification",
+    "zero-shot-classification",
+    "multilingual",
+    "arxiv:2312.17543",
+    "base_model:BAAI/bge-m3-retromae",
+    "base_model:finetune:BAAI/bge-m3-retromae",
+    "license:mit",
+    "endpoints_compatible",
+    "region:us"
+  ],
+  "cardData": {
+    "language": [
+      "multilingual"
+    ],
+    "pipeline_tag": "zero-shot-classification",
+    "license": "mit"
+  }
+}

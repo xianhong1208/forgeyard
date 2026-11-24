@@ -1,0 +1,22 @@
+{
+  "id": "facebook/dinov2-small",
+  "sha": "ed25f3a31f01632728cabb09d1542f84ab7b0056",
+  "pipeline_tag": "image-feature-extraction",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "pytorch",
+    "safetensors",
+    "dinov2",
+    "image-feature-extraction",
+    "dino",
+    "vision",
+    "arxiv:2304.07193",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

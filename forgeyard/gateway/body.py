@@ -13,7 +13,7 @@ from starlette.requests import Request
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, new_session
-from forgeyard.gateway import imagegen, media as gmedia, multipart, speech
+from forgeyard.gateway import embeddings, imagegen, media as gmedia, multipart, speech
 from forgeyard.gateway.errors import GatewayError
 
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
@@ -39,6 +39,7 @@ class Parsed:
     tts: Optional[speech.Ask] = None               # a text-to-speech request, checked (1.3)
     image: Optional[imagegen.Ask] = None           # an image request, checked (1.3)
     vision: Optional[str] = None                   # a vision request: its task (1.4)
+    embed: Optional[embeddings.Ask] = None         # an embeddings request: its texts and images (1.5.4)
     size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 

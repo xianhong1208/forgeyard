@@ -23,7 +23,7 @@ import json
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -164,7 +164,8 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
         raise fail(422, *why)
     if why := encoders.deploy_refusal(m.task, m.meta or {}, recipe):
         # 1.5.4 (#141, #144): the transformers server runs image embedders and text classifiers only, and on a vision
-        # image from 1.5.4 on.
+        # image from 1.5.4 on; vLLM's pooling runner no NLI or other non-vLLM classifier, and no image embedder
+        # (an entry added before these rules).
         raise fail(422, *why)
     params = normalise_params(recipe, body.params)
     fit_default_context(recipe, body.params, params, m.meta or {})
@@ -331,7 +332,9 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
                   # 1.4: what it takes besides text, so the pages list a chat model as multimodal chat.
                   "modalities": modalities.of_model(d.model.meta or {}, d.model.format),
                   # 1.4.4: a text classifier's labels, so the Playground names every probability.
-                  **({"classify": textcls.out(d.model.meta or {})} if d.model.task == textcls.TASK else {})},
+                  **({"classify": textcls.out(d.model.meta or {})} if d.model.task == textcls.TASK else {}),
+                  # 1.5.4: what an embedding model takes (text, image or both), for Try it and the Playground.
+                  **({"embed": encoders.embed_of(d.model.meta or {})} if d.model.task == "embed" else {})},
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
         "route": {"served_name": route.served_name, "api": route.api,
                   "upstream_model": own.upstream_model if own else d.served_name}
@@ -823,6 +826,13 @@ def delete_deployment(dep_id: int, caller: Caller = Depends(require_operator), d
 class TryIn(BaseModel):
     input: Optional[str] = Field(default=None, max_length=500)
     stream: bool = False
+    # 1.5.4: the labels a zero-shot text classifier chooses from (default: TRY_ZERO_SHOT_LABELS).
+    labels: Optional[list[Annotated[str, Field(max_length=64)]]] = Field(default=None, max_length=32)
+
+
+# What Try it asks a zero-shot text classifier (1.5.4) when no labels are given: the default text is about technology.
+TRY_ZERO_SHOT_LABELS = ["technology", "sports", "cooking"]
+TRY_EMBED_TEXT = "Forgeyard runs models on your own machines."
 
 
 def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None,
@@ -868,9 +878,12 @@ TRY_IMAGE_SIZE = 256                       # small, so a CPU answers within the 
 
 
 def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[str] = None,
-                draws: Optional[imagegen.Draws] = None, zero_shot: bool = False) -> tuple[str, bytes, str]:
+                draws: Optional[imagegen.Draws] = None, zero_shot: bool = False, *,
+                labels: Optional[list[str]] = None, embeds: Optional[list[str]] = None) -> tuple[str, bytes, str]:
     """(path, body, content type) of a small request in the route's protocol. `zero_shot`: the model is a
-    zero-shot detector, which is told what to find (1.4.4)."""
+    zero-shot detector, which is told what to find (1.4.4), or (1.5.4) a zero-shot text classifier, which is told the
+    `labels` to choose from. `embeds` (1.5.4): what an embedding model takes (text, image): the test image goes with
+    the text to a model that embeds images, alone to an image-only one."""
     if api in VISION_TRY:
         # 1.4: the test image (two squares); for SAM 2, the box around the red one; for a zero-shot detector, the
         # names of the two squares (or the words typed in Try it, comma-separated).
@@ -895,7 +908,11 @@ def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[st
                 "messages": [{"role": "user", "content": text or "In one short sentence: what is a GPU?"}]}
         return "/v1/chat/completions", json.dumps(body).encode(), "application/json"
     if api == "openai-embeddings":
-        body = {"model": upstream, "input": [text or "Forgeyard runs models on your own machines."]}
+        mods = embeds or ["text"]
+        items: list = [text or TRY_EMBED_TEXT] if "text" in mods else []
+        if "image" in mods:   # 1.5.4: the test image (two squares), as a typed item
+            items.append({"image": "data:image/png;base64," + base64.b64encode(vision.test_png()).decode("ascii")})
+        body = {"model": upstream, "input": items}
         return "/v1/embeddings", json.dumps(body).encode(), "application/json"
     if api == "rerank":
         body = {"model": upstream, "query": text or "What is the capital of France?",
@@ -905,6 +922,8 @@ def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[st
     if api == "classify":
         # 1.4.4: vLLM serves /classify without /v1.
         body = {"model": upstream, "input": [text or "Forgeyard runs models on your own machines, and that is great."]}
+        if zero_shot:   # 1.5.4: a zero-shot (NLI) model chooses among the labels sent
+            body["labels"] = [x.strip() for x in labels or [] if x.strip()][:32] or list(TRY_ZERO_SHOT_LABELS)
         return "/classify", json.dumps(body).encode(), "application/json"
     if api == "openai-audio":
         boundary = uuid.uuid4().hex
@@ -960,8 +979,14 @@ def summarise(api: str, answer) -> str:
             text = (msg.get("content") or "").strip()
             return text[:1000] if text else "(reasoning) " + (msg.get("reasoning_content") or "").strip()[:600]
         if api == "openai-embeddings":
-            vec = answer["data"][0]["embedding"]
-            return f"{len(vec)} dimensions: [{', '.join(f'{x:.4f}' for x in vec[:4])}, …]"
+            data = answer["data"]
+            vec = data[0]["embedding"]
+            out = f"{len(vec)} dimensions: [{', '.join(f'{x:.4f}' for x in vec[:4])}, …]"
+            if len(data) == 2 and all(isinstance(d.get("embedding"), list) for d in data):
+                # 1.5.4: the text and the test image, in one space: how close they are.
+                cos = sum(a * b for a, b in zip(data[0]["embedding"], data[1]["embedding"]))
+                out = f"2 vectors (the text and the test image), {out}; text-image cosine {cos:.3f}"
+            return out
         if api == "rerank":
             res = sorted(answer.get("results") or [], key=lambda r: -r.get("relevance_score", 0))
             return "; ".join(f"#{r['index']} {r['relevance_score']:.3f}" for r in res)
@@ -1008,14 +1033,22 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
     if route.api == "openai-videos":
         return _try_videos(target, replica)
-    zero_shot = d.model is not None and vision.is_zero_shot(d.model.meta or {})
-    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws, zero_shot)
+    meta = d.model.meta or {} if d.model is not None else {}
+    zero_shot = d.model is not None and (vision.is_zero_shot(meta) if route.api in VISION_TRY else
+                                         route.api == "classify" and textcls.is_zero_shot(meta))
+    embeds = encoders.embed_of(meta).get("modalities") if route.api == "openai-embeddings" and \
+        encoders.is_server(recipe, "embed") else None
+    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws, zero_shot, labels=body.labels,
+                                       embeds=embeds)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None,
                            target.get("tls_name"))
     ms = int((time.monotonic() - started) * 1000)
     request = json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE) \
         else {"model": upstream, "file": CLIP.name}
+    if route.api == "openai-embeddings" and isinstance(request.get("input"), list):
+        request["input"] = [{"image": "<the test image: 256x192 PNG, base64>"} if isinstance(x, dict) else x
+                            for x in request["input"]]
     if route.api in VISION_TRY:
         request["image"] = "<the test image: 256x192 PNG, base64>"
         if isinstance(answer, dict):   # masks and depth maps are PNGs in base64: not shown

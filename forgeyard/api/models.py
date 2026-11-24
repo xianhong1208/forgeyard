@@ -110,7 +110,23 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
             "voices": list((m.meta or {}).get("voices") or []), "image": image_out(m.meta or {}),
             "video": video_out(m.meta or {}), "vision": vision_out(m.meta or {}),
-            "classify": textcls.out(m.meta or {}), **media_out(m.meta or {}, m.format)}
+            "classify": textcls.out(m.meta or {}), "embed": embed_out(m.meta or {}, m.task),
+            "languages": languages_out(m.meta or {}), **media_out(m.meta or {}, m.format)}
+
+
+def embed_out(meta: dict, task: Optional[str]) -> Optional[dict]:
+    """An embedding model's family, what it embeds (text, image or both), its vector size and its longest text (1.5.4),
+    or None for another task."""
+    if task != "embed":
+        return None
+    e = encoders.embed_of(meta)
+    return {k: e.get(k) for k in ("family", "modalities", "dimensions", "text_max_tokens") if e.get(k) is not None}
+
+
+def languages_out(meta: dict) -> Optional[list[str]]:
+    """The languages its card names (or the recommended list gives it), or None: unknown (1.5.4)."""
+    langs = meta.get("languages")
+    return [str(x) for x in langs] if isinstance(langs, list) and langs else None
 
 
 def vision_out(meta: dict) -> Optional[dict]:
@@ -349,8 +365,16 @@ def recommended_models(_: Caller = Depends(require_admin), db: DbSession = Depen
     except rec.RecommendedError as e:
         raise fail(500, "recommended_broken", f"The recommended models file is broken: {e}") from None
     have = _catalog_names(db)
+    # 1.5.4 (Q5): one repository can be two entries (image classification and image embeddings): matched by task too.
+    tasks = {(m.source, m.file, m.task): m.name for m in db.scalars(select(CatalogModel)).all()}
     return {"groups": [g.model_dump() for g in data.groups],
-            "models": [e.model_dump() | {"in_catalog": have.get((e.source, e.file))} for e in data.models]}
+            "models": [e.model_dump() | {"in_catalog": tasks.get((e.source, e.file, e.task))
+                                         if _twice(data, e) else have.get((e.source, e.file))} for e in data.models]}
+
+
+def _twice(data, e) -> bool:
+    """The recommended list has this source (and file) under another task as well."""
+    return any(o.source == e.source and o.file == e.file and o.task != e.task for o in data.models)
 
 
 # A person searching sends a request per keystroke pause; Hugging Face is asked at most this often.
@@ -416,6 +440,9 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     if task == textcls.TASK and "classify" not in meta and meta.get("kind") != "local":
         # 1.4.4 (#144): a text classifier's labels are read from its config.json (safetensors repositories).
         raise fail(422, "not_a_text_classifier", textcls.refusal(None))
+    if why := encoders.add_refusal(task, meta, meta.get("format"), catalog.all_recipes(db)):
+        # 1.5.4: no engine serves it as this task (a multimodal embedding model vLLM would need chat messages for).
+        raise fail(422, "no_engine", why)
     if task in ("tts", "image", "video", textcls.TASK) + vision.TASKS:
         # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
         # takes in chat.
@@ -430,6 +457,15 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
             origin = None
         if origin is not None:
             meta["license"], meta["license_from"] = origin.license, origin.license_from
+    if not meta.get("languages") and task in ("embed", textcls.TASK):
+        # 1.5.4: a card that names no language (CLIP, SigLIP): the languages the recommended list gives the model.
+        try:
+            entry = next((e for e in rec.recommended().models if e.source == body.source.strip() and e.task == task
+                          and e.languages), None)
+        except rec.RecommendedError:
+            entry = None
+        if entry is not None:
+            meta["languages"] = list(entry.languages)
     src = sources.parse_source(body.source)
     m = CatalogModel(name=name, title=(body.title or "").strip() or None, source=str(src), kind=src.kind,
                      ref=meta.get("ref"), revision=meta.get("revision"), file=meta.get("file"),
@@ -491,6 +527,9 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
             raise fail(422, "not_a_vision_model", why)
         if body.task != m.task and (why := _classify_retask(body.task, m)):
             raise fail(422, "not_a_text_classifier", why)
+        if body.task != m.task and (why := encoders.add_refusal(body.task, m.meta or {}, m.format,
+                                                                catalog.all_recipes(db))):
+            raise fail(422, "no_engine", why)
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:

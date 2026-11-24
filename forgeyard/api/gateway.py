@@ -27,7 +27,8 @@ from starlette.concurrency import run_in_threadpool
 
 from forgeyard import removed
 from forgeyard.db import new_session
-from forgeyard.gateway import classify, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs, vision
+from forgeyard.gateway import (classify, embeddings as gembeddings, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs,
+                               vision)
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -92,13 +93,21 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         elif endpoint == imagegen.ENDPOINT:
             route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
         elif endpoint == classify.ENDPOINT:
-            proxy.fit_classify(parsed)               # 1.4.4: checked, only the known fields sent on
+            # 1.4.4: checked, only the known fields sent on; 1.5.4: zero-shot labels to zero-shot deployments only
+            route = proxy.fit_classify(route, parsed)
+        elif endpoint == gembeddings.ENDPOINT:
+            route = proxy.fit_embeddings(route, parsed)  # 1.5.4: typed items, images to models that embed them
         # Images, audio and video (1.3): parts rebuilt, the route narrowed to what can take them,
         # media URLs fetched by the gateway, and the size checked again with them inlined.
         media = proxy.scan_media(parsed, endpoint)
         route = proxy.fit_route(route, parsed, parsed.size)
         if media is not None and media.fetch:
             await gmedia.fetch_all(media)
+            parsed.size = proxy.body_size(parsed)
+            route = proxy.fit_route(route, parsed, parsed.size)
+        if parsed.embed is not None and parsed.embed.fetch:
+            # 1.5.4: image URLs to embed, fetched by the gateway through the same media rules, then inlined.
+            await gembeddings.fetch_all(parsed.obj, parsed.embed)
             parsed.size = proxy.body_size(parsed)
             route = proxy.fit_route(route, parsed, parsed.size)
     except GatewayError as e:
