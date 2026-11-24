@@ -745,3 +745,26 @@ def test_fy_rg_019_a_guarded_model_process_gets_loopback_and_the_internal_port(t
         assert out == {"guarded": "bind=127.0.0.1 port=31001", "plain": "bind=10.9.8.7 port=31000"}
     finally:
         cleanup_world(work)
+
+
+def test_fy_rg_021_guard_never_listens_on_its_own_upstream(monkeypatch):
+    """FY-RG-021: a test guard never takes its upstream's port as its own, even when the OS hands the just-released
+    "dead engine" number out again; otherwise the guard forwards to itself and the client sees a dropped connection
+    (the CI flake of FY-RTLS-009). The guard in front of a dead port still answers 503 not-taken."""
+    import tests.guard_helpers as gh
+
+    dead = gh.free_port()
+    real, handed = gh.free_port, []
+
+    def first_the_dead_one():
+        handed.append(dead if not handed else real())
+        return handed[-1]
+
+    monkeypatch.setattr(gh, "free_port", first_the_dead_one)
+    g = gh.GuardThread(dead)
+    try:
+        assert g.port != dead and handed[0] == dead
+        r = httpx.get(g.url + "/v1/models", headers={"Authorization": f"Bearer {gh.KEY}"}, timeout=10)
+        assert r.status_code == 503 and r.headers.get("x-forgeyard-not-taken") == "engine-unreachable"
+    finally:
+        g.close()
