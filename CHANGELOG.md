@@ -18,7 +18,9 @@ version until 1.0.
   size (the first input's shape at the deployment's default pixels when the request gives none) and rebuilds the
   engine's request with the checked files only: no URL, mask, LoRA path or other client field reaches the engine.
   Edits share the image queue; usage counts the images made plus the input images (`media_items`) and their bytes
-  (`bytes_in`). Masks are refused (400 `mask_not_supported`), and so is `file_id`.
+  (`bytes_in`). Masks are refused (400 `mask_not_supported`), and so is `file_id`. What the model does is checked
+  before anything about the images: an edit to a model that edits none is 400 `edits_not_supported` with or without
+  images, and its URLs are never fetched.
 - What an image model does is in its catalog entry: `meta.image.edit` (input images it edits, 0 for none) and
   `meta.image.generate` (whether it makes images from text), from its diffusers pipeline class, or for a
   stable-diffusion.cpp file from its names, or as an admin says when adding it (`image_edit`, `image_generate`). No

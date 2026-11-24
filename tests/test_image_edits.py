@@ -524,3 +524,33 @@ def test_fy_iedt_014_the_openai_sdk_edits(ed):
     assert len(two.data) == 2 and [data for _, _, data in ed.e["klein"].edits()[-1]["files"]] == [a, b]
     with pytest.raises(openai.NotFoundError):
         c.images.create_variation(model="klein", image=("a.png", a, "image/png"))
+
+
+def test_fy_iedt_015_what_the_model_does_comes_before_the_images(ed):
+    """FY-IEDT-015: an edit to a model that edits nothing (Stable Diffusion 1.5) is 400 edits_not_supported whatever it
+    carries: no image (JSON or a form), a file, or an http(s) image_url, which is then never fetched. A model that
+    edits still needs the image (400 missing_image)."""
+    url = f"{ed.media.url}/img.png"
+    for r in (ed.api.post("/v1/images/edits", json={"model": "sd", "prompt": "x"}),
+              ed.api.post("/v1/images/edits", data={"model": "sd", "prompt": "x"}, files={"note": (None, "a form")}),
+              edit(ed.api, "sd", [png(64, 64)]),
+              ed.api.post("/v1/images/edits", json={"model": "sd", "prompt": "x", "images": [{"image_url": url}]})):
+        assert r.status_code == 400 and err(r)["code"] == "edits_not_supported", r.text
+    assert ed.media.hits == [] and not ed.e["sd"].seen
+    for model in ("klein", "kgguf"):
+        r = ed.api.post("/v1/images/edits", json={"model": model, "prompt": "x"})
+        assert r.status_code == 400 and err(r)["code"] == "missing_image", r.text
+
+
+def test_fy_iedt_016_a_route_sends_edits_only_to_deployments_that_edit(ed):
+    """FY-IEDT-016: a route whose tier holds a deployment that edits (FLUX.2 [klein] GGUF) and one that does not (Stable
+    Diffusion 1.5) sends every edit to the first, never to the second; its generations go to both."""
+    from tests.cloud_helpers import deployment_id, set_tiers
+
+    set_tiers(ed.owner, "kgguf", [[("local", deployment_id(ed.owner, "kgguf")), ("local", deployment_id(ed.owner, "sd"))]])
+    for _ in range(6):
+        assert edit(ed.api, "kgguf", [png(256, 256)]).status_code == 200
+    assert len(ed.e["kgguf"].edits()) == 6 and not ed.e["sd"].seen
+    for _ in range(6):
+        assert ed.api.post("/v1/images/generations", json={"model": "kgguf", "prompt": "x"}).status_code == 200
+    assert ed.e["sd"].seen and all(s["path"] == "/v1/images/generations" for s in ed.e["sd"].seen)

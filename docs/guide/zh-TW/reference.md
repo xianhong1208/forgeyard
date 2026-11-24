@@ -395,8 +395,12 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 
 推論引擎收到的是閘道重新組成的請求：上面這些欄位，加上檢查過的圖片（以 `image[]` 檔案送出）。其他東西都不會送過去：
 不送網址（vLLM-Omni 會從你的網路內部自己下載它的 `url` 欄位，以及字串形式的 `mask_image`、`reference_image`），
-也不送遮罩、LoRA 路徑或其他任何欄位。不會編輯圖片的模型回應 400 `edits_not_supported`，並說明請改用
-`/v1/images/generations`。
+也不送遮罩、LoRA 路徑或其他任何欄位。
+
+檢查的順序：先在讀取請求時檢查格式（`mask`、`file_id`、其他 scheme 的網址、不是 base64 的 data: URL、名稱不對的檔案欄位），
+再確認模型與金鑰能不能使用它。**不會編輯圖片的模型一律回應 400 `edits_not_supported`**（並說明請改用
+`/v1/images/generations`），不論請求有沒有附圖片，請求裡的網址也一個都不會下載。之後才計算圖片張數（`missing_image`、
+`too_many_input_images`）、下載網址、逐張檢查，再套用各部署的上限。
 
 圖片編輯和[圖片生成](#images)共用佇列、*Timeout* 與回應格式。計量方式和圖片生成相同，另外加上：
 

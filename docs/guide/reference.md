@@ -504,8 +504,13 @@ Two request shapes, as OpenAI's API takes them:
 
 The engine gets a new request built by the gateway: the fields above and the checked images as `image[]` files.
 Nothing else reaches it: not a URL (vLLM-Omni would fetch its own `url` fields, string `mask_image` and
-`reference_image` from inside your network), not a mask, a LoRA path or any other field. A model that edits nothing is
-400 `edits_not_supported`, saying to use `/v1/images/generations`.
+`reference_image` from inside your network), not a mask, a LoRA path or any other field.
+
+The order of the checks: first the request's shape as it is read (`mask`, `file_id`, a URL of another scheme, a data:
+URL that is not base64, a file under another name), then the model and the key's access to it. **A model that edits
+nothing is 400 `edits_not_supported`** (saying to use `/v1/images/generations`) whether or not the request has images,
+and none of its URLs is fetched. Only then are the images counted (`missing_image`, `too_many_input_images`), their
+URLs fetched, each one checked, and the deployments' caps applied.
 
 Edits share the image queue, *Timeout* and answer of [Images](#images). They are counted as images are, plus:
 

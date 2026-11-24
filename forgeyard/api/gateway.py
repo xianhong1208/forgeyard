@@ -93,8 +93,11 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         elif endpoint == imagegen.ENDPOINT:
             route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
         elif endpoint == imageedit.ENDPOINT:
-            # 1.5.5: input URLs fetched by the gateway (only now that the key may use the model), every input's bytes,
-            # type and header size checked, then the deployments that edit and take them.
+            # 1.5.5: what the model does first (a model that edits none: edits_not_supported, images or not), then
+            # how many images, then their URLs fetched by the gateway (only for a key that may use a model that edits),
+            # every input's bytes, type and header size checked, then the deployments that edit and take them.
+            imageedit.offered(route)
+            imageedit.count(parsed.edit)
             await imageedit.fetch_all(parsed.edit)
             imageedit.check(parsed.edit)
             parsed.size = max(parsed.size, parsed.edit.bytes)
