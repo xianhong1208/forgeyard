@@ -12,40 +12,20 @@ import { notifyUnauthorized } from "../lib/api";
 import { IMAGE_MIME, SPEECH_MIME, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
   type Attached, type ImageOptions, type Voice } from "../lib/gateway";
 import { MODEL_KIND, type ModelKind } from "../lib/fleet";
-import { firstVision, imageProblem, pickerDetail, pickerGroups, playError, routeReady, routeSleep } from "../lib/playground";
+import { SENT_EVENT, failure, firstVision, imageProblem, pickerDetail, pickerGroups, post, routeReady, routeSleep } from "../lib/playground";
 import { api, errorText } from "../lib/api";
 import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
 import { usePoll } from "../lib/poll";
 import { when } from "../lib/format";
 import { targetHeader } from "../lib/routing";
-import type { ClassifyAnswer, Deployment, DeploymentsResponse, RouteInfo, RoutesResponse, TextClassifier } from "../lib/types";
+import type { Deployment, DeploymentsResponse, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { Classify } from "./PlaygroundClassify";
+import { Embeddings } from "./PlaygroundEmbed";
 import { Videos } from "./PlaygroundVideo";
 import { VisionModelPanel } from "./PlaygroundVision";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean; images?: Attached[] };
-
-// The playground talks to /api/playground/<endpoint>: the gateway's routing, as the signed-in
-// user (the session cookie and the CSRF header), counted as "console" in usage. No API key.
-async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?: FormData, localOnly = false): Promise<Response> {
-  window.dispatchEvent(new Event(SENT_EVENT));   // 1.5.0: an asleep model starts waking now; the page looks again soon
-  const headers: Record<string, string> = { "X-Forgeyard": "1" };
-  if (localOnly) headers["X-Forgeyard-Local-Only"] = "1";
-  if (!form) headers["Content-Type"] = "application/json";
-  const res = await fetch(`/api/playground/${endpoint}`, {
-    method: "POST", credentials: "same-origin", headers, signal, body: form ?? JSON.stringify(body),
-  });
-  if (res.status === 401) {
-    const data = await res.json().catch(() => null);
-    notifyUnauthorized((data as { detail?: { reason?: string } } | null)?.detail?.reason);
-  }
-  return res;
-}
-
-async function failure(res: Response): Promise<string> {
-  const data = await res.json().catch(() => null);
-  return playError(res.status, data);
-}
 
 // "asleep" / "waking" beside a model's name in the picker.
 const SLEEP_WORD: Record<"asleep" | "waking", string> = labels({ asleep: "playground.picker.asleep", waking: "playground.picker.waking" });
@@ -93,6 +73,8 @@ export function PlaygroundPage() {
   }, [legacy, loaded, error, vision, setSearch]);
 
   const pick = (name: string) => setSearch({ model: name }, { replace: true });
+  // 1.5.4: the chosen model's own deployment tells the Embeddings and Classify panels what it takes.
+  const own = dep;
 
   return (
     <>
@@ -127,10 +109,11 @@ export function PlaygroundPage() {
       )}
       {dep && sleeping && <WakeNotice d={dep} canWake={canDeploy} onWoken={() => { reloadDeps(); reloadRoutes(); }} />}
       {route?.api === "openai-chat" && <Chat key={route.served_name} model={route.served_name} />}
-      {route?.api === "openai-embeddings" && <Embeddings key={route.served_name} model={route.served_name} />}
+      {route?.api === "openai-embeddings" && <Embeddings key={route.served_name} model={route.served_name} embed={own?.model.embed ?? null}
+        maxImages={numberParam(own?.params?.max_images)} />}
       {route?.api === "rerank" && <Rerank key={route.served_name} model={route.served_name} />}
-      {route?.api === "classify" && <Classify key={route.served_name} model={route.served_name}
-        labels={deps.data?.deployments.find((d) => d.id === route.deployment_id)?.model.classify ?? null} />}
+      {route?.api === "classify" && <Classify key={route.served_name} model={route.served_name} labels={own?.model.classify ?? null}
+        languages={own?.model.languages} maxPairs={numberParam(own?.params?.max_pairs)} />}
       {route?.api === "openai-audio" && <Transcribe key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-speech" && <Speak key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-images" && <Imagine key={route.served_name} model={route.served_name} />}
@@ -140,11 +123,15 @@ export function PlaygroundPage() {
   );
 }
 
+// A deployment's numeric parameter (max_images, max_pairs), or null when it has none.
+function numberParam(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
 // 1.5.0 (#37): how often the Playground asks again while the chosen model is asleep or waking, and how soon after a
 // request is sent (the gateway starts the wake as it takes the request).
 const SLEEP_POLL_MS = 2000;
 const SENT_LOOK_MS = 400;
-const SENT_EVENT = "forgeyard:playground-sent";
 
 // 1.5.0 (#37): the chosen model is asleep (a message wakes it; operators may also Wake now) or waking (about how
 // long, from the wake under way or its last start). The request itself is sent as to any model: the gateway holds it.
@@ -455,37 +442,6 @@ function Chat({ model }: { model: string }) {
   );
 }
 
-function Embeddings({ model }: { model: string }) {
-  const t = useT();
-  const [input, setInput] = useState("Forgeyard runs models on your own machines.");
-  const [out, setOut] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const go = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true); setErr(null); setOut(null);
-    const started = performance.now();
-    try {
-      const res = await post("embeddings", { model, input });
-      if (!res.ok) { setErr(await failure(res)); return; }
-      const data = await res.json();
-      const v: number[] = data.data?.[0]?.embedding ?? [];
-      setOut(`${t("playground.emb.out", { dims: String(v.length), time: ms(performance.now() - started), tokens: String(data.usage?.prompt_tokens ?? "?") })}\n[${v.slice(0, 8).map((x) => x.toFixed(4)).join(", ")}, …]`);
-    } catch { setErr(t("playground.unreachable")); } finally { setBusy(false); }
-  };
-  return (
-    <section className="panel play" aria-labelledby="emb-title">
-      <h2 id="emb-title">{t("playground.emb.title")}</h2>
-      <form onSubmit={go}>
-        <div className="field"><label htmlFor="emb-input">{t("playground.text")}</label><textarea id="emb-input" rows={3} value={input} onChange={(e) => setInput(e.target.value)} /></div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !input.trim()} style={{ marginTop: 10 }}>{busy ? t("playground.waiting") : t("playground.emb.embed")}</button>
-      </form>
-      {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
-      {out && <pre className="logs try-answer play-out" aria-label={t("playground.emb.answer")}>{out}</pre>}
-    </section>
-  );
-}
-
 function Rerank({ model }: { model: string }) {
   const t = useT();
   const [query, setQuery] = useState("What is the capital of France?");
@@ -519,93 +475,6 @@ function Rerank({ model }: { model: string }) {
         </ol>
       )}
     </section>
-  );
-}
-
-const CLASSIFY_SAMPLE = "I love how quiet this laptop is.\nThe delivery was late and the box was crushed.\n這家餐廳的服務很好，下次還會再來。";
-
-// Text classification (1.4.4): texts, one per line, to /v1/classify; for each, every label's probability, the
-// most likely first (the names come from the model's config.json, kept in the catalog).
-function Classify({ model, labels }: { model: string; labels: TextClassifier | null }) {
-  const t = useT();
-  const [text, setText] = useState(CLASSIFY_SAMPLE);
-  const [out, setOut] = useState<{ texts: string[]; answer: ClassifyAnswer; took: number } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const list = text.split("\n").map((t) => t.trim()).filter(Boolean);
-  const go = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true); setErr(null); setOut(null);
-    const started = performance.now();
-    try {
-      const res = await post("classify", { model, input: list });
-      if (!res.ok) { setErr(await failure(res)); return; }
-      setOut({ texts: list, answer: await res.json(), took: performance.now() - started });
-    } catch { setErr(t("playground.unreachable")); } finally { setBusy(false); }
-  };
-  const multi = labels?.problem === "multi_label_classification";
-  return (
-    <section className="panel play" aria-labelledby="cls-title">
-      <h2 id="cls-title">{t("playground.cls.title")}</h2>
-      <p className="muted small">
-        {labels?.labels ? `${labelLine(t, labels.labels, labels.label_names ?? [])} ` : ""}
-        {multi ? t("playground.cls.multi") : t("playground.cls.single")}
-      </p>
-      <form onSubmit={go}>
-        <div className="field"><label htmlFor="cls-input">{t("playground.cls.texts")}</label><textarea id="cls-input" rows={4} value={text} onChange={(e) => setText(e.target.value)} /></div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !list.length} style={{ marginTop: 10 }}>{busy ? t("playground.waiting") : t("playground.cls.classify")}</button>
-      </form>
-      {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
-      {out && (
-        <>
-          <ol className="cls-results" aria-label={t("playground.cls.labels")}>
-            {[...out.answer.data].sort((a, b) => a.index - b.index).map((d) => (
-              <ClassifyResult key={d.index} text={out.texts[d.index] ?? ""} d={d} names={labels?.label_names ?? []} />
-            ))}
-          </ol>
-          <p className="muted small">{out.answer.usage?.prompt_tokens != null ? t("playground.cls.tokens", { count: String(out.answer.usage.prompt_tokens) }) : ""}{ms(out.took)}</p>
-        </>
-      )}
-    </section>
-  );
-}
-
-const CLASSIFY_SHOWN = 5;
-
-// "3 labels: positive, negative, neutral." (at most six names, then "…").
-function labelLine(t: ReturnType<typeof useT>, count: number, names: string[]): string {
-  if (!names.length) return t("playground.cls.labelsOnly", { count: String(count) });
-  const list = names.slice(0, 6).join(t("playground.cls.join"));
-  return t(names.length > 6 ? "playground.cls.labelsMore" : "playground.cls.labelsNamed", { count: String(count), names: list });
-}
-
-function ClassifyResult({ text, d, names }: { text: string; d: ClassifyAnswer["data"][number]; names: string[] }) {
-  const t = useT();
-  const [all, setAll] = useState(false);
-  // Without the names (a local model), the engine still names the most likely label.
-  const top = d.probs.indexOf(Math.max(...d.probs));
-  const ranked = d.probs.map((p, i) => ({ i, p, name: names[i] ?? (i === top && d.label ? d.label : t("playground.cls.label", { i: String(i) })) }))
-    .sort((a, b) => b.p - a.p);
-  const shown = all ? ranked : ranked.slice(0, CLASSIFY_SHOWN);
-  return (
-    <li className="cls-item">
-      <p className="cls-text">{text}</p>
-      <p className="cls-top"><strong>{d.label ?? ranked[0]?.name}</strong> <span className="mono small">{(ranked[0]?.p ?? 0).toFixed(3)}</span></p>
-      <ul className="cls-bars" aria-label={t("playground.cls.probs", { n: String(d.index + 1) })}>
-        {shown.map((r) => (
-          <li key={r.i}>
-            <span className="cls-name" title={r.name}>{r.name}</span>
-            <span className="cls-bar" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(1, r.p)) * 100}%` }} /></span>
-            <span className="mono small">{r.p.toFixed(3)}</span>
-          </li>
-        ))}
-      </ul>
-      {ranked.length > CLASSIFY_SHOWN && (
-        <button type="button" className="linkish small" onClick={() => setAll(!all)}>
-          {all ? t("playground.cls.top") : t("playground.cls.all", { count: String(ranked.length) })}
-        </button>
-      )}
-    </li>
   );
 }
 

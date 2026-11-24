@@ -458,8 +458,9 @@ export type Deployment = {
     modalities?: Medium[] | null;
     // 1.4.4: a text classifier's labels (names in index order), for the Playground.
     classify?: TextClassifier | null;
-    // 1.5.4: what an embedding model takes (Try it sends the test image to one that embeds images).
-    embed?: EmbedModel | null };
+    // 1.5.4: what an embedding model takes (Try it sends the test image to one that embeds images), and (an
+    // embedding or classification model) the languages its card names, for the Playground's English-only warning.
+    embed?: EmbedModel | null; languages?: string[] | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];

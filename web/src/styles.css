@@ -1900,3 +1900,63 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .scale-line p + p { margin-top: 4px; }
 .warn-text { color: var(--heat-ink); }
 .chip-draining { margin-left: 6px; }
+
+/* 1.5.4 (#141, #144): the Playground's Embeddings with images and its similarity table; Classify's zero-shot labels;
+   the model page's language warning. */
+.emb-drop { padding: 12px 14px; position: relative; }
+/* The hidden file picker sits inside a .field, whose inputs are full width: keep it a 1 px box. */
+.field .emb-drop input.sr-only { width: 1px; min-height: 0; height: 1px; padding: 0; border: 0; }
+.emb-url { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.emb-url input { flex: 1 1 auto; min-width: 0; }
+.emb-pics { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.emb-pics li { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 3px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.emb-pic-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+.emb-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex: none; background: var(--surface-2); }
+.emb-thumb-url { display: inline-grid; place-items: center; color: var(--muted); border: 1px solid var(--line); }
+.emb-x { display: inline-flex; align-items: center; justify-content: center; padding: 3px; border: 0; border-radius: 4px; background: none;
+  color: var(--muted); cursor: pointer; flex: none; }
+.emb-x:hover { color: var(--ink); background: var(--surface-2); }
+.emb-x:focus-visible { outline: 2px solid var(--heat); outline-offset: 1px; }
+.emb-result { margin-top: 14px; display: grid; gap: 8px; min-width: 0; }
+.emb-line { margin: 0; }
+.emb-sim-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); justify-self: start; }
+.emb-sim { border-collapse: collapse; font-size: 13px; }
+.emb-sim th, .emb-sim td { padding: 6px 9px; border-bottom: 1px solid var(--line); border-left: 1px solid var(--line); }
+.emb-sim tr:last-child th, .emb-sim tr:last-child td { border-bottom: 0; }
+.emb-sim th:first-child { border-left: 0; }
+.emb-sim thead th { background: var(--surface-2); font-weight: 600; vertical-align: bottom; text-align: center; }
+.emb-sim th[scope="row"] { text-align: left; font-weight: 500; background: var(--surface-2); }
+.emb-sim td { text-align: right; white-space: nowrap; background: color-mix(in srgb, var(--heat) calc(var(--s, 0) * 42%), var(--surface)); }
+.emb-sim td.emb-best { font-weight: 700; color: var(--heat-ink); box-shadow: inset 0 0 0 2px var(--heat-ink); }
+.emb-sim td.emb-self { color: var(--muted); background: var(--surface-2); text-align: center; }
+.emb-head-img { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; }
+.emb-head-text { display: block; max-width: 15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emb-values summary { cursor: pointer; color: var(--info); }
+.emb-values pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chips-input { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.chips-input:focus-within { outline: 2px solid var(--heat); outline-offset: 2px; }
+.chips-list { display: contents; list-style: none; margin: 0; padding: 0; }
+.chips-list .chip { gap: 4px; max-width: 100%; padding-right: 3px; }
+.chips-list .chip + .chip { margin-left: 0; }
+.chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chips-input .field-chip-input, .field .chips-input input { flex: 1 1 9rem; min-width: 7rem; border: 0; padding: 4px 6px; min-height: 28px; background: none; }
+.field .chips-input input:focus { outline: none; }
+.check-line { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0 2px; cursor: pointer; }
+.field .check-line input { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--steel); }
+.cls-zs-row { margin-top: 0; }
+.cls-best .cls-name { font-weight: 700; color: var(--heat-ink); }
+.cls-warn, .lang-warn { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; padding: 8px 10px; border: 1px solid #f3d39b;
+  border-radius: var(--radius); background: var(--heat-soft); color: var(--heat-ink); }
+.cls-warn svg, .lang-warn svg { flex: none; margin-top: 2px; }
+.linkish { padding: 0; border: 0; background: none; color: var(--info); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.deprow-img { display: inline-flex; vertical-align: -2px; margin-right: 5px; color: var(--heat-ink); }
+.two-jobs { margin: 10px 0 0; max-width: 90ch; }
+@media (max-width: 600px) {
+  .emb-head-text { max-width: 7.5rem; }
+  .emb-pic-name { max-width: 9rem; }
+  .emb-sim th, .emb-sim td { padding: 5px 6px; }
+}
+/* A long fact chip (what an embedding model takes) wraps on a phone instead of widening the page. */
+.mk-facts .chip { max-width: 100%; height: auto; min-height: 21px; white-space: normal; overflow-wrap: anywhere; gap: 4px; }

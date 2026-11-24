@@ -27,6 +27,7 @@
 - **只在需要時使用 GPU（1.5.0）。** 沒人呼叫的部署可以休眠，把記憶體還回來；下一個請求會喚醒它並等待回應（金鑰允許時，等待期間改由雲端服務），無法喚醒的模型會立刻說明原因。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、`/v1/classify` 的文字分類（1.4.4）、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
 - **視覺模型（1.4）。** 物件偵測（1.4.4 起也有找你說的東西的偵測模型）、影像分割、深度估計與（1.4.4）圖片分類在 `/v1/vision/…`，像其他模型一樣部署。
+- **用文字搜尋圖片、不用訓練就能分類（1.5.4）。** Forgeyard 自己的 transformers 推論引擎在任何 CPU 上都能執行：在 `/v1/embeddings` 用 CLIP、SigLIP 2 或 DINOv2 產生圖片嵌入（圖片和文字一起送，文字能找到圖片；圖片絕不送往雲端供應商），文字分類則有固定標籤的模型，也有從每個請求指定的標籤中挑選的零樣本模型，中文也行。試用區會顯示相似度表格，標籤以標籤塊呈現；每個模型的頁面都會列出它能讀的語言。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。1.4.5 起，閘道也以 TLS 連每個副本，憑證由這個 CA 替那台機器簽發（金鑰絕不離開那台機器）。
 - **沒有網路的機器。** 用檔案帶過去的推論引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和推論引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
@@ -225,6 +226,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | Wan2.1-T2V-1.3B | vLLM-Omni（`vllm-omni-video`） | NVIDIA A100 |
 | **視覺（1.4）** | | |
 | RT-DETRv2 R18 與 R50、SAM 2.1 Hiera tiny、Depth Anything V2 Small | Forgeyard 的視覺伺服器（`vision`） | CPU（以行程執行，1.4 映像檔發布之前） |
+| **圖片嵌入與文字分類（1.5.4）** | | |
+| CLIP ViT-B/32 LAION-2B 與 DINOv2 small 嵌入；DistilBERT 多語言情緒；bge-m3-zeroshot-v2.0-c 與 roberta-base-zeroshot-v2.0-c（零樣本） | Forgeyard 的 transformers 伺服器（`transformers`） | CPU（以行程執行，1.5.4 的映像檔發布之前） |
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
 

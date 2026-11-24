@@ -61,6 +61,37 @@ version until 1.0.
   (multilingual) and `roberta-base-zeroshot-v2.0-c` (English), MIT, and SigLIP 2 base, CLIP ViT-B/32 LAION-2B and
   DINOv2 small as embedding models (a new group, Image embeddings); one repository may now be listed once per task.
 
+- **The console, the guide and the acceptance for the transformers engine (1.5.4, #141 and #144; part 3).**
+  - **Playground → Embeddings** takes images beside texts for a model that embeds them: choose, drop or paste them,
+    or give an address the server fetches under the media rules (the browser never loads it); the answer is a
+    cosine-similarity table, texts down the side and images across for a CLIP-like model (each row's best marked),
+    every item against every other for DINOv2 or a text model, with the vectors' size, tokens, images and whether
+    they are normalised. An image-only model has no text box and says why; the deployment's *Images per request* is
+    the cap.
+  - **Playground → Text classification** for a zero-shot model: the labels as chips (Enter or a comma adds one,
+    each once), the hypothesis template with a one-click Chinese one and why (12 of 12 Chinese news lines right
+    with it, 11 with the English default), *Several labels may apply*, texts x labels counted against the
+    deployment's *Zero-shot pairs per request*; the bars keep the order of the labels asked. Chinese texts sent to a
+    model whose card names English only get a warning. Fixed-label models are unchanged.
+  - **A model's page** shows what an embedding model takes and its vector size (*Texts and images · 512 dimensions ·
+    texts up to 77 tokens*, *Images only · 384 dimensions*), *Zero-shot: labels in each request*, and the languages
+    its card names, with a warning on an English-only classifier or CLIP-like model. **Add a model** shows the same
+    and says that a CLIP-like repository does two jobs, one catalog entry each. **Serving** marks an image embedder
+    with a picture. **Deploy** says the transformers server runs on any CPU, and the estimate why a 16-bit model
+    takes about twice its size in RAM there (float32).
+  - The deployments API names an embedding or classification model's `languages`. A Hugging Face search for
+    embeddings also asks for `image-feature-extraction` (DINOv2), one for text classification also for
+    `zero-shot-classification` (NLI models). The console translates the new gateway error codes.
+  - Guide: [Classify text without training (zero-shot)](docs/guide/how-to.md#classify-text-without-training-zero-shot),
+    [Search images by text (image embeddings)](docs/guide/how-to.md#search-images-by-text-image-embeddings) and
+    [The transformers engine](docs/guide/concepts.md#the-transformers-engine), in both languages.
+  - `scripts/accept_transformers.py` and an `accept_all` group `transformers`: CLIP, DINOv2, a DistilBERT classifier
+    and `bge-m3-zeroshot-v2.0-c` on a CPU machine (CLIP and the zero-shot model also on a GPU machine), checked
+    through the gateway (a text finds its picture, a picture its smaller copy, normalised vectors, an image by
+    address, the limits and refusals, images staying local, 12 Traditional Chinese lines among 10 topics, multi-label,
+    usage, Try it, the Playground's route, the key guard). Until the built-in recipe's image moves to 1.5.4 its
+    deployments are a SKIP saying `vision_image_too_old`; `--transformers-recipe` runs them on a custom recipe.
+
 ### Changed
 
 - **Which engine serves which embedding and classification model (1.5.4).** vLLM's pooling runner (`vllm-pooling`) is

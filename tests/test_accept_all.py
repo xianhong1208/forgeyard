@@ -13,8 +13,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "accept_all.py"
-ORDER = ["server", "machines", "models", "gateway", "cloud", "tts", "img", "video", "vision", "relay", "images", "scale",
-         "console"]
+ORDER = ["server", "machines", "models", "gateway", "cloud", "tts", "img", "video", "vision", "transformers", "relay", "images",
+         "scale", "console"]
 
 
 @pytest.fixture(scope="module")
@@ -28,13 +28,13 @@ def acc():
 
 
 def test_fy_acc_001_groups_in_order_and_their_needs(acc):
-    """FY-ACC-001: the thirteen groups run in this order (1.3 adds tts, img and video, 1.4 vision, relay and images,
-    1.5 scale; the workloads and passthrough groups went with apps in 1.5.3, #89); gateway and cloud need the models
-    group, the others make their own."""
+    """FY-ACC-001: the fourteen groups run in this order (1.3 adds tts, img and video, 1.4 vision, relay and images,
+    1.5 scale, 1.5.4 transformers; the workloads and passthrough groups went with apps in 1.5.3, #89); gateway and cloud
+    need the models group, the others make their own."""
     assert list(acc.GROUPS) == ORDER
     assert acc.GROUPS["gateway"].needs == ("models",) and acc.GROUPS["cloud"].needs == ("models",)
-    assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "models", "tts", "img", "video", "vision", "relay",
-                                                  "images", "scale", "console"))
+    assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "models", "tts", "img", "video", "vision", "transformers",
+                                                  "relay", "images", "scale", "console"))
 
 
 def test_fy_acc_002_arguments(acc):
@@ -71,7 +71,7 @@ def test_fy_acc_003_plan_keeps_what_a_chosen_group_needs(acc):
     plan = acc.plan_groups([], ["models", "console"], ORDER, needs)
     assert plan == [("server", ""), ("machines", ""), ("models", "needed by gateway"),
                     ("gateway", ""), ("cloud", ""), ("tts", ""), ("img", ""), ("video", ""),
-                    ("vision", ""), ("relay", ""), ("images", ""), ("scale", "")]
+                    ("vision", ""), ("transformers", ""), ("relay", ""), ("images", ""), ("scale", "")]
     assert acc.plan_groups(["cloud", "gateway"], [], ORDER, needs) == [
         ("models", "needed by gateway"), ("gateway", ""), ("cloud", "")]
     with pytest.raises(ValueError, match="unknown group 'x'"):
@@ -633,14 +633,14 @@ def acc_resp(status, data):
 
 
 def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, monkeypatch):
-    """FY-ACC-024: before each GPU group (tts, img, video, vision, scale) the run stops what earlier groups
+    """FY-ACC-024: before each GPU group (tts, img, video, vision, transformers, scale) the run stops what earlier groups
     deployed on a GPU, waits until that is stopped, removes it (the models group's deployments are only stopped:
     the console shows one; they are removed at the end like everything else), and notes it; the models group's
     speech-to-text deployment stays while the tts group may use it (--tts-asr), CPU work and the group's own stay;
     run_groups does this before the GPU groups only, and every object is still removed by the cleanup."""
     ft = FakeTime()
     monkeypatch.setattr(acc, "time", ft)
-    assert acc.GPU_GROUPS == ("tts", "img", "video", "vision", "scale")
+    assert acc.GPU_GROUPS == ("tts", "img", "video", "vision", "transformers", "scale")
     run = acc.Run(acc.parse_args([]), None)
     objs = {f"/api/deployments/{i}": {"kind": "deployment", "state": "healthy"} for i in (1, 2, 3, 4, 5, 6)}
     run.admin = admin = GpuAdmin(objs)

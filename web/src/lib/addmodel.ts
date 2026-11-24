@@ -4,8 +4,9 @@
 import { t } from "../i18n/core";
 import { formatNumber, spaceCjkNumbers } from "../i18n/format";
 import { getLang } from "../i18n/lang";
+import { clipLike } from "./encoders";
 import { PERMISSIVE, TASK_LABEL, VISION_TASKS } from "./models";
-import type { CatalogModel, Estimate, Medium, Task } from "./types";
+import type { CatalogModel, EmbedModel, Estimate, Medium, Task, TextClassifier } from "./types";
 
 export type RecommendedGroup = { id: string; title: string; description: string };
 
@@ -54,6 +55,9 @@ export type InspectMeta = {
   diffusers?: { pipeline: string | null; components: Record<string, { class: string; params: number; dtype: string | null }> };
   // 1.3, video models: the pipeline's own size, frame rate and the multiple its sizes take.
   video?: { size: [number, number]; multiple: number; fps: number };
+  // 1.5.4 (#141, #144): an embedding model's modalities and vector size, a text classifier's labels (zero_shot: an NLI
+  // model), and the languages its card names.
+  embed?: EmbedModel; classify?: TextClassifier; languages?: string[];
 };
 
 export type InspectResponse = { meta: InspectMeta; recipes: string[]; suggestion: Suggestion };
@@ -133,4 +137,10 @@ export function visionProblem(meta: { vision?: InspectMeta["vision"]; license?: 
 export function searchLicenceProblem(r: SearchResult): string | null {
   if (!r.task || !VISION_TASKS.includes(r.task) || !r.license) return null;
   return PERMISSIVE.includes(r.license) ? null : t("addmodel.search.licence", { licence: r.license });
+}
+
+// 1.5.4 (Q5): a CLIP-like repository (CLIP, SigLIP, SigLIP 2) does two jobs, one catalog entry (and one deployment)
+// each: zero-shot image classification and image embeddings. The add form says so when it reads one.
+export function twoJobs(meta: { vision?: InspectMeta["vision"]; embed?: InspectMeta["embed"] }): boolean {
+  return (meta.vision?.task === "image-classify" && !!meta.vision.zero_shot) || clipLike(meta.embed);
 }
