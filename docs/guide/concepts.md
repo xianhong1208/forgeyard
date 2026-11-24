@@ -415,7 +415,9 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
   model's own: 832x480 for Wan2.1, 1280x704 for Wan2.2), jobs waiting or being made (8), of those one
   key's (2), and the longest a job may take (an hour). The memory estimate is sized for the longest,
   largest video.
-- **Text to video only** in 1.3: image-to-video references are refused.
+- **A start image** (1.5.5): Wan2.2-TI2V-5B makes a video from text, or from text and a start image
+  (`input_reference`), and image-to-video models need one. The gateway checks the image and fetches a URL
+  itself; the engine gets the file only.
 - **The prompt is not kept**, and a key sees only its own jobs.
 - Usage counts **one request per video**, its **length** and the **busy time** (GPU time).
 - Videos stay on your own deployments; they never go to a cloud provider.

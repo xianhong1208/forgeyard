@@ -160,7 +160,7 @@ def test_fy_vid_001_the_recipe_serves_video_jobs():
     assert v.env["VLLM_OMNI_SERVER_STORAGE__FILE_TTL"] == "{keep_seconds}"
     up_front = {"default_size", "seconds", "max_seconds"}
     advanced = {"max_side", "fps", "steps", "max_steps", "queue", "jobs_per_key", "keep_minutes", "timeout",
-                "max_prompt_chars", "offload"}
+                "max_prompt_chars", "offload", "max_input_side"}
     assert set(v.params) == up_front | advanced
     assert all(not v.params[p].advanced for p in up_front) and all(v.params[p].advanced for p in advanced)
     assert v.params["keep_minutes"].default == 1440 and v.params["jobs_per_key"].default == 2
@@ -184,10 +184,11 @@ def test_fy_vid_001_the_recipe_serves_video_jobs():
     ({}, "invalid_request", "prompt"),
     ({"prompt": "  "}, "invalid_request", "prompt"),
     ({"prompt": 7}, "invalid_request", "prompt"),
-    ({"prompt": "a cat", "input_reference": {"file": "input_reference"}}, "input_reference_not_supported",
-     "input_reference"),
-    ({"prompt": "a cat", "input_reference": "data:image/png;base64,AAAA"}, "input_reference_not_supported",
-     "input_reference"),
+    # 1.5.5: a start image is a file, or {"image_url": …} in JSON (forgeyard/gateway/videogen.py); other shapes are 400.
+    ({"prompt": "a cat", "input_reference": {"file": "input_reference"}}, "invalid_request", "input_reference"),
+    ({"prompt": "a cat", "input_reference": "data:image/png;base64,AAAA"}, "invalid_request", "input_reference"),
+    ({"prompt": "a cat", "input_references": [{"image_url": "https://x/y.png"}]}, "input_reference_not_supported",
+     "input_references"),
     ({"prompt": "a cat", "image_reference": {"image_url": "http://10.0.0.1/x.png"}}, "input_reference_not_supported",
      "image_reference"),
     ({"prompt": "a cat", "video_reference": '{"video_url": "https://x/y.mp4"}'}, "input_reference_not_supported",
@@ -205,8 +206,8 @@ def test_fy_vid_001_the_recipe_serves_video_jobs():
     ({"prompt": "a cat", "negative_prompt": 3}, "invalid_request", "negative_prompt"),
 ])
 def test_fy_vid_002_requests_are_checked(body, code, param):
-    """FY-VID-002: a missing or empty prompt, any image-to-video or video-to-video reference (an upload or
-    a URL), a bad length (OpenAI's seconds is a whole number, also as a string), size, steps, seed,
+    """FY-VID-002: a missing or empty prompt, a start image in another shape than a file or {"image_url"} (1.5.5), any
+    reference the engine would fetch or read itself (image, video, sound; several), a bad length (OpenAI's seconds is a whole number, also as a string), size, steps, seed,
     guidance or negative prompt are 400 before anything is sent."""
     with pytest.raises(GatewayError) as e:
         videogen.check(body)
@@ -237,8 +238,10 @@ def test_fy_vid_003_what_the_engine_is_sent(vid):
     assert r.status_code == 200, r.text
     second = [p for e in vid.engines for p in e.posts][-1]["fields"]
     assert second["num_frames"] == "81" and second["size"] == "832x480"
+    # Wan2.1-T2V makes videos from text only (1.5.5: image_input none), so a start image is refused.
+    from tests.test_multimodal import PNG
     r = vid.api.post("/v1/videos", data={"model": "wan", "prompt": "Rain."},
-                     files={"input_reference": ("x.png", b"\x89PNG", "image/png")})
+                     files={"input_reference": ("x.png", PNG, "image/png")})
     assert r.status_code == 400 and err(r)["code"] == "input_reference_not_supported"
 
 
@@ -644,7 +647,7 @@ def test_fy_vid_020_try_it_and_the_playground(vid):
     o = vid.owner.get("/api/playground/videos/options?model=wan").json()
     assert o == {"model": "wan", "default_size": "832x480", "max_side": 832, "max_pixels": 832 * 480, "multiple": 16,
                  "seconds": 5, "max_seconds": 5, "fps": 16, "max_steps": 50, "max_prompt_chars": 2000,
-                 "keep_minutes": 1440}
+                 "keep_minutes": 1440, "image_input": "none", "max_input_side": 0}
     assert vid.owner.get("/api/playground/videos/options?model=nope").status_code == 404
     v = vid.owner.post("/api/playground/videos", json={"model": "wan", "prompt": "A paper boat.", "seconds": 3}).json()
     assert v["seconds"] == "3"
@@ -718,9 +721,11 @@ def test_fy_vid_023_the_inspector_reads_video_pipelines(monkeypatch):
     """FY-VID-023: a diffusers repository whose model_index.json names WanPipeline is a video model: its
     task hint is video and it carries its own size, frame rate and size multiple (Wan2.1: 832x480 at 16
     fps, multiples of 16; Wan2.2-TI2V-5B, whose VAE packs 16 x 16 pixels: 1280x704 at 24 fps, multiples of
-    32); image-to-video pipelines are not video models here."""
+    32); only the image-to-video pipelines vLLM-Omni 0.32.0 runs are video models too (1.5.5)."""
     assert inspector.is_video_pipeline("WanPipeline") and inspector.is_video_pipeline("HunyuanVideoPipeline")
-    assert not inspector.is_video_pipeline("WanImageToVideoPipeline")
+    assert inspector.is_video_pipeline("WanImageToVideoPipeline")
+    assert not inspector.is_video_pipeline("CogVideoXImageToVideoPipeline")
+    assert not inspector.is_video_pipeline("LTXImageToVideoPipeline")
     assert not inspector.is_video_pipeline("ZImagePipeline") and not inspector.is_video_pipeline(None)
     configs = {"vae/config.json": {"_class_name": "AutoencoderKLWan", "z_dim": 16},
                "transformer/config.json": {"patch_size": [1, 2, 2]}}
@@ -729,11 +734,11 @@ def test_fy_vid_023_the_inspector_reads_video_pipelines(monkeypatch):
         return json.dumps(next(v for k, v in configs.items() if url.endswith(k))).encode()
 
     monkeypatch.setattr(inspector.fetch, "get_bytes", fake_get)
-    assert inspector._video_native({}, lambda p: f"https://hf/{p}", None, None) == \
-        {"size": [832, 480], "multiple": 16, "fps": 16}
+    assert inspector._video_native({"_class_name": "WanPipeline"}, lambda p: f"https://hf/{p}", None, None) == \
+        {"size": [832, 480], "multiple": 16, "fps": 16, "image_input": "none"}
     configs["vae/config.json"] = {"scale_factor_spatial": 16, "z_dim": 48}
-    assert inspector._video_native({"expand_timesteps": True}, lambda p: f"https://hf/{p}", None, None) == \
-        {"size": [1280, 704], "multiple": 32, "fps": 24}
+    assert inspector._video_native({"_class_name": "WanPipeline", "expand_timesteps": True}, lambda p: f"https://hf/{p}",
+                                   None, None) == {"size": [1280, 704], "multiple": 32, "fps": 24, "image_input": "optional"}
 
 
 def test_fy_vid_024_the_recommended_video_models():

@@ -22,16 +22,22 @@
 #   deletes each video on the replica when it expires): the deployment's keep_minutes and an hour.
 #
 # Requests: the gateway sends only prompt, model, size, num_frames, fps, num_inference_steps,
-# guidance_scale, negative_prompt and seed. It never sends input_reference / image_reference /
-# video_reference / audio_reference (uploads and URLs the engine would read), lora, extra_params,
-# frame interpolation paths or the other extensions. Frames are seconds x fps rounded to 4k + 1, the
-# frame counts Wan makes; fps is the model's own (16 for Wan2.1, 24 for Wan2.2) unless set here.
+# guidance_scale, negative_prompt and seed, and (1.5.5) a start image for models that take one
+# (Wan2.2-TI2V-5B: optional; the image-to-video pipelines: required) as the file input_reference, after
+# checking it (PNG, JPEG or WebP, at most MEDIA_FETCH_MAX_MB, its header size within max_input_side) and
+# fetching it itself when the client gave a URL. It never sends image_reference / video_reference /
+# audio_reference (URLs the engine would fetch, following redirects), lora, extra_params, frame
+# interpolation paths or the other extensions. The size is always sent: without one the engine makes the
+# start image's size. Frames are seconds x fps rounded to 4k + 1, the frame counts Wan makes; fps is the
+# model's own (16 for Wan2.1, 24 for Wan2.2) unless set here.
 #
 # Memory: as for images, a diffusion pipeline holds its components in bfloat16 (float32 files are
 # cast) and allocates while it works; nothing reserves a fixed share of the card. The estimate is sized
 # for the deployment's caps: the weights, the denoiser's activations for the longest video at the
 # largest size (tokens = latent frames x (width / 16) x (height / 16) for Wan2.1; / 32 for Wan2.2-5B),
-# and the VAE's decode of one frame at the largest size, plus overhead. Offload (--enable-cpu-offload)
+# and the VAE's decode of one frame at the largest size, plus overhead. A start image (1.5.5) adds no
+# tokens (Wan2.2-TI2V-5B puts its latent in place of the first latent frame) and its VAE encode runs
+# before the denoiser, smaller than the decode counted; not yet measured. Offload (--enable-cpu-offload)
 # keeps only the component at work on the card (the text encoder alone is 11 GB in bfloat16).
 name: vllm-omni-video
 title: vLLM-Omni (video)
@@ -87,6 +93,9 @@ params:
             help: A job not finished this long after it was asked is stopped and reported failed.}
   max_prompt_chars: {type: int, default: 2000, min: 1, max: 32000, advanced: true, label: Longest prompt (characters),
                      help: Longer prompts are refused (400 prompt_too_long).}
+  max_input_side: {type: int, default: 2048, min: 64, max: 8192, advanced: true, label: Largest start image (pixels),
+                   help: "Image to video: the widest or tallest start image a request may give, read from the image's
+                     header. Larger ones are refused (400); the engine scales it to the video's size."}
   offload: {type: choice, default: none, choices: [none, model], advanced: true, label: Offload to host memory,
             help: "model: only the component at work (text encoder, transformer, VAE) is on the card, the rest waits in
               host memory. Less GPU memory, slower videos."}

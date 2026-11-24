@@ -294,7 +294,11 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   rate and size multiple come from its VAE and transformer configs: the VAE packs 8 × 8 pixels (16 × 16
   for Wan2.2's, `scale_factor_spatial`) and the transformer 2 × 2 of those into a token, so Wan2.1 makes
   832x480 at 16 fps in multiples of 16, and Wan2.2-TI2V-5B (`expand_timesteps`) 1280x704 at 24 fps in
-  multiples of 32.
+  multiples of 32. 1.5.5 (#143): the image-to-video pipelines vLLM-Omni 0.32.0 runs
+  (`WanImageToVideoPipeline`, `SanaImageToVideoPipeline`, `HunyuanVideo15ImageToVideoPipeline`) are video
+  models too, and `meta.video.image_input` says what a request may carry: `optional` (Wan2.2-TI2V-5B),
+  `required` (those pipelines) or `none`; an entry without the key is read from its pipeline class
+  (forgeyard/models/videoinput.py).
 - **Recipes** are YAML ([forgeyard/recipes](../forgeyard/recipes)): tasks, formats, the protocol per
   task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
   NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
@@ -571,12 +575,17 @@ page contain these lines whenever the server uses its own CA.
   asynchronous. Checks and caps work as for images (*Longest video* 5 s, *Largest side* the model's
   own and no more pixels a frame than the default size scaled to it, sizes a multiple of 16, or 32 for
   Wan2.2-5B, *Most steps* 50, *Longest prompt* 2,000; `video_too_long`, `video_too_large`,
-  `invalid_size`, `too_many_steps`, `prompt_too_long`); `input_reference` and vLLM-Omni's other
-  references are refused (`input_reference_not_supported`: text to video only in 1.3, and the engine
-  would read uploads and fetch URLs). The engine gets multipart with only the prompt, its model name,
-  the size, the frames (seconds × the deployment's frame rate, rounded to the 4k + 1 Wan makes: 5 s at
-  16 fps is 81) and the frame rate, plus steps, guidance, seed and a negative prompt; never `lora`,
-  `extra_params` or frame interpolation paths.
+  `invalid_size`, `too_many_steps`, `prompt_too_long`). vLLM-Omni's `image_reference`,
+  `video_reference`, `audio_reference` and `input_references` are refused (`input_reference_not_supported`:
+  the engine would fetch the URLs itself, following redirects). **A start image (1.5.5, #143)** is OpenAI's
+  `input_reference`: a multipart file or JSON `{"image_url"}` (a data: URL, or an http(s) URL the gateway
+  fetches under the media rules once the key may use the model), checked as an edit's input images are
+  (bytes, magic bytes, the header's size against the deployment's `max_input_side`), refused by a model whose
+  `image_input` is `none` and required by one whose is `required`. The engine gets multipart with only the
+  prompt, its model name, the size (always), the frames (seconds × the deployment's frame rate, rounded to the
+  4k + 1 Wan makes: 5 s at 16 fps is 81) and the frame rate, plus steps, guidance, seed, a negative prompt
+  and the checked start image as the file `input_reference`; never a URL, `lora`, `extra_params` or frame
+  interpolation paths. The start image counts `media_items` 1 and its `bytes_in` when the job is accepted.
   - **Job-to-replica affinity.** vLLM-Omni keeps a job in its memory (its `VIDEO_STORE`) and the file on
     its own disk (`VLLM_OMNI_SERVER_STORAGE__PATH`, here inside the container, so a stopped, restarted
     or moved replica takes its files with it). So a job belongs to one replica for its whole life: the

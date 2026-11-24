@@ -435,7 +435,8 @@ async def playground_image_options(request: Request, model: Optional[str] = None
 def video_options(model: Optional[str], caller: KeyCaller) -> dict:
     """What a video model's deployments take (1.3), for the Playground's Video panel: sizes (the default, the
     largest side, the multiple), lengths (the default, the longest), frames per second, the longest prompt,
-    how long results are kept (over every deployment of the route: what at least one takes)."""
+    how long results are kept (over every deployment of the route: what at least one takes), and the start image
+    (1.5.5)."""
     if not model:
         raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
     route = proxy.check_access(caller, _route(model), model, videogen.ENDPOINT)
@@ -447,7 +448,8 @@ def video_options(model: Optional[str], caller: KeyCaller) -> dict:
             "max_pixels": max(f.max_pixels for f in fs), "multiple": min(f.multiple for f in fs),
             "seconds": first.seconds, "max_seconds": max(f.max_seconds for f in fs), "fps": first.fps,
             "max_steps": max(f.max_steps for f in fs), "max_prompt_chars": max(f.max_prompt for f in fs),
-            "keep_minutes": max(f.keep for f in fs) // 60}
+            "keep_minutes": max(f.keep for f in fs) // 60,
+            **dict(zip(("image_input", "max_input_side"), videogen.start_image(fs)))}   # 1.5.5 (#143)
 
 
 async def _console(request: Request):

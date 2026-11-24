@@ -135,9 +135,11 @@ class Recorder:
                deployment_id: Optional[int], status: int, latency_ms: float, prompt_tokens: int = 0,
                completion_tokens: int = 0, limited: bool = False, target: str = "local", cached_tokens: int = 0,
                reasoning_tokens: int = 0, spilled: bool = False, cost_picos: Optional[int] = 0,
-               cost_method: str = pricing.LOCAL, units: Optional[dict] = None) -> None:
+               cost_method: str = pricing.LOCAL, units: Optional[dict] = None, request: bool = True) -> None:
         """One finished request. cost_picos None (or cost_method "unpriced"): its cost is unknown.
-        `units`: the request's counts of UNITS ({"media_items": 2}); unknown names are ignored."""
+        `units`: the request's counts of UNITS ({"media_items": 2}); unknown names are ignored. `request` False (1.5.5):
+        only the units are added, to the request counted on its own when it ends (a video job's start image, counted
+        when the job is accepted)."""
         slot = (day_of(self.clock()), source, int(key_id or 0), int(user_id or 0), username or "", (model or "")[:128],
                 (target or "local")[:32])
         with self._lock:
@@ -146,6 +148,11 @@ class Recorder:
                 c = self._pending[slot] = _Count()
             if deployment_id is not None:
                 c.deployment_id = deployment_id
+            for name, n in (units or {}).items():
+                if name in UNITS:
+                    setattr(c, name, getattr(c, name) + max(0, int(n or 0)))
+            if not request:
+                return
             c.requests += 1
             c.errors += 1 if status >= 400 and status != 499 else 0  # 499: the client went away
             c.limited += 1 if limited else 0
@@ -155,9 +162,6 @@ class Recorder:
             c.reasoning_tokens += max(0, int(reasoning_tokens or 0))
             c.spilled += 1 if spilled else 0
             c.add_cost(cost_picos, cost_method)
-            for name, n in (units or {}).items():
-                if name in UNITS:
-                    setattr(c, name, getattr(c, name) + max(0, int(n or 0)))
             c.latency_ms_sum += int(latency_ms)
             c.buckets[bucket_of(latency_ms)] += 1
 

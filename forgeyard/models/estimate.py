@@ -742,6 +742,13 @@ def _video_rest(est: Estimate, meta: dict, recipe: Recipe, params: dict, gpus: i
             est.notes.append("The pipeline runs on one GPU; the others are reserved but idle.")
     est.notes.append(f"Sized for the deployment's caps: videos of up to {vs.max_seconds} s at up to "
                      f"{vs.max_w}x{vs.max_h}. Raising them raises this.")
+    from forgeyard.models import videoinput
+
+    if videoinput.takes_image(meta):
+        # 1.5.5 (#143): Wan2.2-TI2V-5B puts the start image's latent in place of the first latent frame (no more tokens);
+        # its VAE encode runs before the denoiser and is smaller than the decode above.
+        est.notes.append("Image to video: the start image adds no tokens, and its encode runs before the denoiser, "
+                         "within the VAE decode counted here. Not yet measured with a start image.")
     return est
 
 

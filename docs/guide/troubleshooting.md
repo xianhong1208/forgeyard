@@ -821,7 +821,8 @@ unpack .zip engines" in the placement: update it.
 | `video_too_long` | `seconds` over the deployment's *Longest video* | Ask for fewer seconds, or raise it (memory grows with it) |
 | `video_too_large` | A side over *Largest side*, or more pixels a frame than the default size scaled to it | Ask for the model's own size (832x480 for Wan2.1), or raise *Largest side* |
 | `invalid_size` | Not `WIDTHxHEIGHT`, or sides that are not multiples of 16 (32 for Wan2.2-5B) | Use the size the message suggests |
-| `input_reference_not_supported` | An image or video reference: only text to video in 1.3 | Describe it in the prompt |
+| `input_reference_not_supported` | A start image for a model that makes videos from text only, or a reference the engine would fetch itself (`image_reference`, `video_reference`, `audio_reference`) | Leave it out, or use a model that takes a start image (Wan2.2-TI2V-5B) |
+| `input_reference_required` | An image-to-video model without a start image | Send it as `input_reference` |
 | `too_many_steps`, `prompt_too_long` | Over *Most steps* or *Longest prompt* | Ask for fewer, or shorten the prompt |
 
 **429 `too_many_jobs`:** your key (or you, in the Playground) already has *Jobs per key* videos waiting

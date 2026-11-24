@@ -162,7 +162,8 @@ class FakeVideos:
                 if "multipart/form-data" not in ctype:
                     return self._json(422, {"detail": [{"msg": "Field required", "loc": ["body", "prompt"]}]})
                 fields = parse_form(raw, ctype)
-                engine.posts.append({"fields": fields, "content_type": ctype})
+                engine.posts.append({"fields": fields, "content_type": ctype, "files": parse_files(raw, ctype),
+                                     "raw": raw})
                 if engine.status:
                     return self._json(engine.status, {"detail": "engine says no"})
                 if not fields.get("prompt"):
@@ -235,6 +236,14 @@ def parse_form(raw: bytes, ctype: str) -> dict:
 
     _, parts = multipart.parse(raw, ctype)
     return {p.name: (p.content.decode("utf-8", "replace") if not p.is_file else {"file": True}) for p in parts}
+
+
+def parse_files(raw: bytes, ctype: str) -> list[tuple[str, str, bytes]]:
+    """The file parts of a multipart body: (field name, its header lines, its bytes) (1.5.5: the start image)."""
+    from forgeyard.gateway import multipart
+
+    _, parts = multipart.parse(raw, ctype)
+    return [(p.name, p.head.decode("latin-1"), p.content) for p in parts if p.is_file]
 
 
 if __name__ == "__main__":

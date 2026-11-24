@@ -28,11 +28,28 @@ version until 1.0.
 - Image recipes gain *Largest request* (`max_body_mb`, 64 MiB), and the estimate of a model that edits counts its
   input images (vLLM-Omni's edit pipelines resize them to about a megapixel; stable-diffusion.cpp works on them at
   their size).
+- **Image to video at `/v1/videos` (#143).** A start image as OpenAI's `input_reference`: a file in
+  `multipart/form-data` (what OpenAI's SDK sends for `videos.create`), or in JSON `{"image_url": …}` (a base64 data:
+  URL, or an http(s) URL the gateway fetches under the media rules once the key may use the model). It gets the checks
+  of an edit's input images (bytes, PNG / JPEG / WebP by its first bytes, its size from its header against the
+  deployment's new *Largest start image*, 2,048 pixels) and reaches the engine as the checked file only, with an
+  explicit size. Wan2.2-TI2V-5B takes one optionally; image-to-video pipelines vLLM-Omni 0.32.0 runs
+  (Wan2.2-I2V-A14B, SANA-Video I2V, HunyuanVideo-1.5 I2V) can now be added and need one (400
+  `input_reference_required` without it); other video models refuse it (400 `input_reference_not_supported`).
+  Usage counts the start image (`media_items`, `bytes_in`) when the job is accepted. The memory estimate is unchanged
+  by a start image (not yet measured with one).
+- What a video model does with a start image is in its catalog entry: `meta.video.image_input` (`none`, `optional`,
+  `required`), from its diffusers pipeline class. No migration: entries from before are read from their class, so a
+  Wan2.2-TI2V-5B added in 1.3 takes start images without being added again. The Playground's video options say it
+  too (`image_input`, `max_input_side`).
 
 ### Changed
 
 - `/v1/images/variations` stays closed (404 `endpoint_not_supported`), now saying to send the image to
   `/v1/images/edits` with `n` and a prompt.
+- `/v1/videos`: `input_reference` sent in another shape than a file or `{"image_url"}` (a bare string) is now 400
+  `invalid_request`; a start image to a text-to-video model stays 400 `input_reference_not_supported`. vLLM-Omni's
+  `image_reference`, `video_reference`, `audio_reference` and `input_references` stay refused.
 
 ### Fixed
 

@@ -240,7 +240,7 @@ local_dirs = ["/data/models"]
 | `POST /v1/images/generations` | 圖片生成（1.3）：OpenAI 的請求格式，圖片只以 base64（`b64_json`）傳回。見[圖片生成](#images) | 否 |
 | `POST /v1/images/edits` | 圖片編輯（1.5.5）：提示加上要編輯的圖片，以 `multipart/form-data`（OpenAI SDK 送的格式）或帶 `images[].image_url` 的 JSON 送出；圖片以 base64 傳回。見[圖片編輯](#image-edits) | 否 |
 | `POST /v1/images/variations` | 和 OpenAI 一樣不提供：一律回應 404 `endpoint_not_supported`。請改把圖片送到 `/v1/images/edits`，附上 `n` 和提示 | — |
-| `POST /v1/videos` | 影片生成（1.3）：要求一段影片，立刻回應這個工作。可用 JSON、`multipart/form-data`（OpenAI SDK 送的格式）或 URL 編碼表單。見[影片生成](#video) | 否 |
+| `POST /v1/videos` | 影片生成（1.3）：要求一段影片，立刻回應這個工作。可用 JSON、`multipart/form-data`（OpenAI SDK 送的格式）或 URL 編碼表單。1.5.5 起可用 `input_reference` 附上起始圖片（圖片轉影片）。見[影片生成](#video) | 否 |
 | `GET /v1/videos` | 這把金鑰自己的影片，最新的在前：`limit`（1 到 100，預設 20）、`after`（看過的最後一個 id）、`order`（`desc` 或 `asc`） | — |
 | `GET /v1/videos/{id}` | 一個影片工作：它的狀態與進度 | — |
 | `GET /v1/videos/{id}/content` | 完成的影片，`video/mp4`，從製作它的副本串流過來。只有 `variant=video`；`Range` 請求回應 206 | — |
@@ -429,10 +429,21 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | `size` | `WIDTHxHEIGHT`；沒指定時用 *Default size*（模型自己的：Wan2.1 為 832x480，Wan2.2 為 1280x704）。每一邊最多 *Largest side*（`max_side`，0 = 模型自己的長邊），而且每格像素不超過預設尺寸放大到該邊時的像素；超過時回應 400 `video_too_large`。邊長是 16 的倍數（Wan2.2-5B 為 32）；否則回應 400 `invalid_size` |
 | `num_inference_steps` | 去噪步數，最多為 *Most steps*（`max_steps`，50）；超過時回應 400 `too_many_steps`。沒指定時用 *Default steps*，否則用模型自己的 |
 | `negative_prompt`、`guidance_scale`、`seed` | 轉送 |
-| `input_reference`（以及 vLLM-Omni 的 `image_reference`、`video_reference`、`audio_reference`） | 拒絕，回應 400 `input_reference_not_supported`：1.3 只支援文字轉影片 |
+| `input_reference` | 起始圖片（1.5.5，圖片轉影片）：`multipart/form-data` 裡的檔案（OpenAI SDK 送的格式），或 JSON 的 `{"image_url": "data:image/png;base64,…"}` 或 `http(s)` 網址。網址**由閘道下載**（推論引擎從不自己下載），規則和[對話中的圖片、音訊與影片](#images-audio-and-video-in-chat)相同，而且要先確認金鑰可以使用這個模型才會下載。`file_id`：400 `file_id_not_supported`。只能一張（兩個檔案：400 `too_many_input_images`）。檢查方式和圖片編輯的輸入圖片相同：必須是 PNG、JPEG 或 WebP（從檔案開頭的位元組判斷；否則 400 `unsupported_image_format`），最多 `MEDIA_FETCH_MAX_MB`（413 `media_too_large`），尺寸從檔頭讀出、絕不解碼（讀不出時 400 `invalid_image`），寬高都不超過部署的 *Largest start image*（`max_input_side`，2,048；超過時 400 `input_image_too_large`）。推論引擎會把它縮放成影片的尺寸 |
+| `image_reference`、`video_reference`、`audio_reference`、`input_references`（vLLM-Omni 的） | 拒絕，回應 400 `input_reference_not_supported`：推論引擎會自己下載這些網址，或讀取影片和聲音 |
 | `quality`、`user` | 接受但忽略 |
 
-其他東西都不會送到推論引擎：閘道只送出提示、模型、尺寸、影格數、每秒影格數和上面的欄位（絕不送 vLLM-Omni 的 `lora`、`extra_params` 或影格插補的路徑）。
+其他東西都不會送到推論引擎：閘道只送出提示、模型、尺寸、影格數、每秒影格數和上面的欄位，以及檢查過的起始圖片（檔案欄位 `input_reference`；絕不送網址，也絕不送 vLLM-Omni 的 `lora`、`extra_params`、影格插補的路徑或其他檔案）。尺寸一定會送：沒有尺寸時，推論引擎會做成起始圖片的尺寸。
+
+**哪些模型接受起始圖片**（1.5.5）從模型的 diffusers pipeline 判斷，顯示在模型目錄裡（`video.image_input`）：
+
+| `image_input` | 模型 | 請求 |
+|---|---|---|
+| `optional` | Wan2.2-TI2V-5B（`WanPipeline`，帶 `expand_timesteps`） | 有沒有 `input_reference` 都可以 |
+| `required` | vLLM-Omni 0.32.0 能執行的圖片轉影片 pipeline：`WanImageToVideoPipeline`（Wan2.2-I2V-A14B）、`SanaImageToVideoPipeline`、`HunyuanVideo15ImageToVideoPipeline` | 沒有時回應 400 `input_reference_required` |
+| `none` | 其他文字轉影片 pipeline（Wan2.1-T2V-1.3B） | 帶了時回應 400 `input_reference_not_supported` |
+
+模型的能力會先判斷：確認金鑰可以使用模型後，不接受起始圖片的模型收到起始圖片時，會在檢查圖片或下載網址之前就拒絕。1.5.5 以前加入的 Wan2.2-TI2V-5B 不用重新加入，就能接受起始圖片。其他圖片轉影片和影片轉影片的 pipeline 不能加入成影片模型。記憶體估算不因起始圖片而改變（Wan2.2-TI2V-5B 用它取代第一個潛在影格，它的編碼在去噪之前執行）；這一點還沒有實測。
 
 **工作**採用 OpenAI 的格式：`{"id", "object": "video", "model", "status", "progress", "created_at",
 "completed_at", "expires_at", "size", "seconds", "quality", "remixed_from_video_id", "error"}`。
@@ -475,6 +486,7 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | `keep_minutes`（*Keep results*，進階） | `1440` | 完成的影片可以取回多久 |
 | `timeout`（*Longest job*，進階） | `3600` | 從要求開始算的秒數；到時還在製作的工作會被取消並回報失敗 |
 | `max_prompt_chars`（*Longest prompt*，進階） | `2000` | 更長的提示：400 |
+| `max_input_side`（*Largest start image*，進階） | `2048` | 圖片轉影片（1.5.5）：起始圖片最寬或最高的像素數，從檔頭讀出；超過時 400 |
 | `offload`（*Offload to host memory*，進階） | `none` | `model`：卡上只放正在工作的元件（`--enable-cpu-offload`）；較慢 |
 
 **每個工作在結束時計入一次**（`GET /api/usage` 與 **用量** 頁面）：
@@ -484,11 +496,12 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | 請求數 | 每個工作一個。完成的算有回應；失敗的算一個錯誤，其他什麼都不算；製作中被刪除的算 499（不是錯誤）。被拒絕的請求（400、404、429）在被拒絕時計入 |
 | `media_ms` | 影片的長度（毫秒），用推論引擎回報的值（否則用影格數 / 每秒影格數） |
 | `busy_ms` | 從看到工作進入製作中到它做完的時間，乘以部署占用的 GPU 數：也就是 GPU 時間 |
+| `media_items`、`bytes_in` | 起始圖片（1.5.5）：1 張和它的大小（位元組），在工作被接受時計入（推論引擎那時已經收到），不管工作之後怎樣，也不會多算一個請求 |
 | tokens | 不計 |
 
 試用區的 **影片** 面板使用 `/api/playground/videos`（`POST`、`GET`）、`GET
 /api/playground/videos/options?model=<model>`、`GET` 與 `DELETE /api/playground/videos/{id}`，以及 `GET
-/api/playground/videos/{id}/content`：規則相同，以登入的使用者身分（session cookie 與主控台的 `X-Forgeyard: 1` 標頭），只能看到自己的工作，計為 console。工作存放在伺服器的資料庫裡（資料表 `video_jobs`，migration `0014`）。
+/api/playground/videos/{id}/content`：規則相同，以登入的使用者身分（session cookie 與主控台的 `X-Forgeyard: 1` 標頭），只能看到自己的工作，計為 console（1.5.5 起，選項也會依模型的各個部署列出 `image_input` 和 `max_input_side`）。工作存放在伺服器的資料庫裡（資料表 `video_jobs`，migration `0014`）。
 
 ### 視覺
 
@@ -620,11 +633,11 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | 400 | `generation_not_supported` | 圖片生成（1.5.5）：這個模型只會編輯圖片（Qwen-Image-Edit） | 把圖片和提示送到 `/v1/images/edits` |
 | 400 | `edits_not_supported` | 圖片編輯（1.5.5）：這個模型只從文字產生圖片，不會編輯 | 改用 `/v1/images/generations`，或改用會編輯的模型 |
 | 400 | `mask_not_supported` | 圖片編輯（1.5.5）：帶了 `mask` | 拿掉遮罩，在提示裡說明要改什麼 |
-| 400 | `file_id_not_supported` | 圖片編輯（1.5.5）：`images` 裡用了 `file_id` | 改以 `image_url` 或檔案送出圖片 |
-| 400 | `too_many_input_images` | 圖片編輯（1.5.5）：輸入圖片超過部署的 *Input images*（或超過 16 張） | 少送幾張，或調高 `max_input_images` |
-| 400 | `input_image_too_large` | 圖片編輯（1.5.5）：有輸入圖片的寬或高超過部署的 *Largest input* | 先縮小圖片，或調高 `max_input_side` |
-| 400 | `unsupported_image_format` | 圖片編輯（1.5.5）：輸入圖片不是 PNG、JPEG 或 WebP（例如 HEIC 照片、GIF） | 先轉換格式 |
-| 400 | `invalid_image` | 圖片編輯（1.5.5）：輸入圖片的檔頭讀不出尺寸，或 data: URL 不是 base64 | 重新送出檔案 |
+| 400 | `file_id_not_supported` | 圖片編輯（1.5.5）：`images` 裡用了 `file_id`。影片（1.5.5）：`input_reference` 用了 `file_id` | 改以 `image_url` 或檔案送出圖片 |
+| 400 | `too_many_input_images` | 圖片編輯（1.5.5）：輸入圖片超過部署的 *Input images*（或超過 16 張）。影片（1.5.5）：`input_reference` 檔案不只一個 | 少送幾張，或調高 `max_input_images` |
+| 400 | `input_image_too_large` | 圖片編輯（1.5.5）：有輸入圖片的寬或高超過部署的 *Largest input*。影片（1.5.5）：起始圖片超過 *Largest start image* | 先縮小圖片，或調高 `max_input_side` |
+| 400 | `unsupported_image_format` | 圖片編輯與影片的起始圖片（1.5.5）：圖片不是 PNG、JPEG 或 WebP（例如 HEIC 照片、GIF） | 先轉換格式 |
+| 400 | `invalid_image` | 圖片編輯與影片的起始圖片（1.5.5）：圖片的檔頭讀不出尺寸，或 data: URL 不是 base64 | 重新送出檔案 |
 | 400 | `labels_required` | 視覺（1.4.4）：沒告訴零樣本偵測模型要找什麼，或沒給零樣本分類器它的標籤；文字分類（1.5.4）：零樣本模型沒收到 `labels` | 送 `labels` |
 | 400 | `labels_not_supported` | 視覺（1.4.4）：固定類別的偵測模型或分類器收到 `labels`；文字分類（1.5.4）：固定標籤的模型收到 `labels` | 拿掉 `labels`，或改用零樣本模型 |
 | 400 | `too_many_pairs` | 文字分類（1.5.4）：文字數 x `labels` 超過零樣本部署的 *Zero-shot pairs per request* | 少送幾段文字或幾個標籤，或調高 `max_pairs` |
@@ -638,7 +651,8 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | 400 | `prompt_too_long` | 圖片與影片：`prompt` 或 `negative_prompt` 超過部署的 *Longest prompt* | 縮短它，或調高 `max_prompt_chars` |
 | 400 | `video_too_long` | 影片：`seconds` 超過部署的 *Longest video* | 要短一點的秒數，或調高 `max_seconds` |
 | 400 | `video_too_large` | 影片：某一邊超過 *Largest side*，或每格像素比預設尺寸放大到該邊時還多 | 要小一點的尺寸，或調高 `max_side` |
-| 400 | `input_reference_not_supported` | 影片：帶了 `input_reference`（或 `image_reference`、`video_reference`、`audio_reference`）：1.3 只支援文字轉影片 | 改在提示裡描述 |
+| 400 | `input_reference_not_supported` | 影片：只從文字做影片的模型收到 `input_reference`（1.5.5），或帶了 `image_reference`、`video_reference`、`audio_reference`、`input_references`（一律不接受） | 拿掉它，或把起始圖片以 `input_reference` 送給接受起始圖片的模型 |
+| 400 | `input_reference_required` | 影片（1.5.5）：圖片轉影片的模型沒有收到 `input_reference` | 附上起始圖片 |
 | 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；推論引擎只做影片 | 改用 `variant=video` |
 | 4xx/5xx | `engine_error` | 圖片與影片：推論引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
 | 400 | `structured_output_not_supported` | 請求要求結構化輸出（JSON 的 `response_format`、`structured_outputs`、`guided_*`、`grammar`、`json_schema`、strict 工具），但提供這個模型的每個供應商都會拿掉或忽略它。訊息會列出它們和參數 | 拿掉這個參數，或改用接受它的目標（OpenAI 相容伺服器、本機部署） |
