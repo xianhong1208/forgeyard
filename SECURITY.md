@@ -28,9 +28,10 @@ Forgeyard is built for **one organisation's own machines on a LAN or VPN**. It i
 face the internet on its own; put it behind a VPN or a reverse proxy you trust (see
 [docs/https-and-trust.md](docs/https-and-trust.md)).
 
-- **Admins and operators are trusted with the machines.** Anyone who may create a workload can run
-  code on them, which is why only those two roles can. Users can only call deployed models with
-  their own API keys and see their own usage.
+- **Admins and operators are trusted with the machines.** Anyone who may deploy a model starts engines
+  on them, and an admin's custom engine can run any image or program, which is why only those two roles
+  can. Users can only call deployed models with their own API keys and see their own usage. (Apps, your
+  own workloads made through the API, were removed in 1.5.3.)
 - **An agent runs with the rights it is given.** As root, with the host's Docker socket, it
   controls that host. Process workloads never run as root (`--workload-user`), get an empty
   environment and only their GPUs; containers never run `--privileged`. See *Isolation* in
