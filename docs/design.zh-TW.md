@@ -421,9 +421,9 @@ Kong 與 GPUStack 之後決定。
   embeddings 路由，模型也要相符。每個登入的人都能讀路由（含是否可用，以及種類：local、mixed 或 cloud）；admin 才能修改（稽核紀錄
   `route.created`、`route.changed`、`route.deleted`）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
   名稱不變，所以行為完全和以前一樣。
-- **在 console 的位置**（1.4，#81）。部署自己的路由就是它的**雲端備援**，在部署的頁面上編輯；Serving 清單會標出有雲端層的部署
+- **在 console 的位置**（1.4，#81）。部署自己的路由就是它的**分流與備援**（1.5.4 之前叫「雲端備援」：後面的層也可以放另一個本機部署），在部署的頁面上編輯；Serving 清單會標出有雲端層的部署
   （*→ Gemini*）。admin 自己建立的路由在 **Cloud → Cloud models**：裡面有供應商模型的是*雲端模型*，其他列在 *Other names for
-  deployments*；每個部署的頁面會連到它另外回應的名稱。console 用「雲端備援」和「雲端模型」，「路由」只留作 API 的用語
+  deployments*；每個部署的頁面會連到它另外回應的名稱。console 用「分流與備援」和「雲端模型」，「路由」只留作 API 的用語
   （`/api/routes`）。舊網址（`?tab=routes`、`/models/routes/<id>`、`/providers…`）會轉址。
 - **溢出規則，只在第一個 byte 之前。** 這一層 *unavailable*（沒有就緒的副本、每個連線都失敗）、*busy*（每個就緒副本經由這台
   server 處理中的請求數都達到部署的 `concurrency`；名額是原子地取得的，兩個請求不會同時拿到最後一個；`wait_ms` 會先等名額）或
