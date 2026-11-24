@@ -146,7 +146,10 @@ def carry_over_keys(db: DbSession, node: Node, inventory: InventoryIn, existing:
 def apply_inventory(db: DbSession, node: Node, inventory: InventoryIn) -> None:
     now = utcnow()
     existing = {a.key: a for a in node.accelerators}
-    carry_over_keys(db, node, inventory, existing)
+    renamed = carry_over_keys(db, node, inventory, existing)
+    from forgeyard.machines import gpu_changes
+
+    gpu_changes.track(db, node, inventory, renamed, now)  # 1.5.4: cards added or removed since the last report
     seen: set[str] = set()
     for position, item in enumerate(inventory.accelerators):
         if item.key in seen:
@@ -188,7 +191,10 @@ def apply_hello(db: DbSession, node: Node, hello: HelloIn, ip: Optional[str]) ->
     node.runtimes = list(hello.runtimes)
     node.features = list(hello.features)
     listed = (node.runtime_info or {}).get("images")
-    node.runtime_info = dict(hello.runtime_info)
+    from forgeyard.machines.gpu_changes import KEPT_KEYS
+
+    kept = {k: v for k, v in (node.runtime_info or {}).items() if k in KEPT_KEYS}
+    node.runtime_info = {**dict(hello.runtime_info), **kept}  # 1.5.4: the GPUs last trusted, and their changes
     if listed is not None:
         # 1.4.3 (#140): the machine's last image listing outlives a reconnect (forgeyard/machines/engineimages.py).
         node.runtime_info["images"] = listed

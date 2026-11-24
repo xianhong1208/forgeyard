@@ -1206,6 +1206,36 @@ To keep a model on one card next to other programs, deploy it with **GPU sharing
 **Share VRAM**: it then reserves only its estimate, and vLLM is told to use just that much (see
 [vLLM does not start on a shared card](troubleshooting.md#vllm-does-not-start-on-a-shared-card)).
 
+## Add or remove a GPU on a machine
+
+After you install a GPU in a machine (or take one out), and the host's driver lists it (`nvidia-smi` or `amd-smi`):
+
+1. **Re-create the agent** with the **Update the agent** command on the machine's page
+   ([how](#update-an-agent)). An agent container has only the GPU devices it was created with, so it does not see a
+   GPU installed later until it is created again; the command passes the host's GPU devices as they are when you run
+   it. An agent installed with install.sh or run from a checkout only needs a restart.
+2. **Allow it, if the machine has a GPU access list** ([Restrict GPUs](#restrict-gpus-on-a-shared-machine)):
+   **Change GPU access** and tick the new card. A machine with a list never uses a new card by itself; a machine
+   without one uses it at once.
+
+What Forgeyard tells you (admins, in **Setup health** and as a banner on **Machines** and the machine's page):
+
+- *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8* (`machine-gpus-hidden`): from 1.5.4 the agent counts the
+  host's GPUs on its PCI bus, which a container sees whole, and compares them with the GPUs it can use. It names the
+  PCI address of each one it does not see. Re-create the agent as in step 1. A GPU that is not for Forgeyard (a
+  desktop CPU's integrated graphics, say): snooze it.
+- *New GPU on gpu-01: allow GPU #8?* (`machine-gpu-not-allowed`), or, without a GPU access list, *New GPU on gpu-01 is
+  in use* (`machine-gpu-added`, a note).
+- *gpu-01 no longer reports GPU #3* (`machine-gpu-removed`), with the deployments that were placed on it. Forgeyard
+  does not move a replica because its GPU is gone: it keeps its place. Restart those deployments (stop and start, or
+  edit them) and placement picks GPUs the machine has now, or another machine.
+
+These stay for 7 days after the change. A card is told by its UUID (an AMD card by its PCI address), not by its
+number: a swapped card is one removed and one added, and renumbered cards are no change. When the agent cannot read
+its GPUs at all (the driver fails, or the container lost its device access) nothing is counted as removed. Every
+change is in the audit log as `node.gpus_changed`, with each card's model and memory, and the machine's page lists the
+recent ones under **GPU access**.
+
 ## Add people
 
 Admins, on **Users**:

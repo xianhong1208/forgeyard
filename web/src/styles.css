@@ -387,6 +387,10 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   border-radius: var(--radius); font-size: 11.5px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .gpu-access { margin: 0 0 8px; }
+.gpu-changes { margin-top: 10px; }
+.gpu-changes h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.gpu-changes ul { margin: 0; padding-left: 18px; font-size: 13px; }
+.gpu-changes li { overflow-wrap: anywhere; }
 .gpu-access-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; font-size: 13px; }
 .gpu-access-line > span { overflow-wrap: anywhere; min-width: 0; }
 .gpu-access-limited { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid #f3d39b; border-radius: 4px;

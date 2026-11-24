@@ -19,7 +19,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus, InvalidURI
 
 from forgeyard import __version__
-from forgeyard.agent import gpu_check, replica_tls, trust
+from forgeyard.agent import gpu_census, gpu_check, replica_tls, trust
 from forgeyard.agent.backoff import Backoff
 from forgeyard.agent.inventory import Inventory, fingerprint
 from forgeyard.agent.relay import RelayClient
@@ -226,6 +226,10 @@ class Agent:
                 msg["features"].append(FEATURE_IMAGE_SAVE)
             if getattr(self.supervisor, "can_remove_images", lambda: False)():
                 msg["features"].append(FEATURE_IMAGE_REMOVE)
+        # 1.5.4: the host's GPUs (sysfs) next to the ones this agent sees; servers before 1.5.4 drop it.
+        census = gpu_census.for_agent(inventory["accelerators"], simulated=self.inventory.simulated)
+        if census is not None:
+            msg.setdefault("runtime_info", {})["gpu_census"] = census
         return msg
 
     @property

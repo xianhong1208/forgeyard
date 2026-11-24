@@ -43,6 +43,13 @@ def accelerator_out(a: Accelerator, node: Node, assigned: dict[str, str]) -> dic
     }
 
 
+def _public_changes(n: Node) -> list[dict]:
+    from forgeyard.machines import gpu_changes
+
+    return [{**c, "removed": [{k: v for k, v in g.items() if k != "deployments"} for g in c.get("removed") or []
+                              if isinstance(g, dict)]} for c in gpu_changes.changes(n)]
+
+
 def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
     assigned = placement.usage(db, n.id).gpu_keys if db is not None else {}
     return {
@@ -55,7 +62,10 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [],
         # How the agent runs (1.4.2) stays out of the listing: admins get it as the update command.
         # Nor does its kept image listing (1.4.3): the engine pages and the machine's engine images show it.
-        "runtime_info": {k: v for k, v in (n.runtime_info or {}).items() if k not in ("install", "images")},
+        # 1.5.4: nor the GPUs last trusted (internal); its GPU changes without the deployments a removed GPU held
+        # (Setup health names those for admins).
+        "runtime_info": {**{k: v for k, v in (n.runtime_info or {}).items() if k not in ("install", "images", "gpu_set")},
+                         **({"gpu_changes": _public_changes(n)} if "gpu_changes" in (n.runtime_info or {}) else {})},
         # 1.4.2 (#122): why the agent should be updated (older, older protocol, a feature missing), or null.
         "agent_behind": agent_update.behind(n), "server_version": __version__,
         # 1.4.5 (#163): how the gateway reaches its replicas: plain (an older agent) or TLS, and its certificate.

@@ -215,6 +215,7 @@ local_dirs = ["/data/models"]
 | `DOCKER_HOST`、`DOCKER_CONFIG`、`CONTAINER_HOST`、`XDG_RUNTIME_DIR` | 傳給 `docker` 或 `podman` 指令，讓非預設的容器引擎 socket 或設定可以運作。agent 環境裡的其他東西都不會傳給推論引擎 |
 | `ROCM_PATH`、`ROCM_HOME` | ROCm 不在 `/opt/rocm` 時的安裝位置（AMD 卡） |
 | `FORGEYARD_AGENT_SIMULATION` | 設為 `1` 才允許 `--simulate-inventory FIXTURE`：agent 回報錄好的硬體資料，而不是自己的硬體。僅供開發和測試；伺服器會把這種機器標示為模擬 |
+| `FORGEYARD_AGENT_SYSFS` | 只在 `FORGEYARD_AGENT_SIMULATION=1` 時有效：一個和 `/sys/bus/pci/devices` 結構相同的目錄，模擬的 agent 會在裡面清點主機的 GPU（1.5.4）。沒有設定時，模擬的 agent 不會清點 |
 
 ## 閘道（/v1）
 
@@ -1048,6 +1049,30 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 稽核事件 `node.image_removed`（映像檔、它的 tag、指定它的 recipe、`ok`、釋出的位元組，或 agent 的 `code` 和原因），每次要求 agent 刪除都會記錄；在那之前就被拒絕的不會記錄。
 
+## 加裝、拆下或看不到的 GPU
+
+從 1.5.4 起提供（不需要遷移：以下內容都存在機器的 `runtime_info` 裡，agent 的 hello 本來就會填寫它，另外也記錄在稽核紀錄裡）。該怎麼處理：[在機器上加裝或拆下 GPU](how-to.md#add-or-remove-a-gpu-on-a-machine)。
+
+**agent 清點什麼。** 每次連線時，agent 會列出 `/sys/bus/pci/devices` 裡主機的 PCI function（容器也看得到完整的匯流排），並清點其中的 GPU：NVIDIA（vendor `0x10de`）class 為 `0x0300`（VGA）或 `0x0302`（3D 控制器）；AMD（vendor `0x1002`）class 為 `0x0300`、`0x0302`、`0x0380`（Instinct MI100–MI250）或 `0x1200`（MI300）。卡上的音訊、USB-C 之類的 function、NVSwitch，以及 SR-IOV 的虛擬 function 都不算；APU 的顯示晶片和獨立顯示卡一樣算一張 GPU。agent 會送出 `runtime_info.gpu_census`，`GET /api/machines/{id}` 會顯示它：
+
+```json
+{"host_gpus": 9, "visible_gpus": 8, "missing": ["0000:c1:00.0"],
+ "vendors": {"nvidia": {"host": 9, "visible": 8, "missing": ["0000:c1:00.0"]}}}
+```
+
+`visible` 是 agent 的 NVML 或 amd-smi 列出的 GPU 數量；`missing` 是主機上沒有任何一張對應得到的 PCI 位址。1.5.4 之前的伺服器會捨棄這個欄位，1.5.4 之前的 agent 則不會送出（這時不會有提醒）。
+
+**伺服器記錄什麼。** 伺服器會保留每台機器上次回報的 GPU，用 key 辨識（UUID；AMD 的卡用 PCI 位址）；某次回報多了或少了卡時，就會在 `runtime_info.gpu_changes` 加上一筆（保留最近 20 筆）：
+
+```json
+{"at": "2026-11-24T09:12:03+00:00", "gpus": 9,
+ "added": [{"key": "nvidia:GPU-…", "vendor": "nvidia", "index": 8, "model": "NVIDIA A100 80GB PCIe",
+            "vram_total": 85899345920, "pci_bus_id": "00000000:C1:00.0"}],
+ "removed": []}
+```
+
+拆下的卡原本放了哪些部署（`deployments`），只會寫在稽核紀錄和設定健康檢查裡，不會出現在 `GET /api/machines`。以下不算變更：機器的第一次回報（或升級到 1.5.4 後的第一次回報）、以新的 key 回報並註明舊 key 的卡，以及該次回報中收集器失敗的廠商的卡。每次變更都會記錄稽核事件 `node.gpus_changed`（執行者為 `agent`）：`added`、`removed`，以及變更後這台機器的 GPU 數量 `gpus`。對應的設定健康檢查項目是 `machine-gpus-hidden`、`machine-gpu-not-allowed`、`machine-gpu-added` 和 `machine-gpu-removed`（[表格](#setup-health-checks)）。
+
 ## 設定健康檢查的項目
 
 管理員會在 **開始使用 → 設定健康檢查** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。
@@ -1081,6 +1106,10 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
 | `machine-loopback-address` | 警告 | 不是伺服器主機的機器把副本公開在 loopback 位址上（透過 tunnel 或 proxy），而且它的連接埠範圍沒有轉送到伺服器的主機（[做法](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)） |
 | `machine-gpu-access-lost` | 錯誤 | 線上機器的新行程打不開它的 GPU（agent 每 5 分鐘以workload 帳號檢查一次；只用 `--gpus` 啟動的 agent 容器，在主機執行 `systemctl daemon-reload` 後會失去這份存取權）。這段期間不會把行程類 workload放到那些 GPU 上；修正連結會開啟機器的更新指令（[做法](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)） |
+| `machine-gpus-hidden` | 警告 | 線上機器的主機 PCI 匯流排上的 GPU 比它的 agent 看到的多（1.5.4 起的 agent 會清點），並列出每張看不到的卡的 PCI 位址：通常是 agent 容器建立之後才裝上的 GPU。修正連結會開啟機器的更新指令（[做法](how-to.md#add-or-remove-a-gpu-on-a-machine)） |
+| `machine-gpu-not-allowed` | 警告 | 最近 7 天內，有 GPU 存取清單的機器上出現了一張不在清單裡的 GPU：管理員允許之前，Forgeyard 不會使用它 |
+| `machine-gpu-added` | 說明 | 最近 7 天內，沒有 GPU 存取清單的機器上出現了一張 GPU：放置時已經會使用它 |
+| `machine-gpu-removed` | 警告 | 最近 7 天內，機器不再回報某張 GPU，並列出原本放在它上面的部署（重新啟動之前，它們會留在原來的位置） |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
