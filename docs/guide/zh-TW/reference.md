@@ -703,7 +703,7 @@ Link: </guide/en/reference#apps-removed>; rel="deprecation"; type="text/html", <
 3. **每把 `/x/` 設定不是 *none* 的 API 金鑰一筆稽核紀錄**，動作是 `api_key.x_access_removed`，對象是金鑰的名稱：`reason`、`key`、`prefix`、`owner`、`workloads`（`listed` 或 `all`）、`workload_list`、`locked_by` 和 `revoked`（已撤銷的金鑰也會記錄）。
 4. 刪除 `api_keys.workloads`、`api_keys.workload_list`、`api_keys.workloads_locked_by` 和 `workloads.gateway` 這幾個欄位。
 
-模型部署、它們的 workload 和試跑都不會被動到。升級後 30 天內，**設定健康檢查**會顯示 `apps-removed`（資訊），列出移除了什麼，並附上稽核紀錄的連結；稽核紀錄會一直保留這些紀錄。
+模型部署、它們的 workload 和試跑都不會被動到。升級後 30 天內，**設定健康檢查**會顯示 `apps-removed`（資訊），列出移除了什麼，並附上稽核紀錄的連結；稽核紀錄會一直保留這些紀錄（已撤銷金鑰的紀錄只在稽核紀錄裡：它沒有失去任何還能用的東西）。
 
 ### 升級之前
 

@@ -279,7 +279,8 @@ def test_fy_apprm_007_the_agent_stops_a_removed_app_when_it_is_next_sent_its_wor
 
 def test_fy_apprm_008_setup_health_says_what_the_upgrade_removed_for_a_month(owner):
     """FY-APPRM-008: no finding without audit entries; an info finding naming the apps and keys while the entries are
-    younger than 30 days (snoozable, on Machines, linking to the audit log); none after; never apps-deprecated."""
+    younger than 30 days (snoozable, on Machines, linking to the audit log; a revoked key is left to the audit log);
+    none after; never apps-deprecated."""
     from forgeyard import advisor
     from forgeyard.config import get_settings
 
@@ -296,6 +297,8 @@ def test_fy_apprm_008_setup_health_says_what_the_upgrade_removed_for_a_month(own
         for action, target in (("workload.removed_in_upgrade", "notebook"), ("workload.removed_in_upgrade", "nightly"),
                                ("api_key.x_access_removed", "ci-key"), ("workload.deleted", "other")):
             db.add(AuditEvent(action=action, actor_name="forgeyard", target=target, detail={}))
+        db.add(AuditEvent(action="api_key.x_access_removed", actor_name="forgeyard", target="old-key",
+                          detail={"revoked": True}))
         db.commit()
     finally:
         db.close()
@@ -303,7 +306,7 @@ def test_fy_apprm_008_setup_health_says_what_the_upgrade_removed_for_a_month(own
     assert f.severity == "info" and f.snoozable and f.pages == ("machines",) and f.fix_url == "/audit"
     assert f.title == "The 1.5.3 upgrade removed 2 apps" and f.fix_label == "Open the audit log"
     assert "2 apps (notebook, nightly)" in f.detail and "1 API key (ci-key)" in f.detail
-    assert "workload.removed_in_upgrade" in f.detail and "other" not in f.detail
+    assert "workload.removed_in_upgrade" in f.detail and "other" not in f.detail and "old-key" not in f.detail
     sql("UPDATE audit_events SET at = :t WHERE action LIKE '%removed%'", t=utcnow() - timedelta(days=31))
     assert "apps-removed" not in findings()
     sql("UPDATE audit_events SET at = :t WHERE target = 'ci-key'", t=utcnow())

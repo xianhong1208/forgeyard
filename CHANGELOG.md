@@ -37,7 +37,7 @@ version until 1.0.
     `api_key.x_access_removed` (the key keeps working for models), and drops `api_keys.workloads`,
     `api_keys.workload_list`, `api_keys.workloads_locked_by` and `workloads.gateway`. A model deployment's workload
     and an engine trial's are never touched. For 30 days **Setup health** says what it removed (`apps-removed`,
-    info, on Machines, linking to the audit log).
+    info, on Machines, linking to the audit log; revoked keys are in the audit log only).
   - **Calls to what was removed answer 410 Gone**, not 404, for the rest of 1.5.x (404 from 1.6): `POST
     /api/workloads`, `GET /api/workloads/templates`, `PUT /api/workloads/{id}/gateway`, `POST
     /api/workloads/{id}/stop|start`, `DELETE /api/workloads/{id}` (for a deployment's workload the answer names the

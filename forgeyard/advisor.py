@@ -696,11 +696,12 @@ def apps_removed(ctx: Context) -> Iterator[Finding]:
     from forgeyard.db import AuditEvent
 
     since = ctx.now - timedelta(days=APPS_REMOVED_DAYS)
-    rows = ctx.db.execute(select(AuditEvent.action, AuditEvent.target)
+    rows = ctx.db.execute(select(AuditEvent.action, AuditEvent.target, AuditEvent.detail)
                           .where(AuditEvent.action.in_((removed.AUDIT_APP, removed.AUDIT_KEY)), AuditEvent.at >= since)
                           .order_by(AuditEvent.id)).all()
-    apps = [t or "?" for a, t in rows if a == removed.AUDIT_APP]
-    keys = [t or "?" for a, t in rows if a == removed.AUDIT_KEY]
+    apps = [t or "?" for a, t, _ in rows if a == removed.AUDIT_APP]
+    # A revoked key lost nothing it could still use: in the audit log, not here.
+    keys = [t or "?" for a, t, d in rows if a == removed.AUDIT_KEY and not (d or {}).get("revoked")]
     if not apps and not keys:
         return
     parts = []

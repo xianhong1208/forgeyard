@@ -902,7 +902,7 @@ When the 1.5.3 server starts, it migrates the database (migration `0019_remove_a
 
 Model deployments, their workloads and engine trials are never touched. For 30 days after the upgrade, **Setup
 health** shows `apps-removed` (info) with what was removed and a link to the audit log, which keeps the entries
-for good.
+for good (a revoked key's entry is only in the audit log: it lost nothing it could still use).
 
 ### Before you upgrade
 
