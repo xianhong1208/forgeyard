@@ -105,7 +105,7 @@ const ACTIONS = [
   "hf_token.cleared", "hf_token.set", "machine.gpu_allowlist_changed", "machine.gpu_keys_changed", "machine.join_refused",
   "machine.join_token_cancelled", "machine.join_token_created", "machine.joined", "machine.removed", "machine.revoked", "model.added",
   "model.cache_removed", "model.changed", "model.checksum_recorded", "model.download_cancelled", "model.download_requested", "model.removed",
-  "model_sources.changed", "node.fetch_via_changed", "node.image_copied", "node.image_removed", "node.image_uploaded", "node.relay_copy_refused",
+  "model_sources.changed", "node.fetch_via_changed", "node.gpus_changed", "node.image_copied", "node.image_removed", "node.image_uploaded", "node.relay_copy_refused",
   "provider.changed", "provider.cloned", "provider.created", "provider.deleted", "provider.model_changed", "provider.model_removed",
   "provider.models_added", "provider.prices_refreshed", "recipe.created", "recipe.deleted", "recipe.updated", "route.changed", "route.created",
   "route.deleted", "secret_key.backup_confirmed", "secret_key.backup_downloaded", "secret_key.backup_failed", "setup.owner_created",

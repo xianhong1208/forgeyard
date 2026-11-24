@@ -257,6 +257,7 @@ These are not settings in `agent.toml`:
 | `DOCKER_HOST`, `DOCKER_CONFIG`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR` | Passed on to the `docker` or `podman` command, so a non-default engine socket or configuration works. Nothing else of the agent's environment reaches the engine |
 | `ROCM_PATH`, `ROCM_HOME` | Where ROCm is installed, when it is not `/opt/rocm` (AMD cards) |
 | `FORGEYARD_AGENT_SIMULATION` | `1` allows `--simulate-inventory FIXTURE`: the agent reports recorded hardware instead of its own. For development and tests only; the server marks such a machine as simulated |
+| `FORGEYARD_AGENT_SYSFS` | With `FORGEYARD_AGENT_SIMULATION=1` only: a directory laid out like `/sys/bus/pci/devices` that a simulated agent counts the host's GPUs in (1.5.4). Without it a simulated agent does not count them |
 
 ## The gateway (/v1)
 
@@ -1442,6 +1443,48 @@ layers another image shares stay); `free_bytes` / `total_bytes` are the space af
 Audited as `node.image_removed` (the image, its tags, the recipes that name it, `ok`, the bytes freed, or the
 agent's `code` and reason) for every removal the agent was asked for; refusals before that are not audited.
 
+## GPUs added, removed or not seen
+
+From 1.5.4 (no migration: everything below lives in the machine's `runtime_info`, which the agent's hello already
+fills, and in the audit log). How to act on it: [Add or remove a GPU on a machine](how-to.md#add-or-remove-a-gpu-on-a-machine).
+
+**What the agent counts.** At every connection the agent lists the host's PCI functions in `/sys/bus/pci/devices`,
+which a container sees whole, and counts the GPUs: NVIDIA (vendor `0x10de`) with class `0x0300` (VGA) or `0x0302` (3D
+controller); AMD (vendor `0x1002`) with class `0x0300`, `0x0302`, `0x0380` (Instinct MI100–MI250) or `0x1200` (MI300).
+A card's audio, USB-C and similar functions, an NVSwitch, and SR-IOV virtual functions do not count; an APU's graphics
+is one GPU, like a separate card. It sends `runtime_info.gpu_census`, which `GET /api/machines/{id}` shows:
+
+```json
+{"host_gpus": 9, "visible_gpus": 8, "missing": ["0000:c1:00.0"],
+ "vendors": {"nvidia": {"host": 9, "visible": 8, "missing": ["0000:c1:00.0"]}}}
+```
+
+`visible` counts the GPUs the agent's NVML or amd-smi lists; `missing`, the host's PCI addresses none of them has.
+`limited_by`, when present, says what limits the agent to some of that vendor's GPUs on purpose: its environment
+(`NVIDIA_VISIBLE_DEVICES` other than `all`, `CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+`GPU_DEVICE_ORDINAL`), or, added by the server from the agent's install report, its container's `--gpus "device=…"`
+or `--gpus N`. Setup health warns only when the agent sees some but not all of a vendor's GPUs and nothing limits it.
+An agent that sees none of them is taken to run without them on purpose (a CPU-only agent on a GPU host), and one
+limited on purpose is left alone; the machine's page says either quietly. Servers before 1.5.4 drop the field, and
+agents before 1.5.4 send nothing (no finding then).
+
+**What the server records.** It keeps the GPUs a machine last reported, by key (the UUID; an AMD card's PCI address),
+and when a report adds or removes one it appends to `runtime_info.gpu_changes` (the last 20):
+
+```json
+{"at": "2026-11-24T09:12:03+00:00", "gpus": 9,
+ "added": [{"key": "nvidia:GPU-…", "vendor": "nvidia", "index": 8, "model": "NVIDIA A100 80GB PCIe",
+            "vram_total": 85899345920, "pci_bus_id": "00000000:C1:00.0"}],
+ "removed": []}
+```
+
+A removed card also names the deployments placed on it (`deployments`) in the audit entry and Setup health, not in
+`GET /api/machines`. Not a change: the first report of a machine (or the first after the upgrade to 1.5.4), a card
+reported under a new key that names its old one, and cards of a vendor whose collector failed in that report. Each
+change is audited as `node.gpus_changed` (actor `agent`): `added`, `removed` and `gpus`, the machine's GPU count
+after it. The Setup health checks are `machine-gpus-hidden`, `machine-gpu-not-allowed`, `machine-gpu-added` and
+`machine-gpu-removed` ([table](#setup-health-checks)).
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
@@ -1479,6 +1522,10 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
 | `machine-gpu-access-lost` | error | New processes on an online machine cannot open its GPUs (the agent checks every 5 minutes as its workload account; an agent container started with `--gpus` alone loses that access when the host runs `systemctl daemon-reload`). Process workloads are not placed on those GPUs meanwhile; the fix opens the machine's update command ([what to do](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)) |
+| `machine-gpus-hidden` | warning | An online machine's host has more GPUs of a vendor on its PCI bus than its agent sees (agents from 1.5.4 count them), the agent sees some of them, and nothing limits it to those, with the PCI address of each one it does not see: usually a GPU installed after the agent container was created. An agent that sees none of them (a CPU-only agent on a GPU host) or was limited to some on purpose is not warned; the machine's page says so. The fix opens the machine's update command ([what to do](how-to.md#add-or-remove-a-gpu-on-a-machine)) |
+| `machine-gpu-not-allowed` | warning | In the last 7 days a GPU appeared on a machine that has a GPU access list, and it is not on the list: Forgeyard does not use it until an admin allows it |
+| `machine-gpu-added` | note | In the last 7 days a GPU appeared on a machine without a GPU access list: placement already uses it |
+| `machine-gpu-removed` | warning | In the last 7 days a machine stopped reporting a GPU, with the deployments that were placed on it (they keep their place until restarted) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |

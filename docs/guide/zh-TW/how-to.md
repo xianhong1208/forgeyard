@@ -762,6 +762,21 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 如果要讓模型和其他程式共用同一張卡，部署時選擇 **GPU 共用** → **共用 VRAM**：這樣它只會保留估算的記憶體量，vLLM 也會被設定成只使用這麼多（請看 [vLLM 在共用的卡上無法啟動](troubleshooting.md#vllm-does-not-start-on-a-shared-card)）。
 
+## 在機器上加裝或拆下 GPU
+
+在機器上裝好 GPU（或拆下一張），而且主機的驅動程式列得出它（`nvidia-smi` 或 `amd-smi`）之後：
+
+1. **重新建立 agent**：使用機器頁面上 **更新 agent** 的指令（[做法](#update-an-agent)）。agent 容器只有它建立時拿到的 GPU 裝置，所以之後才裝上的 GPU，要等容器重新建立才看得到；這個指令會傳入你執行它當下主機上的 GPU 裝置。用 install.sh 安裝或從原始碼執行的 agent，只要重新啟動就好。
+2. **如果這台機器有 GPU 存取清單，就允許它**（[限制 GPU](#restrict-gpus-on-a-shared-machine)）：選 **變更 GPU 存取**，勾選新的卡。有清單的機器永遠不會自己使用新卡；沒有清單的機器則會馬上使用。
+
+Forgeyard 會這樣告訴你（管理員可以在 **設定健康檢查** 看到，**機器** 和機器的頁面上也會顯示橫幅）：
+
+- *gpu-01: the host has 9 NVIDIA GPUs but the agent sees 8*（`machine-gpus-hidden`）：從 1.5.4 起，agent 會清點主機 PCI 匯流排上的 GPU（容器也看得到完整的匯流排），再和它能使用的 GPU 比較，並列出每張看不到的卡的 PCI 位址。請照第 1 步重新建立 agent。不是給 Forgeyard 用的 GPU（例如桌上型 CPU 的內建顯示晶片），把這項暫停提醒即可。一張 GPU 都看不到的 agent（例如 GPU 主機上只用 CPU 的 agent），或刻意只給部分 GPU 的 agent（`--gpus "device=0,2"`、`NVIDIA_VISIBLE_DEVICES=0,1`），不會收到警告：機器的 **GPU 存取** 區塊會寫 *這個 agent 一張都沒有使用*，或 *只能使用 8 張中的 2 張*。
+- *New GPU on gpu-01: allow GPU #8?*（`machine-gpu-not-allowed`）；沒有 GPU 存取清單時則是 *New GPU on gpu-01 is in use*（`machine-gpu-added`，備註）。
+- *gpu-01 no longer reports GPU #3*（`machine-gpu-removed`），並列出原本放在那張卡上的部署。Forgeyard 不會因為 GPU 不見了就搬動副本：副本會留在原來的位置。請重新啟動那些部署（先停止再啟動，或修改它們），放置時就會選這台機器現有的 GPU，或改放到另一台機器。
+
+這些提醒會在變更後保留 7 天。卡是用它的 UUID 辨識的（AMD 的卡用 PCI 位址），不是用編號：換掉一張卡會算成拆下一張、加裝一張，編號改變則不算變更。agent 完全讀不到它的 GPU 時（驅動程式出錯，或容器失去裝置存取權），不會把任何卡算成已拆下。每次變更都會記錄在稽核紀錄裡，動作是 `node.gpus_changed`，包含每張卡的型號和記憶體；機器頁面的 **GPU 存取** 底下也會列出最近的變更。
+
 ## 加入其他人
 
 管理員在 **使用者**：

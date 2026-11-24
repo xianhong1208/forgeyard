@@ -94,6 +94,7 @@ export default {
   "admin.action.hf_token.set": "Hugging Face 權杖已設定",
   "admin.action.machine.gpu_allowlist_changed": "Forgeyard 可用的 GPU 已變更",
   "admin.action.machine.gpu_keys_changed": "GPU 識別碼已變更",
+  "admin.action.node.gpus_changed": "GPU 加裝或拆下",
   "admin.action.machine.join_refused": "加入被拒絕",
   "admin.action.machine.join_token_cancelled": "加入權杖已取消",
   "admin.action.machine.join_token_created": "加入權杖已建立",

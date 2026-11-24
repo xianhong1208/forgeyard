@@ -115,7 +115,10 @@ export type Machine = {
   image_upload_max_bytes?: number;
   // 1.4.5 (#171): `address`, where its replicas are published (what the gateway dials); `same_host`, whether its
   // agent runs on the server's own host (agents before 1.4.5 report neither).
-  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>> & { address?: string; same_host?: boolean };
+  // 1.5.4: `gpu_census`, the host's GPUs next to the ones its agent sees; `gpu_changes`, GPUs added or removed.
+  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>> & {
+    address?: string; same_host?: boolean; gpu_census?: GpuCensus; gpu_changes?: GpuChange[];
+  };
   // 1.4.2 (#122): why its agent should be updated (null: it need not be), and the server's version.
   agent_behind?: AgentBehind | null;
   server_version?: string;
@@ -762,6 +765,24 @@ export type AgentBehind = { agent: string | null; server: string; older: boolean
 
 // 1.4.2 (#121): GET /api/machines/{id}/agent-update (admins): the command that updates a machine's agent.
 export type UpdateStep = { title: string; command: string };
+// 1.5.4: the host's GPUs (from its PCI bus) next to the ones the agent sees, per vendor.
+export type GpuCensus = {
+  host_gpus: number;
+  visible_gpus: number;
+  missing: string[];
+  // limited_by: what limits the agent to some of that vendor's GPUs on purpose ("--gpus device=0,2",
+  // "NVIDIA_VISIBLE_DEVICES=0,1").
+  vendors: Record<string, { host: number; visible: number; missing: string[]; limited_by?: string }>;
+};
+
+// 1.5.4: one card in a GPU change.
+export type GpuChangeCard = {
+  key: string; vendor: string; index: number; model: string; vram_total: number | null; pci_bus_id?: string;
+};
+
+// 1.5.4: GPUs added to or removed from a machine since its agent last reported them.
+export type GpuChange = { at: string; gpus: number; added: GpuChangeCard[]; removed: GpuChangeCard[] };
+
 export type AgentUpdate = {
   machine_id: number;
   name: string;
