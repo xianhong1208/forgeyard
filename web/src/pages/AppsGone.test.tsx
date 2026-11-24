@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// 1.4 (#88): apps left the console (deprecated; the API, the templates and /x/ go in 1.5). FY-WEB-330 to 332;
-// the old addresses are FY-WEB-268, and Machines naming an app without a link FY-WEB-223 and 224.
+// 1.4 (#88): apps left the console; 1.5.3 (#89) removed them, their API, the templates and /x/. FY-WEB-330 to 332;
+// the old addresses are FY-WEB-268, and Machines naming a workload no deployment lists, without a link, FY-WEB-223
+// and 224.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
@@ -31,12 +32,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// A key an admin gave every app at /x/ in 1.3: the setting stays in the API, the console no longer shows it.
+// A key as the API answers since 1.5.3: no workloads setting.
 const key = (over: Partial<ApiKey> = {}): ApiKey => ({
   id: "k1", name: "laptop", prefix: "fyk_AbCdEfGh", models: null, rpm: null, tpm: null, effective_rpm: null, effective_tpm: null,
   expires_at: null, created_at: "2026-11-10T10:00:00Z", last_used_at: null, revoked_at: null, revoked_by: null, status: "active",
-  user: { id: 1, username: "owner" }, this_minute: { requests: 0, tokens: 0 }, cloud: "off",
-  workloads: "listed", workload_list: ["web"], workloads_locked_by: "owner", ...over,
+  user: { id: 1, username: "owner" }, this_minute: { requests: 0, tokens: 0 }, cloud: "off", ...over,
 });
 
 const keys = (): KeysResponse => ({
@@ -47,7 +47,7 @@ const keys = (): KeysResponse => ({
 const bodies = (fetch: ReturnType<typeof server>, method: string) =>
   fetch.mock.calls.filter(([u, i]) => String(u).startsWith("/api/keys") && i?.method === method).map(([, i]) => JSON.parse(String(i?.body)));
 
-describe("apps left the console (1.4, #88)", () => {
+describe("apps left the console (1.4, #88) and were removed (1.5.3, #89)", () => {
   it("FY-WEB-330 API keys has no Apps setting: not on a key's row, not when changing a key, not on a new key, and nothing is sent", async () => {
     const fetch = server((url, init) => {
       if (url === "/api/keys" && init?.method === "POST") return { status: 201, body: { api_key: key({ id: "k2", name: "ci" }), key: "fyk_x", gateway_url: "https://forge.lan:7860/v1" } };
@@ -87,14 +87,14 @@ describe("apps left the console (1.4, #88)", () => {
     expect(within(screen.getByRole("menu")).queryByText(/Apps|Workloads/)).toBeNull();
     expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
     expect(screen.queryByRole("heading", { name: /^Apps$|^New app$/ })).toBeNull();
-    // A machine's model cache names an app that uses a model, without a page to link to.
+    // A machine's model cache names a workload no deployment lists, without a page to link to.
     expect(userHref({ kind: "workload", id: 7, name: "notebook" })).toBeNull();
     expect(userHref({ kind: "deployment", id: 3, name: "chat" })).toBe("/serving/3");
   });
 
   it("FY-WEB-332 the Playground offers vision models only, whatever the options say", async () => {
     server((url) => url === "/api/playground/vision/options"
-      ? { status: 200, body: { models: [], tasks: [{ task: "detect", title: "Object detection", template: "object-detection", model: "PekingU/rtdetr_v2_r18vd" }],
+      ? { status: 200, body: { models: [],
         // what a 1.3 server answered: the console must not offer these
         workloads: [{ name: "detector", workload_id: 7, task: "detect", title: "Object detection", model: "m", licence: "apache-2.0",
           endpoint: "/v1/detect", path: "/x/detector", ready: 1, reason: null, max_body_mb: 32 }] } }

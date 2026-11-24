@@ -215,7 +215,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 ## 副本一直停在 pending
 
-**你會看到：**部署或應用程式已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **等待中**：沒有下載、也沒有啟動。2 分鐘後，部署和 workload 頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
+**你會看到：**部署已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **等待中**：沒有下載、也沒有啟動。2 分鐘後，部署頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
 
 **原因：**那台機器的 agent 沒有處理它的工作清單。1.2.0 以前的 agent 會跨連線記住最後收到的工作清單編號，而之後重新啟動過的伺服器又從 1 開始編號：agent 把這些清單全當成舊的，默默丟掉。1.3.0 起的伺服器編號方式不會再這樣，連舊版 agent 也一樣；1.3.0 起的 agent 每次連線都重新計數，丟掉清單時也會留下紀錄。
 
@@ -237,9 +237,9 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 ## 副本在等待：沒有空的主機連接埠
 
-**你會看到：** 副本沒有被放到任何機器上，部署或應用程式頁面顯示 *Cannot be placed: gpu-02: no free port: 3 of 3 in use (host ports 33000-33002)*，或 *not enough free ports: 2 of 3 in use, it needs 2*。部署預覽中那台機器也會顯示同樣的一行。
+**你會看到：** 副本沒有被放到任何機器上，部署頁面顯示 *Cannot be placed: gpu-02: no free port: 3 of 3 in use (host ports 33000-33002)*，或 *not enough free ports: 2 of 3 in use, it needs 2*。部署預覽中那台機器也會顯示同樣的一行。
 
-**原因：** agent 用它連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠公開服務和模型副本。模型副本佔用兩個（agent 的金鑰守門員聽一個，推論引擎聽另一個），應用程式每公開一個連接埠佔用一個（公開在 `/x/` 時是兩個）。伺服器會計算機器上副本已佔用的連接埠，並略過沒有足夠空連接埠的機器，就像略過記憶體不夠的機器一樣，而不是把副本送到只能在那裡等待的地方。透過 SSH tunnel 連線的機器常有很小的範圍，因為範圍內的每個連接埠都要轉送。1.4.2 之前的 agent 不會回報它的範圍，它們的連接埠不會被計算。
+**原因：** agent 用它連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠公開服務和模型副本。模型副本佔用兩個（agent 的金鑰守門員聽一個，推論引擎聽另一個）。伺服器會計算機器上副本已佔用的連接埠，並略過沒有足夠空連接埠的機器，就像略過記憶體不夠的機器一樣，而不是把副本送到只能在那裡等待的地方。透過 SSH tunnel 連線的機器常有很小的範圍，因為範圍內的每個連接埠都要轉送。1.4.2 之前的 agent 不會回報它的範圍，它們的連接埠不會被計算。
 
 agent 給不出連接埠的副本（在伺服器開始計算連接埠之前就被放上去的）會回報 *no free host port left in 33000-33002*。如果伺服器的計算也這麼認為，就把它從那台機器拿下來：它會被放到有空間的機器，或帶著上面的原因等待。如果計算結果還有空間，代表 Forgeyard 以外的程式佔用了範圍內的連接埠：agent 會跳過它們，並在 backoff 後再試一次。
 
@@ -265,7 +265,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 ## 機器上的新行程打不開它的 GPU
 
 **你會看到：** **開始使用 → 設定健康檢查** 和機器的頁面出現錯誤 *New processes on gpu-01 cannot open its GPUs
-(/dev/nvidia0: Operation not permitted)*。那台機器上的行程推論引擎或應用程式一啟動就失敗，出現
+(/dev/nvidia0: Operation not permitted)*。那台機器上的行程推論引擎一啟動就失敗，出現
 `cuInit: CUDA_ERROR_NO_DEVICE` 或 `Failed to initialize NVML: Unknown Error`，但同一台機器上容器裡的模型照常回應，機器的頁面也仍列出每張 GPU。需要在那些 GPU 上執行行程的部署會等待，原因是 *new processes there cannot open its NVIDIA GPUs*。
 
 **原因：** agent 每 5 分鐘（以及啟動時）檢查一次：以它的workload 帳號執行的新行程，能不能打開 GPU 的裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm` 和每個 `/dev/nvidiaN`；AMD 是 `/dev/kfd` 和 render 節點）。用 `docker run --gpus all` 時，NVIDIA runtime hook 是在 Docker 和 systemd 不知道的情況下，把 GPU 裝置交給 agent 的容器。主機執行 `systemctl daemon-reload` 時（安裝套件、自動更新、任何 unit 變更：在共用主機上很常發生），systemd 會依它知道的內容重新套用容器的 cgroup，那份裝置存取權就沒了。已經打開的照常運作（agent 讀 GPU 的數值、原本在跑的推論引擎）；那個容器裡每一次新的開啟都會被拒絕。新的容器會重新拿到存取權，所以容器裡的模型不受影響。AMD 的 agent 也不受影響：它的指令以 `--device` 傳入 `/dev/kfd` 和 `/dev/dri`。檢查失敗期間，Forgeyard 不會把行程類 workload放到那些 GPU 上。
@@ -365,16 +365,13 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 更多內容請見[雲端供應商](cloud-providers.md#troubleshooting)。
 
-## 來自 /x/ 的錯誤
+## 程式收到 410 apps_removed
 
-`/x/` 在 1.4 淘汰，1.5 移除（[應用程式（已淘汰）](reference.md#apps-deprecated)）。
+**你會看到：**腳本或程式收到 **410 Gone**，code 是 `apps_removed`：來自 `POST /api/workloads`、`GET /api/workloads/templates`、workload 的 `PUT …/gateway`、`POST …/stop` 或 `…/start` 或 `DELETE`、`/x/` 底下的任何位址，或 `POST /api/playground/vision/<name>/<task>`。或是建立、修改 API 金鑰時把 `workloads` 設成 `listed` 或 `all`，收到 **422** `apps_removed`。
 
-- **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API 金鑰** 頁面修改。
-- **404 `workload_not_found`：** 名稱打錯、應用程式沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他應用程式。
-- **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或應用程式是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動應用程式。
-- **副本因「listens beyond loopback」被停止：** 在金鑰守門員後面，行程必須監聽 `127.0.0.1`。在它的參數裡用 `${BIND_ADDRESS}`，不要用 `0.0.0.0`。
-- **頁面、它的連結或轉址不對：** 前綴會被拿掉，所以服務看到的是 `/`。把它的 root path 設成 `/x/<name>`（FastAPI 的 `root_path`、`--root-path`、`GRADIO_ROOT_PATH`），或讀 `X-Forwarded-Prefix`。瀏覽器介面在 `/x/` 無法使用：回應會被放進沙箱。
-- **WebSocket 或 gRPC 用戶端失敗：** 1.3 兩者都不轉送。請用一般的 HTTP，串流請用 SSE。
+**原因：**應用程式、範本和 `/x/` 在 1.5.3 移除了（[應用程式（已移除）](reference.md#apps-removed)）。升級時移除了剩下的應用程式；稽核紀錄裡每一個都有一筆 `workload.removed_in_upgrade`，記下它原本執行的東西。
+
+**解決：**把程式需要的東西當成模型部署，在 `/v1` 呼叫；內建推論引擎跑不了的模型，加一個自訂推論引擎（**模型 → 推論引擎**）。如果是模型部署的 workload，410 會寫出它的部署：請改為停止、啟動或刪除那個部署。管理金鑰的腳本：不要再送 `workloads` 和 `workload_list`。
 
 ## 程式不信任憑證
 

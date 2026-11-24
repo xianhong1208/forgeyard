@@ -110,9 +110,10 @@ export function groupByKind(list: Deployment[]): [ModelKind, Deployment[]][] {
 
 export type Holder = {
   name: string;                  // the deployment's name, or the workload's
-  key: string;                   // one per deployment or app
-  // Its page: the deployment's. 1.4 (#88): an app has none in the console (apps are deprecated), so it is
-  // only named, so that a card it holds is never shown free.
+  key: string;                   // one per deployment (or workload)
+  // Its page: the deployment's. A workload no deployment lists (apps, until 1.5.3 removed them (#89); now only
+  // for a moment, before the deployments list catches up) has none: it is only named, so that a card it holds is
+  // never shown free.
   href: string | null;
   kind: ModelKind | "workload";
   deployment?: Deployment;
@@ -156,7 +157,7 @@ export function placement(workloads: Workload[], deployments: Deployment[], tria
       if (reserved === null && !dep && r.gpus.length === 0) reserved = w.spec.resources.memory ?? null;
       holders.push({
         name: dep?.name ?? w.name,
-        key: dep ? `deployment:${dep.id}` : `app:${w.id}`,
+        key: dep ? `deployment:${dep.id}` : `workload:${w.id}`,
         href: dep ? `/serving/${dep.id}` : null,
         kind: dep ? modelKind(dep) : "workload",
         deployment: dep,
@@ -172,10 +173,9 @@ export function placement(workloads: Workload[], deployments: Deployment[], tria
   return { holders, onMachine, onRow, asleep: (id: number) => asleepOn(deployments, id) };
 }
 
-// 1.4 (#88): an app is named where it holds a card, so the card is never shown free, but not linked:
-// apps left the console (deprecated, removed in 1.5).
-export function appTitle(name: string): string {
-  return t("fleet.appTitle", { name });
+// A workload no deployment lists is named where it holds a card, so the card is never shown free, but not linked.
+export function workloadTitle(name: string): string {
+  return t("fleet.workloadTitle", { name });
 }
 
 // One entry per name: a deployment with two replicas on a machine counts once.

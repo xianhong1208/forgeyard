@@ -397,11 +397,11 @@ describe("what runs on a machine (1.4)", () => {
     mount();
     const box = await screen.findByRole("article", { name: "Machine a100-box" });
     expect(await within(box).findByText("7 running")).toBeTruthy();
-    // 1.4 (#88): an app is named (it holds a card) but not linked: apps left the console.
+    // A workload no deployment lists is named (it holds a card) but not linked (apps: removed in 1.5.3).
     const chips = [...box.querySelectorAll(".holder-chip:not(.holder-more)")];
     expect(chips.map((a) => a.textContent)).toEqual(["notebook", "dep-chat", "dep-embed", "dep-rerank", "dep-asr"]);
     expect(chips[0].tagName).toBe("SPAN");
-    expect(chips[0].getAttribute("title")).toMatch(/^App notebook: apps are deprecated and removed in 1.5/);
+    expect(chips[0].getAttribute("title")).toMatch(/^Workload notebook: it runs here, but no deployment lists it/);
     expect(chips[1].getAttribute("href")).toBe("/serving/30");
     expect(within(box).getByText("+2 more")).toBeTruthy();
     // nothing runs on the offline APU
@@ -418,7 +418,7 @@ describe("what runs on a machine (1.4)", () => {
     const bar = within(four).getAllByRole("img").find((x) => x.classList.contains("membar"))!;
     expect(bar.getAttribute("aria-label")).toMatch(/^21 GiB reserved by Forgeyard, .* free of 80 GiB$/);
     expect(bar.querySelector('[title="dep-image: 6 GiB"]')).toBeTruthy();
-    // a card held by an app that declared no memory names it without a size; 1.4 (#88): not linked
+    // a card held by a workload that declared no memory names it without a size, not linked
     const two = screen.getByRole("group", { name: "GPU #2" });
     expect(within(two).queryAllByRole("link")).toHaveLength(0);
     expect(two.querySelector(".holder-chip")?.textContent).toBe("notebook");
@@ -427,7 +427,7 @@ describe("what runs on a machine (1.4)", () => {
     const running = screen.getByRole("region", { name: /Running here/ });
     expect(within(running).getAllByRole("listitem")).toHaveLength(7);
     expect(within(running).queryByRole("link", { name: "notebook" })).toBeNull();
-    expect(within(running).getByText("notebook").getAttribute("title")).toMatch(/^App notebook: apps are deprecated/);
+    expect(within(running).getByText("notebook").getAttribute("title")).toMatch(/^Workload notebook/);
     expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/serving/30");
     expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/serving/deploy?machine=1");
     // 1.4 (#81): Apps is an advanced page; nothing but the Apps page itself offers New app.

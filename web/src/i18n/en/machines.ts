@@ -37,7 +37,7 @@ export default {
   "machines.legend": "each slot is one card (or the RAM), filled from the bottom.",
   "machines.empty.title": "No machines yet",
   "machines.empty.body":
-    "Forgeyard runs models and apps on machines you add: GPU servers, workstations, or computers with only a CPU. Each one runs the Forgeyard agent, which reports its hardware and keeps a connection to this server.",
+    "Forgeyard runs models on machines you add: GPU servers, workstations, or computers with only a CPU. Each one runs the Forgeyard agent, which reports its hardware and keeps a connection to this server.",
   "machines.empty.admin":
     "To add one, create a join command here and paste it on the machine: one line installs the agent as a service (or run it in Docker).",
   "machines.empty.user": "An admin adds machines; ask one to add yours.",
@@ -72,7 +72,7 @@ export default {
     "It first downloads the server's certificate authority and checks it against the fingerprint{inCommand}; only then does it fetch the installer, over a connection checked against that authority. Then it:",
   "machines.install.inCommand": " in the command",
   "machines.install.does1": "installs the agent {version} from this server in {dir};",
-  "machines.install.does2": "creates the account {account} that apps run as when they are processes;",
+  "machines.install.does2": "creates the account {account} that engines run as when they are processes;",
   "machines.install.does3": "writes {file} from what it finds (GPUs, Docker, systemd);",
   "machines.install.does4": "joins with the token, and starts the {service} service (systemd).",
   "machines.install.again": "Running the same line again later upgrades the agent and keeps the machine. Add {flag} to remove it.",

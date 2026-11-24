@@ -1,33 +1,35 @@
-"""The workloads API: roles, create / stop / start / delete, events, audit (FY-WL-*)."""
+"""The workloads API: who sees what, events, logs, and the engine's stop / start (FY-WL-*).
+
+Since 1.5.3 (#89) every workload a server makes is a model deployment's: the API reads them, and creating,
+stopping, starting and deleting go through deployments (the old app routes answer 410, tests/test_apps_removed.py).
+Plain workloads here are made by tests (tests/workload_helpers.py create_workload) to exercise the engine."""
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from forgeyard.db import AuditEvent, Replica, get_db
 from tests.conftest import add_user, make_client, sign_in
-from tests.workload_helpers import make_node, service, task
-
-WRITE_CALLS = [("post", "/api/workloads"), ("post", "/api/workloads/1/stop"), ("post", "/api/workloads/1/start"),
-               ("delete", "/api/workloads/1"), ("get", "/api/workloads/1/replicas/0/logs")]
+from tests.workload_helpers import create_workload, delete_workload, make_node, service, start_workload, stop_workload, task
 
 
-@pytest.mark.parametrize("method, path", WRITE_CALLS)
-def test_fy_wl_001_users_cannot_run_or_change_workloads(owner, method, path):
-    """FY-WL-001: creating a workload is running code on a machine; `user` gets 403 everywhere."""
+def test_fy_wl_001_users_cannot_read_logs(owner):
+    """FY-WL-001: a replica's output may hold secrets: `user` gets 403 on the logs. (Until 1.5.3 also on creating,
+    stopping, starting and deleting an app, routes that are gone.)"""
     make_node()
-    owner.post("/api/workloads", json=task())
+    wid = create_workload(owner, task())["workload"]["id"]
     add_user(owner, "bob", role="user")
     bob = sign_in(owner, "bob", "quiet-meadow-4821")
-    r = getattr(bob, method)(path, **({"json": task("other")} if method == "post" else {}))
+    r = bob.get(f"/api/workloads/{wid}/replicas/0/logs")
     assert r.status_code == 403 and r.json()["detail"]["code"] == "forbidden"
-    assert [w["name"] for w in owner.get("/api/workloads").json()["workloads"]] == ["job"]
+    assert [w["name"] for w in bob.get("/api/workloads").json()["workloads"]] == ["job"]
 
 
-@pytest.mark.parametrize("method, path", WRITE_CALLS + [("get", "/api/workloads"), ("get", "/api/workloads/1")])
-def test_fy_wl_002_anonymous_gets_401(owner, method, path):
+@pytest.mark.parametrize("path", ["/api/workloads", "/api/workloads/1", "/api/workloads/1/replicas/0/logs"])
+def test_fy_wl_002_anonymous_gets_401(owner, path):
     """FY-WL-002"""
     c = make_client()
-    assert getattr(c, method)(path, **({"json": {}} if method == "post" else {})).status_code == 401
+    assert c.get(path).status_code == 401
 
 
 def test_fy_wl_003_operators_run_workloads_and_users_can_look(owner):
@@ -37,40 +39,20 @@ def test_fy_wl_003_operators_run_workloads_and_users_can_look(owner):
     add_user(owner, "ursula", role="user")
     olga = sign_in(owner, "olga", "quiet-meadow-4821")
     ursula = sign_in(owner, "ursula", "quiet-meadow-4821")
-    r = olga.post("/api/workloads", json=task(env={"HF_TOKEN": "hf_secret"}))
-    assert r.status_code == 201 and r.json()["workload"]["created_by"] == "olga"
-    wid = r.json()["workload"]["id"]
+    w = create_workload(olga, task(env={"HF_TOKEN": "hf_secret"}), by="olga")["workload"]
+    assert w["created_by"] == "olga"
+    wid = w["id"]
     seen = ursula.get("/api/workloads").json()
     assert seen["can_manage"] is False and seen["workloads"][0]["spec"]["env"] == {"HF_TOKEN": "••••"}
     assert "hf_secret" not in ursula.get(f"/api/workloads/{wid}").text
     assert olga.get(f"/api/workloads/{wid}").json()["workload"]["spec"]["env"] == {"HF_TOKEN": "hf_secret"}
-    assert olga.post(f"/api/workloads/{wid}/stop").status_code == 200
-    assert olga.delete(f"/api/workloads/{wid}").status_code == 200
-
-
-def test_fy_wl_004_validation_errors_are_readable(owner):
-    """FY-WL-004"""
-    r = owner.post("/api/workloads", json=task(env={"CUDA_VISIBLE_DEVICES": "0"}))
-    assert r.status_code == 422
-    d = r.json()["detail"]
-    assert d["code"] == "invalid_spec" and d["message"].startswith("env: CUDA_VISIBLE_DEVICES is set by Forgeyard")
-    r = owner.post("/api/workloads", json={"name": "x", "kind": "task", "runtime": {"type": "vm"}})
-    assert r.status_code == 422 and "runtime" in r.json()["detail"]["message"]
-    assert owner.post("/api/workloads", json=[1]).status_code == 422
-
-
-def test_fy_wl_005_names_are_unique(owner):
-    """FY-WL-005"""
-    make_node()
-    owner.post("/api/workloads", json=task())
-    r = owner.post("/api/workloads", json=task())
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "name_taken"
 
 
 def test_fy_wl_006_create_places_replicas_and_records_events(owner):
     """FY-WL-006"""
     make_node("box")
-    w = owner.post("/api/workloads", json=service(replicas=2)).json()
+    wid = create_workload(owner, service(replicas=2))["workload"]["id"]
+    w = owner.get(f"/api/workloads/{wid}").json()
     reps = w["workload"]["replica_list"]
     assert [r["ordinal"] for r in reps] == [0, 1] and {r["machine"]["name"] for r in reps} == {"box"}
     assert {r["state"] for r in reps} == {"pending"} and w["workload"]["status"] == "pending"
@@ -79,34 +61,40 @@ def test_fy_wl_006_create_places_replicas_and_records_events(owner):
 
 
 def test_fy_wl_007_stop_start_delete_and_audit(owner):
-    """FY-WL-007"""
+    """FY-WL-007: the engine's stop and start (what a deployment's Stop and Start use): stopping waits for the agent,
+    a start while it stops is refused, a start bumps the generation; both are audited."""
     make_node("box")
-    wid = owner.post("/api/workloads", json=service()).json()["workload"]["id"]
-    w = owner.post(f"/api/workloads/{wid}/stop").json()["workload"]
+    wid = create_workload(owner, service())["workload"]["id"]
+    w = stop_workload(wid)["workload"]
     assert w["desired_state"] == "stopped" and w["replica_list"][0]["state"] == "stopping"
     assert "offline" in w["replica_list"][0]["reason"]
-    assert owner.post(f"/api/workloads/{wid}/stop").status_code == 409
+    with pytest.raises(HTTPException) as e:
+        stop_workload(wid)
+    assert e.value.status_code == 409 and e.value.detail["code"] == "already_stopped"
     # Not confirmed by the agent yet: starting again must wait.
-    r = owner.post(f"/api/workloads/{wid}/start")
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "still_stopping"
+    with pytest.raises(HTTPException) as e:
+        start_workload(wid)
+    assert e.value.status_code == 409 and e.value.detail["code"] == "still_stopping"
     db = next(get_db())
     db.scalar(select(Replica).where(Replica.workload_id == wid)).state = "stopped"
     db.commit()
-    w = owner.post(f"/api/workloads/{wid}/start").json()["workload"]
+    w = start_workload(wid)["workload"]
     assert w["generation"] == 2 and w["replica_list"][0]["generation"] == 2 and w["replica_list"][0]["state"] == "pending"
-    assert owner.post(f"/api/workloads/{wid}/start").status_code == 409
-    assert owner.delete(f"/api/workloads/{wid}").status_code == 200
+    with pytest.raises(HTTPException) as e:
+        start_workload(wid)
+    assert e.value.status_code == 409 and e.value.detail["code"] == "already_running"
+    delete_workload(wid)
     assert owner.get(f"/api/workloads/{wid}").status_code == 404
     actions = [e.action for e in db.scalars(select(AuditEvent).where(AuditEvent.action.like("workload.%"))
                                             .order_by(AuditEvent.id)).all()]
-    assert actions == ["workload.created", "workload.stopped", "workload.started", "workload.deleted"]
+    assert actions == ["workload.stopped", "workload.started"]
     assert db.scalars(select(Replica)).all() == []
 
 
 def test_fy_wl_008_logs_fall_back_to_the_stored_tail(owner):
     """FY-WL-008: no connected agent: the lines kept when the replica ended, and why."""
     make_node("box")
-    wid = owner.post("/api/workloads", json=task()).json()["workload"]["id"]
+    wid = create_workload(owner, task())["workload"]["id"]
     db = next(get_db())
     db.scalar(select(Replica).where(Replica.workload_id == wid)).log_tail = "last words"
     db.commit()
@@ -120,8 +108,8 @@ def test_fy_wl_009_removing_a_machine_sends_its_replicas_back_to_pending(owner):
     """FY-WL-009"""
     nid = make_node("box")
     make_node("other")
-    wid = owner.post("/api/workloads", json=task(machine_id=nid)).json()["workload"]["id"]
-    any_id = owner.post("/api/workloads", json=task("anywhere")).json()["workload"]["id"]
+    wid = create_workload(owner, task(machine_id=nid))["workload"]["id"]
+    any_id = create_workload(owner, task("anywhere"))["workload"]["id"]
     owner.delete(f"/api/machines/{nid}")
     pinned = owner.get(f"/api/workloads/{wid}").json()["workload"]["replica_list"][0]
     assert pinned["machine"] is None and pinned["state"] == "pending"
@@ -133,7 +121,7 @@ def test_fy_wl_009_removing_a_machine_sends_its_replicas_back_to_pending(owner):
 def test_fy_wl_010_task_summary_statuses(owner):
     """FY-WL-010"""
     make_node("box")
-    wid = owner.post("/api/workloads", json=task(replicas=2)).json()["workload"]["id"]
+    wid = create_workload(owner, task(replicas=2))["workload"]["id"]
     db = next(get_db())
     rows = db.scalars(select(Replica).where(Replica.workload_id == wid)).all()
     for r in rows:

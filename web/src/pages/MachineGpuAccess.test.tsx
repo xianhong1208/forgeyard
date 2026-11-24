@@ -81,7 +81,7 @@ describe("GPU access on a machine's page", () => {
     const group = within(card).getByRole("group", { name: "GPU access on a100-box: the GPUs Forgeyard may assign" });
     fireEvent.click(within(group).getAllByRole("checkbox")[4]);
     await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Save" })));
-    expect(confirm.mock.calls[0]).toEqual(["Let Forgeyard assign only GPU #4 on a100-box? No model or app will ever get another card of this machine."]);
+    expect(confirm.mock.calls[0]).toEqual(["Let Forgeyard assign only GPU #4 on a100-box? No model will ever get another card of this machine."]);
     const put = fetch.mock.calls.find(([u, i]) => u === "/api/machines/1/gpu-allowlist" && i?.method === "PUT");
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({ keys: [key4] });
     expect(await screen.findByText("Forgeyard may assign only #4 on a100-box.")).toBeTruthy();

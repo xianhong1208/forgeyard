@@ -105,7 +105,7 @@ export default {
   "keys.form.unlockCloud": "Unlock cloud",
   "keys.form.unlock.rpm": "Unlock requests",
   "keys.form.unlock.tpm": "Unlock tokens",
-  "keys.form.saved": "Limits, cloud, budget and apps of {name} saved.",
+  "keys.form.saved": "Limits, cloud and budget of {name} saved.",
   "keys.form.budgetRemoved": "Budget of {name} removed and unlocked.",
   "keys.form.cloudUnlocked": "Cloud setting of {name} unlocked; it is the default again.",
   "keys.form.unlocked.rpm": "Requests limit of {name} unlocked; it is the default again.",

@@ -31,9 +31,10 @@ def _deploy_with_secrets(owner):
     seed_catalog()
     a100 = make_node("a100", allowlist=[4], features=MODELS + ("replica_keys", "replica_guard"))
     deploy(owner, "chat", "qwen3-4b", "vllm", params={"context": 4096}, machine_id=a100, hf_token=HF)
-    r = owner.post("/api/workloads", json={"name": "web", "kind": "service", "runtime": {"type": "process", "command": "true"},
-                                           "env": {"API_TOKEN": "env-secret-456", "MODE": "plain"}})
-    assert r.status_code == 201, r.text
+    from tests.workload_helpers import create_workload
+
+    create_workload(owner, {"name": "web", "kind": "service", "runtime": {"type": "process", "command": "true"},
+                            "env": {"API_TOKEN": "env-secret-456", "MODE": "plain"}})
     return a100
 
 
@@ -125,7 +126,7 @@ def test_fy_sec_004_migration_encrypts_plain_rows_and_the_downgrade_restores_the
     place plain text is read), the key id is recorded; the downgrade decrypts them again."""
     from alembic import command
 
-    from forgeyard.migrate import alembic_config, upgrade
+    from forgeyard.migrate import alembic_config, scrub
 
     _deploy_with_secrets(owner)
     db = new_session()
@@ -141,7 +142,13 @@ def test_fy_sec_004_migration_encrypts_plain_rows_and_the_downgrade_restores_the
     # A row written in plain text by 1.0, after the downgrade:
     with get_engine().begin() as conn:
         conn.execute(text("UPDATE deployments SET hf_token = 'hf_written_by_1_0'"))
-    upgrade()
+    # Up to 0018, as forgeyard.migrate.upgrade() does (with its scrub), not to head: 0019 (1.5.3, #89) removes the
+    # plain workload "web" whose environment this checks.
+    with get_engine().begin() as conn:
+        cfg.attributes["connection"] = conn
+        command.upgrade(cfg, "0018_engine_trials")
+    if crypto.scrub_after_migration:
+        scrub()
     token = raw("SELECT hf_token FROM deployments")[0][0]
     assert crypto.is_sealed(token)
     if get_engine().dialect.name == "sqlite":

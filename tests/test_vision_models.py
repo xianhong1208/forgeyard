@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -24,7 +25,6 @@ from forgeyard.install.images import vision_image
 from forgeyard.models import fetch, hub, inspect as inspector, recipes, recommended as rec, vision
 from forgeyard.models.estimate import estimate
 from forgeyard.models.recipes import variant_matches
-from forgeyard.workloads import templates
 from tests.cloud_helpers import FakeCloud, add_provider, deployment_id, model_id, set_tiers
 from tests.gateway_helpers import api_client, make_ready, new_key
 from tests.model_helpers import FakeHF, Repo, add_catalog, safetensors_bytes
@@ -518,12 +518,12 @@ def test_fy_vis_010_try_it_and_models_list(vis):
 
 def test_fy_vis_011_the_playground(vis, client):
     """FY-VIS-011: the Playground's options list the vision models with their task, endpoint, catalog model,
-    licence and ready replicas (no apps since 1.4, #88); the console reaches a model at
+    licence and ready replicas, and nothing else (no apps since 1.4, #88; no template tasks since 1.5.3, #89); the console reaches a model at
     /api/playground/vision/<task> as the signed-in person (its session and CSRF rule, counted as console),
     and not with an API key."""
     o = vis.owner.get("/api/playground/vision/options").json()
     models = {m["name"]: m for m in o["models"]}
-    assert set(models) == {"det", "seg", "depth"} and "workloads" not in o  # 1.4 (#88): no apps
+    assert set(models) == {"det", "seg", "depth"} and set(o) == {"models"}  # no apps (1.4, #88), no templates (1.5.3)
     assert models["det"] | {"deployment_id": None} == {
         "name": "det", "task": "detect", "title": "Object detection", "endpoint": "/v1/vision/detect",
         "deployment_id": None, "model": "PekingU/rtdetr_v2_r18vd", "licence": "apache-2.0", "zero_shot": False,
@@ -549,7 +549,7 @@ def test_fy_vis_011_the_playground(vis, client):
 
 # ------------------------------------------------------------------ the recommended list, the search
 def test_fy_vis_012_the_recommended_vision_models():
-    """FY-VIS-012: the three models of the 1.3 templates are recommended, at the same pinned revisions as the
+    """FY-VIS-012: the three models the vision image bakes in (its models.json; the 1.3 templates' models) are recommended, at the same pinned revisions as the
     vision image's models.json, with the vision recipe on the CPU and Apache-2.0; so are three zero-shot detectors
     (1.4.4, #142: Grounding DINO tiny, MM-Grounding-DINO tiny, OWLv2 base), pinned to a commit; a vision entry with a
     licence that is not permissive (even one the list allows for others) or without a pinned commit is refused.
@@ -562,7 +562,7 @@ def test_fy_vis_012_the_recommended_vision_models():
         assert e.recipe == "vision" and e.device == "cpu" and e.group == "image-classification" and len(e.revision) == 40
         assert e.license == ("mit" if e.name == "clip-vit-b-32-laion" else "apache-2.0"), e.name
     entries = [e for e in rec.recommended().models if e.task in ("detect", "segment", "depth")]
-    baked = templates.models_file()
+    baked = json.loads((Path(__file__).resolve().parents[1] / "images" / "vision" / "models.json").read_text())
     fixed = {e.task: e for e in entries if e.source == f"hf://{baked[e.task]['repo']}"}
     assert set(fixed) == {"detect", "segment", "depth"}
     for task, e in fixed.items():

@@ -352,9 +352,9 @@ until room appears (the API's `"wait": true`).
 
 ## A replica stays pending
 
-**You see:** a deployment or app was placed on a machine (*Replica 0 placed on …*), the machine
+**You see:** a deployment was placed on a machine (*Replica 0 placed on …*), the machine
 is online, and the replica stays **pending**: nothing is downloaded or started. After 2 minutes the
-deployment and app pages say *Replica #0 was never picked up*, with the machine, its agent's
+deployment page says *Replica #0 was never picked up*, with the machine, its agent's
 version and what to do, for example *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
 update the agent (the server is 1.3.1)*. An agent gets its work list within a second of a placement
 (or of connecting) and answers every list with the state of each replica, so two minutes of silence
@@ -395,14 +395,13 @@ minutes). If the load rises again it is kept (*Kept replica 1: …* in the event
 
 ## A replica waits: no free host port
 
-**You see:** a replica is not placed, and the deployment or app page says *Cannot be placed: gpu-02: no free
+**You see:** a replica is not placed, and the deployment page says *Cannot be placed: gpu-02: no free
 port: 3 of 3 in use (host ports 33000-33002)*, or *not enough free ports: 2 of 3 in use, it needs 2*. The
 deploy preview gives the same line for that machine.
 
 **Why:** an agent publishes services and model replicas on the host ports of its port range
 (`FORGEYARD_PORT_RANGE`, default `30000-32767`). A model replica takes two of them (the agent's key guard
-listens on one, the engine on the other), an app one per port it publishes (two when it is exposed at
-`/x/`). The server counts the ports the machine's replicas hold and skips a machine without enough free
+listens on one, the engine on the other). The server counts the ports the machine's replicas hold and skips a machine without enough free
 ones, like a machine without memory, instead of sending a replica that could only wait there. A small
 range is common on a machine reached through an SSH tunnel, where every port in the range is forwarded.
 Agents older than 1.4.2 do not report their range, and their ports are not counted.
@@ -448,7 +447,7 @@ proxy on the server's host, say), snooze the warning.
 ## New processes on a machine cannot open its GPUs
 
 **You see:** an error under **Get started → Setup health** and on the machine's page: *New processes on gpu-01 cannot
-open its GPUs (/dev/nvidia0: Operation not permitted)*. A process engine or app there fails at once with
+open its GPUs (/dev/nvidia0: Operation not permitted)*. A process engine there fails at once with
 `cuInit: CUDA_ERROR_NO_DEVICE` or `Failed to initialize NVML: Unknown Error`, while models in containers on the same
 machine keep answering and the machine's page still lists every GPU. Deployments that need a process on those GPUs
 wait, with the reason *new processes there cannot open its NVIDIA GPUs*.
@@ -619,24 +618,20 @@ provider answered.
 
 More in [Cloud providers](cloud-providers.md#troubleshooting).
 
-## Errors from /x/
+## A program gets 410 apps_removed
 
-`/x/` is deprecated in 1.4 and removed in 1.5 ([Apps (deprecated)](reference.md#apps-deprecated)).
+**You see:** a script or program gets **410 Gone** with the code `apps_removed`: from `POST /api/workloads`,
+`GET /api/workloads/templates`, `PUT …/gateway`, `POST …/stop` or `…/start` or `DELETE` of a workload, from
+anything at `/x/`, or from `POST /api/playground/vision/<name>/<task>`. Or creating or changing an API key with
+`workloads` set to `listed` or `all` gets **422** `apps_removed`.
 
-- **403 `workloads_not_allowed`:** the key's **Apps at /x/** is *None*, the default. Change it
-  on **API keys**.
-- **404 `workload_not_found`:** the name is wrong, the app is not exposed (its page, **Gateway**),
-  or the key lists other apps.
-- **503 `no_ready_replica` and "runs without the agent's key guard":** the replica's agent is older
-  than 1.3, or the app was exposed while running and has not restarted behind the guard yet.
-  Update the agent, or stop and start the app.
-- **The replica stops with "listens beyond loopback":** behind the key guard a process must listen on
-  `127.0.0.1`. Use `${BIND_ADDRESS}` in its arguments instead of `0.0.0.0`.
-- **A page, its links or its redirects are wrong:** the prefix is stripped, so the service sees `/`.
-  Set its root path to `/x/<name>` (FastAPI `root_path`, `--root-path`, `GRADIO_ROOT_PATH`), or read
-  `X-Forwarded-Prefix`. A browser UI does not work at `/x/`: answers are sandboxed.
-- **A WebSocket or gRPC client fails:** neither is passed on in 1.3. Use plain HTTP, or SSE for a
-  stream.
+**Why:** apps, the templates and `/x/` were removed in 1.5.3 ([Apps (removed)](reference.md#apps-removed)). The
+upgrade removed the apps that were left; the audit log has one `workload.removed_in_upgrade` entry for each, with
+what it ran.
+
+**Fix:** deploy what the program needs as a model and call it at `/v1`; a model that no built-in engine runs gets
+a custom engine (**Models → Engines**). For a model deployment's workload, the 410 names its deployment: stop,
+start or delete that instead. A key script: leave `workloads` and `workload_list` out.
 
 ## A program does not trust the certificate
 
@@ -865,7 +860,7 @@ price. Under a budget, a model without a price is refused (`402 budget_unpriced`
 
 ## Agent in a container without systemd
 
-**You see:** processes (apps or engines) fail to start, and the agent's log mentions `systemd-run` or
+**You see:** processes (engines) fail to start, and the agent's log mentions `systemd-run` or
 `Failed to connect to bus`.
 
 **Why:** with `limits = "auto"` the agent uses a systemd scope when it runs as root and finds

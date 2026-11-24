@@ -5,7 +5,6 @@ GPU memory, budgets), and that no label carries a key, a user or a prompt."""
 
 import asyncio
 import threading
-import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,8 +13,7 @@ from prometheus_client.parser import text_string_to_metric_families
 from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import new_session
-from forgeyard.gateway import budgets, passthrough, waiting
-from forgeyard.gateway.keys import KeyCaller
+from forgeyard.gateway import budgets, waiting
 from tests.test_routing import background, chat, in_flight_soon, mixed  # noqa: F401 (a fixture)
 from tests.test_scheduler import deploy, fleet, reps  # noqa: F401 (a fixture)
 from tests.test_placement_fetch import set_node
@@ -271,18 +269,16 @@ def test_fy_met_009_a_broken_metric_never_fails_a_request(mixed, monkeypatch):  
     assert any(c.requests for c in recorder._pending.values())
 
 
-def test_fy_met_010_the_passthrough_and_video_jobs_count_too(owner):
-    """FY-MET-010: a request to an exposed workload (/x/, deprecated) counts under endpoint x and its workload's name;
-    a finished video job under videos."""
+def test_fy_met_010_video_jobs_count_too(owner):
+    """FY-MET-010: a finished video job counts under videos. (1.4.5 also counted /x/ requests here; /x/ was removed in
+    1.5.3, #89.)"""
     before = scrape(owner)
-    caller = KeyCaller(source="api", user_id=1, username="someone", key_id=7, key_name="k")
-    passthrough.record(caller, "detector", 200, time.monotonic() - 0.2)
     from forgeyard.gateway import videojobs
 
     videojobs._record({"source": "api", "key_id": 7, "user_id": 1, "username": "someone", "model": "wan",
                        "deployment_id": None, "status": 200, "latency_ms": 90_000.0, "units": None})
     after = scrape(owner)
-    for ep, model in (("x", "x:detector"), ("videos", "wan")):
+    for ep, model in (("videos", "wan"),):
         lab = dict(endpoint=ep, model=model, status="200", source="api", target="local")
         assert value(after, "forgeyard_gateway_requests_total", **lab) - \
             value(before, "forgeyard_gateway_requests_total", **lab) == 1, ep

@@ -89,14 +89,19 @@ deployment's **Edit** page then moves it to the copy and back, keeping its name,
 ([how](docs/guide/how-to.md#try-a-newer-version-of-an-engine)). Back up before upgrading: the server's database
 changes. A server run from source installs with `uv sync --extra server`; the agents need no update.
 
+1.5.3 **removes apps** (deprecated since 1.4): `POST /api/workloads`, the templates and the gateway's `/x/` answer
+410, and the upgrade stops and removes the apps that are left, writing each one in the audit log. Before upgrading,
+see what it would remove with `python -m forgeyard check-apps` and deploy what you still need as a model
+([what changes and how to check](docs/guide/reference.md#apps-removed)).
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
 the running models and a model library (Catalog, Engines, Sources), usage and cost charts, and vision
 models (object detection, segmentation, depth) deployed like any other model. **Download to…** puts a
 model and its engine on machines before you deploy; a machine without internet gets them through the
-server, and admins can upload an image file to it. Apps left the console, and their API is deprecated
-until 1.5. 1.4.1 lets such a machine get a model file from another machine's cache, and an admin copy an
+server, and admins can upload an image file to it. Apps left the console, and their API was deprecated
+(removed in 1.5.3). 1.4.1 lets such a machine get a model file from another machine's cache, and an admin copy an
 engine image from one machine to another, both still through the server. 1.4.2 shows on a machine's page
 the exact command that updates its agent, lists its engine images and removes old ones, and counts free host
 ports when placing replicas. 1.4.3 gives every catalog model and every engine its own page: where it is,

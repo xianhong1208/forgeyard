@@ -29,6 +29,7 @@ from forgeyard.config import get_settings
 from forgeyard.machines.hub import hub
 from tests.conftest import OWNER, SETUP_TOKEN, fast_heartbeat
 from tests.leaks import kill_group
+from tests.workload_helpers import create_workload, stop_workload
 
 
 # ------------------------------------------------------------------ backoff
@@ -330,15 +331,15 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
                                                                                           "replica_guard", "image_ids",
                                                                                           "engine_zip", "workload_guard",
                                                                                           "guard_tls"])
-            job = api("POST", "/api/workloads", {"name": "job", "kind": "task",
-                                                 "runtime": {"type": "process", "command": "sh",
-                                                             "args": ["-c", "echo working; exit 0"]}})["workload"]
+            job = create_workload(None, {"name": "job", "kind": "task",
+                                         "runtime": {"type": "process", "command": "sh",
+                                                     "args": ["-c", "echo working; exit 0"]}})["workload"]
             assert await _wait(lambda: api("GET", f"/api/workloads/{job['id']}")["workload"]["status"] == "succeeded")
-            web = api("POST", "/api/workloads", {"name": "web", "kind": "service", "ports": [{"name": "http"}],
-                                                 "health": {"type": "http", "interval": 1},
-                                                 "runtime": {"type": "process", "command": "python3",
-                                                             "args": ["-m", "http.server", "${PORT}",
-                                                                      "--bind", "127.0.0.1"]}})["workload"]
+            web = create_workload(None, {"name": "web", "kind": "service", "ports": [{"name": "http"}],
+                                         "health": {"type": "http", "interval": 1},
+                                         "runtime": {"type": "process", "command": "python3",
+                                                     "args": ["-m", "http.server", "${PORT}",
+                                                              "--bind", "127.0.0.1"]}})["workload"]
             assert await _wait(lambda: replica0(web["id"])["state"] == "healthy", timeout=20)
             rep = replica0(web["id"])
             assert rep["ports"][0]["host_port"] == web_port
@@ -362,7 +363,7 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
             assert sup2.started == 0 and sup2.records[rep["id"]].pid == pid and alive(pid)
             assert replica0(web["id"])["pid"] == pid
 
-            api("POST", f"/api/workloads/{web['id']}/stop", {})
+            await asyncio.to_thread(stop_workload, web["id"])
             assert await _wait(lambda: replica0(web["id"])["state"] == "stopped")
             rt1.children[rep["id"]].wait(5)  # the test process is still its parent
             assert not alive(pid)
@@ -402,8 +403,8 @@ def test_fy_agt_031_after_a_server_restart_the_same_agent_takes_new_work(monkeyp
         return _http(port, method, path, body, cookie)[0]
 
     def task(name):
-        return api("POST", "/api/workloads", {"name": name, "kind": "task",
-                                              "runtime": {"type": "process", "command": "sh", "args": ["-c", "echo ok"]}})["workload"]
+        return create_workload(None, {"name": name, "kind": "task",
+                                      "runtime": {"type": "process", "command": "sh", "args": ["-c", "echo ok"]}})["workload"]
 
     def status(wid):
         try:

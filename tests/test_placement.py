@@ -11,13 +11,18 @@ from forgeyard.db import Accelerator, AuditEvent, Node, Replica, get_db, new_ses
 from forgeyard.machines import store
 from forgeyard.machines.messages import InventoryIn
 from tests.conftest import add_user, sign_in
-from tests.workload_helpers import PROCESS_OK, make_node, task
+from tests.workload_helpers import PROCESS_OK, create_workload, make_node, task
 
 
-def create(c, spec, status=201):
-    r = c.post("/api/workloads", json=spec)
-    assert r.status_code == status, r.text
-    return r.json()
+def create(c, spec):
+    return create_workload(c, spec)
+
+
+def waiting(c, spec) -> str:
+    """A plain workload that cannot be placed: its replica waits unplaced, and this is why."""
+    rep = create(c, spec)["workload"]["replica_list"][0]
+    assert rep["machine"] is None and rep["gpus"] == [], rep
+    return rep["reason"]
 
 
 def reps(c, wid):
@@ -31,7 +36,7 @@ def gpu_indices(rep):
 # ------------------------------------------------------------------ allowlist
 def test_fy_place_001_gpus_only_from_the_allowlist(owner):
     """FY-PLACE-001: one allowed card (#4): every GPU workload gets #4 and nothing else,
-    a second one waits, and asking for another card by index is refused."""
+    a second one waits, and one asking for another card by index waits, saying why."""
     nid = make_node("a100", allowlist=[4])
     w = create(owner, task("one", machine_id=nid, resources={"gpus": {"count": 1}}))["workload"]
     assert gpu_indices(w["replica_list"][0]) == [4]
@@ -39,11 +44,10 @@ def test_fy_place_001_gpus_only_from_the_allowlist(owner):
     rep = w2["replica_list"][0]
     assert rep["machine"] is None and rep["gpus"] == []
     assert "needs 1 free GPU, 0 free of the allowed (#4)" in rep["reason"]
-    r = owner.post("/api/workloads", json=task("three", machine_id=nid, resources={"gpus": {"indices": [3]}}))
-    assert r.status_code == 422 and "GPU #3 is not allowed for Forgeyard here (allowed: #4)" in r.json()["detail"]["message"]
-    r = owner.post("/api/workloads", json=task("four", machine_id=nid, resources={"gpus": {"count": 2}}))
-    assert r.status_code == 201
-    assert gpu_indices(r.json()["workload"]["replica_list"][0]) == []  # waits; never takes a card outside
+    assert "GPU #3 is not allowed for Forgeyard here (allowed: #4)" in waiting(
+        owner, task("three", machine_id=nid, resources={"gpus": {"indices": [3]}}))
+    w = create(owner, task("four", machine_id=nid, resources={"gpus": {"count": 2}}))["workload"]
+    assert gpu_indices(w["replica_list"][0]) == []  # waits; never takes a card outside
 
 
 def test_fy_place_002_empty_allowlist_means_no_gpu(owner):
@@ -72,8 +76,7 @@ def test_fy_place_004_explicit_indices(owner):
     nid = make_node("a100")
     rep = create(owner, task(machine_id=nid, resources={"gpus": {"indices": [2, 5]}}))["workload"]["replica_list"][0]
     assert gpu_indices(rep) == [2, 5]
-    r = owner.post("/api/workloads", json=task("x", machine_id=nid, resources={"gpus": {"indices": [9]}}))
-    assert r.status_code == 422 and "has no GPU #9" in r.json()["detail"]["message"]
+    assert "has no GPU #9" in waiting(owner, task("x", machine_id=nid, resources={"gpus": {"indices": [9]}}))
     rep = create(owner, task("y", machine_id=nid, resources={"gpus": {"indices": [5]}}))["workload"]["replica_list"][0]
     assert rep["machine"] is None and "GPU #5 is in use by job" in rep["reason"]
 
@@ -101,22 +104,19 @@ def test_fy_place_006_cpu_and_memory_are_counted(owner):
     assert rep["machine"] is None and "memory" in rep["reason"]
 
 
-def test_fy_place_007_pinned_machine_problems_are_refused_up_front(owner):
-    """FY-PLACE-007"""
+def test_fy_place_007_pinned_machine_problems_are_the_reason_it_waits(owner):
+    """FY-PLACE-007: a workload pinned to a machine that can never run it waits, saying why. (Until 1.5.3 the apps
+    API refused such a workload up front with 422; only tests make plain workloads now, #89.)"""
     old = make_node("old", features=())
     nocap = make_node("nocap", runtime_info={"process": {"ok": False, "reason": "the agent runs as root and no "
                                                          "--workload-user is set"}, "container": {"ok": False}})
     nonv = make_node("nonv", runtime_info={"process": PROCESS_OK["process"],
                                            "container": {"ok": True, "engine": "docker", "nvidia": False}})
-    r = owner.post("/api/workloads", json=task(machine_id=old))
-    assert r.status_code == 422 and "does not run workloads yet" in r.json()["detail"]["message"]
-    r = owner.post("/api/workloads", json=task(machine_id=nocap))
-    assert r.status_code == 422 and "--workload-user" in r.json()["detail"]["message"]
-    r = owner.post("/api/workloads", json={"name": "g", "kind": "task", "machine_id": nonv,
-                                           "runtime": {"type": "container", "image": "nvidia/cuda:12.4.1-base"},
-                                           "resources": {"gpus": {"count": 1, "vendor": "nvidia"}}})
-    assert r.status_code == 422 and "cannot pass NVIDIA GPUs" in r.json()["detail"]["message"]
-    assert owner.post("/api/workloads", json=task(machine_id=999)).status_code == 404
+    assert "does not run workloads yet" in waiting(owner, task("a", machine_id=old))
+    assert "--workload-user" in waiting(owner, task("b", machine_id=nocap))
+    assert "cannot pass NVIDIA GPUs" in waiting(owner, {"name": "g", "kind": "task", "machine_id": nonv,
+                                                       "runtime": {"type": "container", "image": "nvidia/cuda:12.4.1-base"},
+                                                       "resources": {"gpus": {"count": 1, "vendor": "nvidia"}}})
 
 
 def test_fy_place_008_waiting_replicas_are_placed_when_room_appears(owner):

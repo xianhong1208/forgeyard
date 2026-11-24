@@ -516,3 +516,97 @@ class FakeDocker:
 
     def info(self, data: dict) -> None:
         (self.root / "info.json").write_text(json.dumps(data))
+
+
+# ------------------------------------------------------------------ plain workloads (tests only)
+def create_workload(client, spec: dict, *, by: Optional[str] = None) -> dict:
+    """A plain workload (not a model deployment's), placed: what POST /api/workloads did on its success path until
+    apps were removed in 1.5.3 (#89). Since then only tests make plain workloads, to exercise the workload engine
+    model deployments run on. `by`: the username recorded as its creator (default: the first account).
+    Returns {"workload": …} as GET /api/workloads/{id} shows it (with `client`, signed in)."""
+    from sqlalchemy import select
+
+    from forgeyard.db import User, Workload, Replica
+    from forgeyard.workloads import placement, state as wstate
+    from forgeyard.workloads.spec import WorkloadSpec
+
+    s = WorkloadSpec.model_validate(spec)
+    db = new_session()
+    try:
+        user = (db.scalar(select(User).where(User.username == by)) if by
+                else db.scalar(select(User).order_by(User.id)))
+        w = Workload(name=s.name, kind=s.kind, runtime=s.runtime_type, spec=s.model_dump(mode="json"),
+                     desired_state="running", generation=1, owner_id=user.id if user else None,
+                     created_by=user.username if user else by)
+        db.add(w)
+        db.flush()
+        for i in range(s.replicas):
+            w.replicas.append(Replica(ordinal=i, generation=1, state="pending", gpus=[], ports=[]))
+        wstate.event(db, w, "created", f"Created by {w.created_by}.")
+        db.commit()
+        wid = w.id
+        placement.place_and_poke(db)
+    finally:
+        db.close()
+    if client is None:
+        return {"workload": {"id": wid}}
+    r = client.get(f"/api/workloads/{wid}")
+    assert r.status_code == 200, r.text
+    return {"workload": r.json()["workload"]}
+
+
+def _caller(by: Optional[str]):
+    from sqlalchemy import select
+
+    from forgeyard.api.deps import Caller
+    from forgeyard.db import User
+
+    db = new_session()
+    try:
+        user = db.scalar(select(User).where(User.username == by)) if by else db.scalar(select(User).order_by(User.id))
+        db.expunge(user)
+    finally:
+        db.close()
+    return Caller(user=user, session=None, ip="127.0.0.1")
+
+
+def stop_workload(workload_id: int, *, by: Optional[str] = None) -> dict:
+    """Stop a plain workload the way its deployment's Stop does (forgeyard.api.workloads.stop_workload)."""
+    from forgeyard.api import workloads as api
+
+    db = new_session()
+    try:
+        return api.stop_workload(workload_id, _caller(by), db)
+    finally:
+        db.close()
+
+
+def start_workload(workload_id: int, *, by: Optional[str] = None) -> dict:
+    """Start a stopped plain workload again (forgeyard.api.workloads.start_workload)."""
+    from forgeyard.api import workloads as api
+
+    db = new_session()
+    try:
+        return api.start_workload(workload_id, _caller(by), db)
+    finally:
+        db.close()
+
+
+def delete_workload(workload_id: int) -> None:
+    """Delete a plain workload as DELETE /api/workloads/{id} did before 1.5.3: its machines' agents stop and forget its
+    replicas (no longer desired), and whatever waited gets a try."""
+    from forgeyard.db import Workload
+    from forgeyard.machines.hub import hub
+    from forgeyard.workloads import placement
+
+    db = new_session()
+    try:
+        w = db.get(Workload, workload_id)
+        nodes = {r.node_id for r in w.replicas if r.node_id is not None and not r.final}
+        db.delete(w)
+        db.commit()
+        for node_id in nodes:
+            hub.poke(node_id)
+        placement.place_and_poke(db)
+    finally:
+        db.close()

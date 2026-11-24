@@ -21,7 +21,7 @@ from forgeyard.workloads import starts, state as wstate
 from tests.test_metrics import scrape, value
 from tests.test_model_supervisor import container_spec
 from tests.test_scheduler import MODELS, deploy, seed_catalog
-from tests.workload_helpers import converge, desired, make_node, replica, service
+from tests.workload_helpers import converge, create_workload, desired, make_node, replica, service
 
 HEALTH = {"type": "http", "path": "/health", "interval": 10, "start_period": 60, "failure_threshold": 3}
 
@@ -326,9 +326,7 @@ def test_fy_start_011_an_older_agent_is_measured_by_the_server(chat_on_cpu):
 def test_fy_start_012_only_model_deployments(owner):
     """FY-START-012: a plain workload turning healthy gets no "ready" event (the measure is for deployments)."""
     node = make_node("box")
-    r = owner.post("/api/workloads", json=service("web", machine_id=node, health={"type": "tcp"}))
-    assert r.status_code == 201, r.text
-    w = r.json()["workload"]
+    w = create_workload(owner, service("web", machine_id=node, health={"type": "tcp"}))["workload"]
     db = new_session()
     try:
         r = db.scalar(select(Replica).where(Replica.workload_id == w["id"]))

@@ -1,18 +1,20 @@
-"""The generic passthrough at /x/<name>/… (1.3): a service workload's own HTTP API behind the gateway,
-for programs with an API key (forgeyard/gateway/passthrough.py). Like /v1, only API keys are accepted
-here, never the console's cookie, and the console's CSRF rule does not apply; the host check (421) does.
+"""The gateway's /x/<name>/… passthrough to apps (1.3) was removed in 1.5.3 (#89): every request there, any method,
+answers 410 Gone in the gateway's error shape, saying what to use instead (forgeyard/removed.py). Like /v1, the
+console's CSRF rule does not apply here (forgeyard/security/middleware.py), so a program learns why whatever it sends.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
-from forgeyard.gateway import passthrough
+from forgeyard import removed
 
 router = APIRouter(tags=["passthrough"])
 
+METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
-@router.api_route("/x", methods=passthrough.METHODS, include_in_schema=False)
-@router.api_route("/x/{rest:path}", methods=passthrough.METHODS, include_in_schema=False)
-async def x(request: Request, rest: str = ""):
-    return await passthrough.handle(request)
+
+@router.api_route("/x", methods=METHODS, include_in_schema=False)
+@router.api_route("/x/{rest:path}", methods=METHODS, include_in_schema=False)
+async def x(rest: str = ""):
+    return removed.gone_gateway("x")

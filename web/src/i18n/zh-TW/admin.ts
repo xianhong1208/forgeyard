@@ -5,7 +5,7 @@ export default {
   "admin.users.index": "08 · 使用者",
   "admin.users.title": "使用者",
   "admin.users.lead":
-    "誰可以登入，以及各自的角色。管理員管理使用者、機器和模型目錄；操作員執行應用程式並部署模型；使用者用自己的 API 金鑰呼叫模型，並查看自己的用量。",
+    "誰可以登入，以及各自的角色。管理員管理使用者、機器和模型目錄；操作員部署模型；使用者用自己的 API 金鑰呼叫模型，並查看自己的用量。",
   "admin.users.add": "新增使用者",
   "admin.users.linkFor": "{name} 的一次性連結",
   "admin.users.linkBody": "把這個連結傳給 {name}。它用來設定密碼，只能用一次，{hours} 小時後失效。它只會在這裡顯示這一次。",
@@ -46,7 +46,7 @@ export default {
   // Audit log
   "admin.audit.index": "09 · 稽核紀錄",
   "admin.audit.title": "稽核紀錄",
-  "admin.audit.lead": "登入、登入失敗，以及帳號、API 金鑰、機器、應用程式、模型、供應商和預算的每一次變更，最新的在最前面。",
+  "admin.audit.lead": "登入、登入失敗，以及帳號、API 金鑰、機器、模型、供應商和預算的每一次變更，最新的在最前面。",
   "admin.audit.show": "顯示",
   "admin.audit.filter.all": "全部",
   "admin.audit.filter.auth": "登入與工作階段",
@@ -54,7 +54,7 @@ export default {
   "admin.audit.filter.setup": "初始設定",
   "admin.audit.filter.api_key": "API 金鑰",
   "admin.audit.filter.machine": "機器",
-  "admin.audit.filter.workload": "應用程式",
+  "admin.audit.filter.workload": "workload 與應用程式",
   "admin.audit.filter.deployment": "部署",
   "admin.audit.filter.model": "模型與來源",
   "admin.audit.filter.recipe": "推論引擎",
@@ -73,6 +73,7 @@ export default {
   "admin.action.api_key.changed": "API 金鑰已變更",
   "admin.action.api_key.created": "API 金鑰已建立",
   "admin.action.api_key.revoked": "API 金鑰已撤銷",
+  "admin.action.api_key.x_access_removed": "API 金鑰的 /x/ 存取已在 1.5.3 升級時移除",
   "admin.action.api_key_cloud.changed": "金鑰的雲端政策已變更",
   "admin.action.api_key_limits.changed": "金鑰的限制已變更",
   "admin.action.auth.login": "已登入",
@@ -146,8 +147,9 @@ export default {
   "admin.action.workload.created": "應用程式已建立",
   "admin.action.workload.deleted": "應用程式已刪除",
   "admin.action.workload.gateway_changed": "應用程式的閘道存取已變更",
-  "admin.action.workload.started": "應用程式已啟動",
-  "admin.action.workload.stopped": "應用程式已停止",
+  "admin.action.workload.removed_in_upgrade": "應用程式已在 1.5.3 升級時移除",
+  "admin.action.workload.started": "workload 已啟動",
+  "admin.action.workload.stopped": "workload 已停止",
 
   // My account
   "admin.account.index": "我的帳號",
