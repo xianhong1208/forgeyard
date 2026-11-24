@@ -32,6 +32,7 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "audio/translations": ("openai-audio", "multipart"),
     "audio/speech": ("openai-speech", "json"),
     "images/generations": ("openai-images", "json"),
+    "images/edits": ("openai-images", "edit"),   # 1.5.5: multipart or JSON, input images checked (imageedit.py)
     "videos": ("openai-videos", "video"),   # asynchronous jobs (forgeyard/gateway/videojobs.py), not forward()
     # 1.4: vision models, one image per request (multipart or JSON)
     "vision/detect": ("vision-detect", "vision"),

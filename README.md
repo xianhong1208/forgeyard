@@ -55,7 +55,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
   memory back; the next request wakes it and waits for the answer (or goes to the cloud meanwhile, when
   the key may), and a model that cannot wake says why at once.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, text classification at
-  `/v1/classify` (1.4.4), speech to text, text to speech, image generation, video generation as jobs, and
+  `/v1/classify` (1.4.4), speech to text, text to speech, image generation, image edits at `/v1/images/edits`
+  (1.5.5: FLUX.2 [klein], Qwen-Image-Edit; input images checked and fetched by the gateway), video generation as
+  jobs, and
   vision models: object detection (1.4.4: also detectors that find what you name), segmentation, depth and
   (1.4.4) image classification at `/v1/vision/…`, deployed like any other model.
 - **Search images by text, classify without training (1.5.4).** Forgeyard's own transformers engine runs on any

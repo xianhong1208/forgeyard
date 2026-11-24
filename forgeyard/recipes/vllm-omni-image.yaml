@@ -20,13 +20,20 @@
 # b64_json or file, output_format png / jpeg / webp, and the extensions negative_prompt,
 # num_inference_steps, guidance_scale, true_cfg_scale and seed. The gateway sends only these (and
 # always b64_json): the request's `lora` (a path on the server), extra_params, system prompts and the
-# rest never reach the engine. /v1/images/edits is not offered: its `url` fields make the engine fetch
-# any URL, and the edit models (Qwen-Image-Edit) are too large for one shared card.
+# rest never reach the engine.
+#
+# Edits (1.5.5, #143; POST /v1/images/edits at v0.32.0, multipart): the gateway sends the prompt, n, an explicit
+# size, output_format, the extras above and the checked input images as `image[]` files, nothing else: the engine's
+# own `url` / `url[]` fields and string `mask_image` / `reference_image` make it fetch any URL with no address
+# filter, so they never reach it (the gateway fetches URLs itself, under the media rules). A size left out would be
+# the first input's (a phone photo's 12 megapixels), so one is always sent. The edit pipelines (FLUX.2 [klein],
+# Qwen-Image-Edit, LongCat) resize each input to about a megapixel before they work on it (input_mp).
 name: vllm-omni-image
 title: vLLM-Omni (images)
 description: >-
   Text to image on NVIDIA GPUs with vLLM-Omni: diffusers pipelines such as Z-Image-Turbo, Stable
-  Diffusion XL and FLUX.1-schnell, behind OpenAI's /v1/images/generations (base64 images).
+  Diffusion XL and FLUX.1-schnell, behind OpenAI's /v1/images/generations (base64 images); edit pipelines such as
+  FLUX.2 [klein] behind /v1/images/edits.
 engine: vllm-omni
 version: "0.32.0"
 tasks: [image]
@@ -70,6 +77,14 @@ params:
             help: How long the gateway waits for the images once a replica has the request.}
   max_prompt_chars: {type: int, default: 4000, min: 1, max: 32000, advanced: true, label: Longest prompt (characters),
                      help: Longer prompts are refused (400 prompt_too_long).}
+  max_input_images: {type: int, default: 1, min: 1, max: 16, label: Input images (most),
+                     help: "Edits: the most images a request may give (the model may take fewer). Each one adds to
+                       the memory a request needs."}
+  max_input_side: {type: int, default: 2048, min: 64, max: 8192, advanced: true, label: Largest input (pixels),
+                   help: "Edits: the widest or tallest input image a request may give, read from the image's header.
+                     Larger ones are refused (400); the engine resizes inputs to about a megapixel anyway."}
+  max_body_mb: {type: int, default: 64, min: 1, max: 1024, advanced: true, label: Largest request (MiB),
+                help: "Requests larger than this are refused by the gateway (413). Edits carry their input images."}
   offload: {type: choice, default: none, choices: [none, model], advanced: true, label: Offload to host memory,
             help: "model: only the component at work (text encoder, transformer, VAE) is on the card, the rest waits in
               host memory. Less GPU memory, slower requests."}
@@ -86,6 +101,7 @@ image:
   request: fields
   output_formats: [png, jpeg, webp]
   max_n: 10
+  edit: {output_formats: [png, jpeg, webp], input_mp: 1.0}
 env:
   VLLM_MEDIA_URL_ALLOW_REDIRECTS: "0"
   HF_HUB_OFFLINE: "1"

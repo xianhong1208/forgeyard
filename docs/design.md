@@ -559,8 +559,12 @@ page contain these lines whenever the server uses its own CA.
   extras dropped (sd-server's `generation_info`, vLLM-Omni's stage timings) and each image's size read
   from its header: usage counts `images`, `kilopixels` and `busy_ms` (the replica's time × the GPUs the
   deployment holds). Engine errors come back in OpenAI's shape (`engine_error`). No tokens, no cloud,
-  no prompt filtering. `/v1/images/edits` and `/variations` are 404 `endpoint_not_supported` (vLLM-Omni's
-  edit route fetches any URL it is given; a later version).
+  no prompt filtering. `/variations` is 404 `endpoint_not_supported`. **Edits (1.5.5,**
+  forgeyard/gateway/imageedit.py**)**: `POST /v1/images/edits` as multipart or OpenAI's JSON (`images[].image_url`,
+  http(s) URLs fetched by the gateway under the media rules), each input's count, bytes, type (first bytes) and size
+  (header only, never decoded) checked, routed to deployments whose model edits (catalog `meta.image.edit`, from the
+  pipeline class), an explicit size always sent, the engine's request rebuilt with the checked files only (vLLM-Omni
+  fetches its own `url` fields with no address filter); the same queue and usage, plus `media_items` and `bytes_in`.
 - **Videos (1.3,** forgeyard/gateway/videogen.py, videojobs.py**).** `POST /v1/videos` takes OpenAI's
   Videos request (JSON, multipart as OpenAI's SDK sends it, or a URL-encoded form) and answers at once
   with a **job**: video takes minutes, and every video API (OpenAI's, Replicate's, fal's, Veo's) is

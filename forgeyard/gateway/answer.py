@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 
 import httpx
 from starlette.responses import Response
@@ -62,7 +63,10 @@ class Answering:
         d = self.image_draws
         status = response.status_code
         if status == 200:
-            out, made = imagegen.answer(data, self.parsed.image, d)
+            ask = self.parsed.image
+            if self.image_size is not None:   # an edit (1.5.5): the size chosen for it, when an image says none
+                ask = replace(ask, size=self.image_size)
+            out, made = imagegen.answer(data, ask, d)
             if out is None or not made.images:
                 raise GatewayError(502, "upstream_error", f"The answer from {who} holds no images.")
             self.made = made

@@ -27,7 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from forgeyard import removed
 from forgeyard.db import new_session
-from forgeyard.gateway import (classify, embeddings as gembeddings, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs,
+from forgeyard.gateway import (classify, embeddings as gembeddings, imageedit, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs,
                                vision)
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
@@ -92,6 +92,13 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
             route = proxy.fit_speech(route, parsed)  # 1.3: checked, voice cloning refused, counted
         elif endpoint == imagegen.ENDPOINT:
             route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
+        elif endpoint == imageedit.ENDPOINT:
+            # 1.5.5: input URLs fetched by the gateway (only now that the key may use the model), every input's bytes,
+            # type and header size checked, then the deployments that edit and take them.
+            await imageedit.fetch_all(parsed.edit)
+            imageedit.check(parsed.edit)
+            parsed.size = max(parsed.size, parsed.edit.bytes)
+            route = proxy.fit_edits(route, parsed)
         elif endpoint == classify.ENDPOINT:
             # 1.4.4: checked, only the known fields sent on; 1.5.4: zero-shot labels to zero-shot deployments only
             route = proxy.fit_classify(route, parsed)
@@ -204,16 +211,24 @@ async def classify_text(request: Request):
 
 
 @router.post("/images/edits")
-@router.post("/images/variations")
 async def images_edit(request: Request):
-    """Image edits and variations: not in 1.3 (vLLM-Omni's edit route fetches any URL it is given, and
-    variations are a retired DALL-E 2 feature)."""
+    """Image edits (1.5.5, #143): the prompt and the images to edit (multipart files or JSON image_url) to a model that
+    edits (forgeyard/gateway/imageedit.py); base64 images back."""
+    return await _api(request, "images/edits")
+
+
+@router.post("/images/variations")
+async def images_variations(request: Request):
+    """Variations: closed, as at OpenAI (DALL-E 2's endpoint no longer takes requests). An edit with `n` and a prompt
+    such as "a variation of this image" does the same."""
     try:
         await run_in_threadpool(_authenticate, request.headers.get("authorization"))
     except GatewayError as e:
         return e.response()
-    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway does not edit images or make variations "
-                                                       "(yet): it serves /v1/images/generations.").response()
+    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway makes no variations (OpenAI's endpoint "
+                                                       "no longer takes requests either). Send the image to "
+                                                       "/v1/images/edits with n and a prompt such as \"a variation of "
+                                                       "this image\".").response()
 
 
 # ------------------------------------------------------------------ videos (1.3)
@@ -378,7 +393,8 @@ async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
                                                  "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
-                                                 "/v1/audio/voices, /v1/images/generations, /v1/videos and "
+                                                 "/v1/audio/voices, /v1/images/generations, /v1/images/edits, "
+                                                 "/v1/videos and "
                                                  "/v1/vision/detect, /segment, /depth and /classify, and "
                                                  "/v1/classify.").response()
 
