@@ -539,6 +539,27 @@ def image_caps(meta: dict, params: dict) -> tuple[int, int]:
     return side, n
 
 
+DEFAULT_INPUT_SIDE = 2048
+
+
+def edit_caps(meta: dict, params: dict, recipe: Recipe) -> tuple[int, int]:
+    """(the most input images an edit may give, the largest side of each in pixels) a deployment allows (1.5.5):
+    its max_input_images, at most what its model edits (0 when the model or its engine edits nothing), and its
+    max_input_side (the recipe's default when the deployment has none)."""
+    from forgeyard.models import editing
+
+    model, _ = editing.of(meta)
+    if recipe.imagegen.edit is None or model == 0:
+        return 0, 0
+    n = params.get("max_input_images")
+    n = n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 1
+    side = params.get("max_input_side")
+    if not (isinstance(side, int) and not isinstance(side, bool) and side > 0):
+        p = recipe.params.get("max_input_side")
+        side = int(p.default) if p is not None and isinstance(p.default, int) else DEFAULT_INPUT_SIDE
+    return min(n, model), side
+
+
 _16BIT = ("BF16", "F16", "FP16")
 
 # Video models (1.3): what a diffusers video pipeline makes natively, when the catalog does not say.
@@ -666,6 +687,22 @@ def _diffusion(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, de
     if recipe.estimate.vae_per_mp:
         est.parts.append(Part("VAE decode", int(recipe.estimate.vae_per_mp * mp), f"one {side}x{side} image at a "
                                                                                   "time (recipe)"))
+    inputs, input_side = edit_caps(meta, params, recipe)
+    if inputs:
+        # 1.5.5 (#143): an edit model works on its input images beside the ones it makes (FLUX.2 [klein], Qwen-Image-Edit
+        # put their latents in the same sequence), each at its own size or what the engine resizes it to.
+        in_mp = input_side * input_side / 1e6
+        cap = recipe.imagegen.edit.input_mp
+        if cap is not None:
+            in_mp = min(in_mp, cap)
+        what = (f"{inputs} input image{'s' if inputs > 1 else ''} per image made, "
+                + (f"resized by the engine to about {in_mp:.2f} MP" if cap is not None and in_mp == cap
+                   else f"up to {input_side}x{input_side} ({in_mp:.2f} MP)"))
+        est.parts.append(Part("Input images", int(recipe.estimate.activation_per_mp * in_mp * inputs * at_once),
+                              what + " (recipe)"))
+        if recipe.estimate.vae_per_mp:
+            est.parts.append(Part("VAE encode", int(recipe.estimate.vae_per_mp * in_mp),
+                                  "one input image at a time (recipe)"))
     if device == "cpu":
         est.parts.append(Part("Engine overhead", recipe.estimate.cpu_overhead, "recipe"))
         est.ram = sum(p.bytes for p in est.parts)
@@ -676,7 +713,8 @@ def _diffusion(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, de
         if gpus > 1:
             est.notes.append("The pipeline runs on one GPU; the others are reserved but idle.")
     est.notes.append(f"Sized for the deployment's caps: {most} image{'s' if most > 1 else ''} per request, up to "
-                     f"{side}x{side}. Raising them raises this.")
+                     f"{side}x{side}" + (f"; edits with up to {inputs} input image{'s' if inputs > 1 else ''} of up to "
+                                         f"{input_side}x{input_side}" if inputs else "") + ". Raising them raises this.")
     return est
 
 

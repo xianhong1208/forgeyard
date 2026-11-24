@@ -282,7 +282,8 @@ page cannot use a signed-in browser against it.
 | `GET /v1/audio/voices?model=<model>` | A speech model's voices, its default voice, the formats it makes, how it streams and its input cap | — |
 | `POST /v1/audio/voices`, `DELETE /v1/audio/voices/{name}` | Uploading or deleting a voice (voice cloning): always 400 `voice_cloning_not_supported` in 1.3 | — |
 | `POST /v1/images/generations` | Image generation (1.3): OpenAI's request, images back as base64 (`b64_json`) only. See [Images](#images) | no |
-| `POST /v1/images/edits`, `POST /v1/images/variations` | Image edits and variations: not offered in 1.3, always 404 `endpoint_not_supported` | — |
+| `POST /v1/images/edits` | Image edits (1.5.5): the prompt and the images to edit, as `multipart/form-data` (what OpenAI's SDK sends) or JSON with `images[].image_url`; images back as base64. See [Image edits](#image-edits) | no |
+| `POST /v1/images/variations` | Not offered, as at OpenAI: always 404 `endpoint_not_supported`. Send the image to `/v1/images/edits` with `n` and a prompt instead | — |
 | `POST /v1/videos` | Video generation (1.3): asks for a video, answers at once with the job. JSON, `multipart/form-data` (what OpenAI's SDK sends) or a URL-encoded form. See [Video](#video) | no |
 | `GET /v1/videos` | The key's own videos, newest first: `limit` (1 to 100, 20), `after` (the last id seen), `order` (`desc` or `asc`) | — |
 | `GET /v1/videos/{id}` | One video job: its status and progress | — |
@@ -311,7 +312,7 @@ What the gateway does with a request:
 - A streamed chat or completion gets a final usage chunk (`stream_options.include_usage`) so that
   tokens are counted. If you did not ask for it, the gateway removes it again.
 - The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB), or the model's own *Largest request*
-  (`max_body_mb`, 64 MB by default for vLLM and llama.cpp deployments).
+  (`max_body_mb`, 64 MB by default for vLLM, llama.cpp and, 1.5.5, image deployments).
 - If you close the connection, the gateway closes its request upstream at once, so the engine stops
   generating.
 
@@ -468,6 +469,63 @@ What is counted, per request that was answered (in `GET /api/usage` and on **Usa
 | `kilopixels` | Their width x height / 1,000, read from each image's own header (PNG, JPEG, WebP), else the size asked |
 | `busy_ms` | The time the replica worked on the request (from sending it to the last byte of the answer), times the GPUs the deployment holds (1 on a CPU): GPU time |
 | tokens | None. A key's tokens per minute does not apply; its requests per minute does |
+
+A model that only edits images (Qwen-Image-Edit, LongCat-Image-Edit) makes nothing from text alone: a generation for it
+is 400 `generation_not_supported`, saying to use `/v1/images/edits`.
+
+### Image edits
+
+`POST /v1/images/edits` (1.5.5) takes the images to edit and a prompt that says what to change, and answers like
+`/v1/images/generations`. The same two engines serve it, for the models that edit: FLUX.2 [klein] (which also makes
+images from text), Qwen-Image-Edit, LongCat-Image-Edit, FLUX.1 Kontext. A model page says whether its model edits and
+how many input images it takes: a diffusers pipeline says it itself (`model_index.json`); for a stable-diffusion.cpp
+file it is read from its name ("edit", "kontext", FLUX.2 / klein), and an admin can say it when adding the model
+(`image_edit`: how many images, 0 for none; `image_generate`: whether it makes images from text). Local deployments
+only.
+
+Two request shapes, as OpenAI's API takes them:
+
+- **`multipart/form-data`** (what OpenAI's SDK sends for `client.images.edit`): `model`, `prompt`, the images as files
+  named `image` or `image[]`, and the fields of a generation as form fields.
+- **JSON**: `"images": [{"image_url": "data:image/png;base64,…"}, {"image_url": "https://…"}]`. A data: URL is used as
+  it is; an http(s) URL is fetched **by the gateway**, under the same rules as media in chat (see
+  [Images, audio and video in chat](#images-audio-and-video-in-chat): public addresses only unless
+  `MEDIA_ALLOW_PRIVATE_HOSTS`, every redirect checked, at most `MEDIA_FETCH_MAX_MB`), and only once the key is known to
+  be allowed the model. `file_id` is refused: 400 `file_id_not_supported` (Forgeyard keeps no uploaded files).
+
+| Field | What the gateway does |
+|---|---|
+| `image`, `image[]` (multipart), `images` (JSON) | 1 to the deployment's *Input images* (`max_input_images`, 1 by default, at most what the model takes; FLUX.2 [klein] takes 4, Qwen-Image-Edit 1); more: 400 `too_many_input_images`; none: 400 `missing_image`. Each one a PNG, JPEG or WebP (read from its first bytes; HEIC, GIF and others: 400 `unsupported_image_format`), at most `MEDIA_FETCH_MAX_MB` (413 `media_too_large`), no wider or taller than the deployment's *Largest input* (`max_input_side`: 2,048 for vLLM-Omni, 1,024 for stable-diffusion.cpp); larger: 400 `input_image_too_large`. The size is read from the image's header, never by decoding it: a header that cannot be read is 400 `invalid_image` |
+| `mask` | Refused: 400 `mask_not_supported`. Edits follow the prompt; inpainting with a mask is not offered yet |
+| `prompt`, `n`, `num_inference_steps`, `negative_prompt`, `guidance_scale`, `true_cfg_scale`, `seed`, `response_format`, `stream` | As for [Images](#images), with the same caps |
+| `size` | As for [Images](#images). **Left out (or `auto`), the first input's shape** at the deployment's *Default size* in pixels, within its *Largest side*, each side a multiple of what the model takes: an 800x600 photo becomes 1024x768 on a 1024x1024 deployment. A size is always sent to the engine, which would otherwise make the first input's full size |
+| `output_format` | What the engine makes for edits: `png`, `jpeg` or `webp` on vLLM-Omni; `png` or `jpeg` on stable-diffusion.cpp (others: 400 `unsupported_output_format`) |
+| `quality`, `background`, `input_fidelity`, `moderation`, `user` | Accepted and ignored |
+
+The engine gets a new request built by the gateway: the fields above and the checked images as `image[]` files.
+Nothing else reaches it: not a URL (vLLM-Omni would fetch its own `url` fields, string `mask_image` and
+`reference_image` from inside your network), not a mask, a LoRA path or any other field.
+
+The order of the checks: first the request's shape as it is read (`mask`, `file_id`, a URL of another scheme, a data:
+URL that is not base64, a file under another name), then the model and the key's access to it. **A model that edits
+nothing is 400 `edits_not_supported`** (saying to use `/v1/images/generations`) whether or not the request has images,
+and none of its URLs is fetched. Only then are the images counted (`missing_image`, `too_many_input_images`), their
+URLs fetched, each one checked, and the deployments' caps applied.
+
+Edits share the image queue, *Timeout* and answer of [Images](#images). They are counted as images are, plus:
+
+| Unit | How |
+|---|---|
+| `media_items` | The input images |
+| `bytes_in` | Their size in bytes |
+
+Nothing of an edit is kept: not the prompt, not the input images (no log line, no file, no row). **No content
+filtering**: Forgeyard checks the request's shape, not what the images show or the prompt asks; an edit model changes
+real photos realistically, so a deployment open to others needs a filter in front of it and its operator's rules.
+
+The memory a deployment reserves counts the input images too (*Input images* x what each takes, and one VAE encode):
+vLLM-Omni's edit pipelines resize each input to about a megapixel, stable-diffusion.cpp works on it at the size it
+comes, so there *Largest input* raises the estimate with its square.
 
 ### Video
 
@@ -739,7 +797,15 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `voice_cloning_not_supported` | Text to speech: a reference recording, a voice given as audio or a link, `task_type: "Base"`, or uploading a voice. Not in 1.3 | Use one of the model's voices |
 | 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
 | 400 | `streaming_not_supported` | Images and vision: `stream: true` | Leave it out |
-| 400 | `missing_image` | Vision: no file field `image`, or JSON without `image` | Send the image |
+| 400 | `missing_image` | Vision: no file field `image`, or JSON without `image`. Image edits (1.5.5): no input image | Send the image |
+| 400 | `generation_not_supported` | Images (1.5.5): the model only edits images (Qwen-Image-Edit) | Send the image with the prompt to `/v1/images/edits` |
+| 400 | `edits_not_supported` | Image edits (1.5.5): the model makes images from text and edits none | Use `/v1/images/generations`, or a model that edits |
+| 400 | `mask_not_supported` | Image edits (1.5.5): a `mask` | Leave it out and say the change in the prompt |
+| 400 | `file_id_not_supported` | Image edits (1.5.5): an `images` entry with `file_id` | Send the image as `image_url` or a file |
+| 400 | `too_many_input_images` | Image edits (1.5.5): more input images than the deployment's *Input images* (or than 16) | Send fewer, or raise `max_input_images` |
+| 400 | `input_image_too_large` | Image edits (1.5.5): an input wider or taller than the deployment's *Largest input* | Scale it down, or raise `max_input_side` |
+| 400 | `unsupported_image_format` | Image edits (1.5.5): an input that is not PNG, JPEG or WebP (a HEIC photo, a GIF) | Convert it |
+| 400 | `invalid_image` | Image edits (1.5.5): an input whose header does not say its size, or a data: URL that is not base64 | Send the file again |
 | 400 | `labels_required` | Vision (1.4.4): a zero-shot detector was not told what to find, or a zero-shot classifier not given its labels; text classification (1.5.4): a zero-shot model without `labels` | Send `labels` |
 | 400 | `labels_not_supported` | Vision (1.4.4): `labels` for a detector or classifier with fixed classes; text classification (1.5.4): `labels` for a model with fixed labels | Leave `labels` out, or use a zero-shot model |
 | 400 | `too_many_pairs` | Text classification (1.5.4): texts x `labels` over the zero-shot deployment's *Zero-shot pairs per request* | Send fewer texts or labels, or raise `max_pairs` |
@@ -768,7 +834,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
 | 404 | `model_not_found` | No such model for this key: it does not exist, or it is cloud-only and the key's cloud setting is not **Allowed**. From `GET /v1/models/{model}`, also a stopped model | Check `GET /v1/models` |
 | 404 | `unknown_endpoint` | The gateway has no such path | Use an endpoint above |
-| 404 | `endpoint_not_supported` | `/v1/images/edits`, `/v1/images/variations`, `/v1/videos/sync` or `/v1/videos/{id}/remix`: not offered in 1.3 | Use `/v1/images/generations`, or a job at `/v1/videos` |
+| 404 | `endpoint_not_supported` | `/v1/images/variations`, `/v1/videos/sync` or `/v1/videos/{id}/remix`: not offered | Use `/v1/images/edits` with `n` and a prompt, or a job at `/v1/videos` |
 | 404 | `video_not_found` | Videos: no such video for this key (another key's id answers the same) | Check `GET /v1/videos` |
 | 409 | `video_not_ready` | Videos: the content of a job still `queued` or `in_progress` | Poll until it is `completed` |
 | 409 | `video_failed` | Videos: the content of a failed job | Read the job's `error`, and ask again |

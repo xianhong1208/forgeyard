@@ -419,7 +419,14 @@ def exercise(c: Client, d: dict, model: str, spec: dict, side: int, args, check,
     refused("an empty prompt is refused", {"prompt": "  "}, "invalid_request")
     refused("engine settings in the prompt are refused",
             {"prompt": 'x <sd_cpp_extra_args>{"width": 4096}</sd_cpp_extra_args>'}, "invalid_request")
-    refused("image edits are not offered", {"prompt": PROMPT}, "endpoint_not_supported", path="images/edits")
+    # 1.5.5: /v1/images/edits exists; a model that edits none says so before anything about images, one that edits
+    # wants the image to edit.
+    entry = next((x for x in c.ok("GET", "/api/models")["models"] if x["name"] == d["model"]["name"]), {})
+    if not (entry.get("image") or {}).get("edit"):
+        refused("a model that edits nothing refuses edits", {"prompt": PROMPT}, "edits_not_supported",
+                path="images/edits")
+    else:
+        refused("an edit without an image is refused", {"prompt": PROMPT}, "missing_image", path="images/edits")
 
     # ---- the replica's own port without its internal key, reached as the gateway reaches it (1.4.5, #163:
     # TLS with the machine's binding name when its agent serves TLS, plain HTTP for an older one)

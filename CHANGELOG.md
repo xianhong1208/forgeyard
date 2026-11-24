@@ -6,6 +6,41 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Image edits at `/v1/images/edits` (#143).** The prompt and the images to edit, as `multipart/form-data` (what
+  OpenAI's SDK sends for `images.edit`) or OpenAI's JSON form with `images[].image_url` (a base64 data: URL, or an
+  http(s) URL the gateway fetches under the media rules), to models that edit: FLUX.2 [klein], Qwen-Image-Edit,
+  LongCat-Image-Edit, FLUX.1 Kontext, on vLLM-Omni and stable-diffusion.cpp. The gateway checks every input image
+  before anything is sent: how many (the deployment's new *Input images*, 1 by default, at most 16), its bytes
+  (`MEDIA_FETCH_MAX_MB`), its type by its first bytes (PNG, JPEG, WebP) and its size from its header without decoding
+  it (the new *Largest input*: 2,048 pixels on vLLM-Omni, 1,024 on stable-diffusion.cpp). It always sends an explicit
+  size (the first input's shape at the deployment's default pixels when the request gives none) and rebuilds the
+  engine's request with the checked files only: no URL, mask, LoRA path or other client field reaches the engine.
+  Edits share the image queue; usage counts the images made plus the input images (`media_items`) and their bytes
+  (`bytes_in`). Masks are refused (400 `mask_not_supported`), and so is `file_id`. What the model does is checked
+  before anything about the images: an edit to a model that edits none is 400 `edits_not_supported` with or without
+  images, and its URLs are never fetched.
+- What an image model does is in its catalog entry: `meta.image.edit` (input images it edits, 0 for none) and
+  `meta.image.generate` (whether it makes images from text), from its diffusers pipeline class, or for a
+  stable-diffusion.cpp file from its names, or as an admin says when adding it (`image_edit`, `image_generate`). No
+  migration: entries from before are read from their pipeline class.
+- Image recipes gain *Largest request* (`max_body_mb`, 64 MiB), and the estimate of a model that edits counts its
+  input images (vLLM-Omni's edit pipelines resize them to about a megapixel; stable-diffusion.cpp works on them at
+  their size).
+
+### Changed
+
+- `/v1/images/variations` stays closed (404 `endpoint_not_supported`), now saying to send the image to
+  `/v1/images/edits` with `n` and a prompt.
+
+### Fixed
+
+- A model that only edits (Qwen-Image-Edit, LongCat-Image-Edit) could be added as an image model, and every
+  `/v1/images/generations` request was then sent to an engine that cannot make it. It now answers 400
+  `generation_not_supported`, pointing to `/v1/images/edits`, and Try it sends it an edit. An inpainting pipeline,
+  which needs a mask, is refused when added (422 `not_an_image_model`).
+
 ## [1.5.4] — 2026-11-24
 
 Image embeddings and text classification on a CPU or a GPU (#141, #144). Forgeyard's own transformers engine runs

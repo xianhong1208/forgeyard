@@ -11,7 +11,8 @@ import re
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import encoders, fetch, gguf, kvlayout, modalities, safetensors, sources, textcls, vision
+from forgeyard.models import (editing, encoders, fetch, gguf, kvlayout, modalities, safetensors, sources, textcls,
+                             vision)
 from forgeyard.models.estimate import vllm_mm_item_tokens
 from forgeyard.models.sources import Source, SourceError
 
@@ -407,6 +408,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         selected = sources.select_files(files, fmt, out.get("file"), (out.get("mmproj") or {}).get("path"))
     out["files"] = selected
     out["size_bytes"] = sum(f["size"] for f in selected)
+    if "image" in out:
+        editing.describe(out)   # 1.5.5 (#143): what it does with images: makes them from text, edits them, or both
     if "image" in out and fmt != "diffusers":
         # What each part weighs, for the estimate: the model file (all parts of a split GGUF) and each component.
         by_path = {f["path"]: f["size"] for f in selected}

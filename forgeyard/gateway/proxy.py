@@ -66,7 +66,9 @@ cloud provider.
 12. Images (1.3, forgeyard/gateway/imagegen.py): /v1/images/generations is checked against each
    deployment's caps (images per request, largest side, steps), sent with only the fields Forgeyard
    knows, queued in the gateway while every replica is busy (429 `queue_full` once the queue is full),
-   answered as base64 only, and counted in images, kilopixels and busy milliseconds. Local only.
+   answered as base64 only, and counted in images, kilopixels and busy milliseconds. Local only. 1.5.5: so are
+   /v1/images/edits (forgeyard/gateway/imageedit.py), with their input images checked (and fetched, for URLs) by the
+   gateway and sent as files in a body it builds, to the deployments whose model edits.
 13. Videos (1.3, forgeyard/gateway/videogen.py and videojobs.py): /v1/videos is asynchronous: a job is
    checked against each deployment's caps, sent to one replica, which holds it, and its status and
    MP4 are relayed from that replica; it does not go through forward(). Local only.
@@ -113,7 +115,7 @@ from forgeyard.gateway.cloud import (DROPPED_HEADER, RETRY_AFTER_CAP, CloudSendi
                                      provider_error, retry_after, rng)
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.fit import (BYTES_PER_TOKEN, KIND_WORDS, MEDIA_ENDPOINTS, _takes, body_size, fit_classify,
-                                   fit_embeddings, fit_images, fit_route, fit_speech, prompt_estimate, scan_media)
+                                   fit_edits, fit_embeddings, fit_images, fit_route, fit_speech, prompt_estimate, scan_media)
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
 from forgeyard.gateway.replicas import LOCAL_BUSY_RETRY_AFTER, ReplicaSending
@@ -141,7 +143,7 @@ __all__ = [
     "parse_vision", "read_body", "streams", "upstream_body",
     # fit.py
     "BYTES_PER_TOKEN", "KIND_WORDS", "MEDIA_ENDPOINTS", "_takes", "body_size", "fit_classify", "fit_embeddings",
-    "fit_images", "fit_route", "fit_speech", "prompt_estimate", "scan_media",
+    "fit_edits", "fit_images", "fit_route", "fit_speech", "prompt_estimate", "scan_media",
     # upstream.py
     "CLIENT_CLOSED", "NOT_TAKEN_HEADER", "RETRYABLE", "SENT_BROKE", "ClientGone", "EngineUnreachable", "Failed",
     "_clients", "_empty", "_until_disconnect", "client", "close_client", "not_taken", "unless_gone",
@@ -193,6 +195,7 @@ class Job(ReplicaSending, CloudSending, Answering):
         self.made: Optional[imagegen.Made] = None   # images: what the answer held (1.3)
         self.busy_ms: int = 0                       # images: the replica's time on it, times its GPUs
         self.image_draws: Optional[imagegen.Draws] = None
+        self.image_size: Optional[tuple[int, int]] = None   # an edit: the size the engine was asked for (1.5.5)
         self.seen: Optional[tuple[int, int]] = None   # vision: the size of the image the replica answered for (1.4)
         self.embedded: Optional[tuple[int, int]] = None   # embeddings: the images and kilopixels the engine embedded (1.5.4)
         self.busy_usage = False                     # the replica answering it counts its busy time (1.5.4)
@@ -250,7 +253,10 @@ class Job(ReplicaSending, CloudSending, Answering):
         if self.parsed.image is not None:
             if self.made is None:      # set only for an answer that held images
                 return None
-            return {"images": self.made.images, "kilopixels": self.made.kilopixels, "busy_ms": self.busy_ms}
+            out = {"images": self.made.images, "kilopixels": self.made.kilopixels, "busy_ms": self.busy_ms}
+            if self.parsed.edit is not None:   # 1.5.5: an edit's input images and their bytes
+                out.update(media_items=len(self.parsed.edit.items), bytes_in=self.parsed.edit.bytes)
+            return out
         if self.parsed.vision is not None:
             if self.seen is None:      # set only for a 200 that says the image's size
                 return None

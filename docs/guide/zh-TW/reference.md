@@ -238,7 +238,8 @@ local_dirs = ["/data/models"]
 | `GET /v1/audio/voices?model=<model>` | 語音模型的聲音、預設聲音、它能產生的格式、串流方式與輸入上限 | — |
 | `POST /v1/audio/voices`、`DELETE /v1/audio/voices/{name}` | 上傳或刪除聲音（聲音複製）：1.3 一律回應 400 `voice_cloning_not_supported` | — |
 | `POST /v1/images/generations` | 圖片生成（1.3）：OpenAI 的請求格式，圖片只以 base64（`b64_json`）傳回。見[圖片生成](#images) | 否 |
-| `POST /v1/images/edits`、`POST /v1/images/variations` | 圖片編輯與變體：1.3 不提供，一律回應 404 `endpoint_not_supported` | — |
+| `POST /v1/images/edits` | 圖片編輯（1.5.5）：提示加上要編輯的圖片，以 `multipart/form-data`（OpenAI SDK 送的格式）或帶 `images[].image_url` 的 JSON 送出；圖片以 base64 傳回。見[圖片編輯](#image-edits) | 否 |
+| `POST /v1/images/variations` | 和 OpenAI 一樣不提供：一律回應 404 `endpoint_not_supported`。請改把圖片送到 `/v1/images/edits`，附上 `n` 和提示 | — |
 | `POST /v1/videos` | 影片生成（1.3）：要求一段影片，立刻回應這個工作。可用 JSON、`multipart/form-data`（OpenAI SDK 送的格式）或 URL 編碼表單。見[影片生成](#video) | 否 |
 | `GET /v1/videos` | 這把金鑰自己的影片，最新的在前：`limit`（1 到 100，預設 20）、`after`（看過的最後一個 id）、`order`（`desc` 或 `asc`） | — |
 | `GET /v1/videos/{id}` | 一個影片工作：它的狀態與進度 | — |
@@ -259,7 +260,7 @@ local_dirs = ["/data/models"]
 - 把 `model` 換成副本或供應商預期的名稱，加上副本的內部金鑰或供應商的金鑰，你的其他東西一概不轉送：不轉送你的 API 金鑰，也不轉送你的其他標頭。
 - `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。文字轉語音則改成 `input` 的每個字元算一個 token（見[文字轉語音](#text-to-speech)）；圖片請求不計任何 token（見[圖片生成](#images)）。
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
-- 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
+- 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM、llama.cpp 與（1.5.5 起）圖片部署預設 64 MB）。
 - 你關閉連線時，閘道會立刻關閉往上游的請求，推論引擎就會停止生成。
 
 ### 重試與等待第一個回應
@@ -361,6 +362,60 @@ local_dirs = ["/data/models"]
 | `kilopixels` | 寬 x 高 / 1,000，從每張圖片自己的檔頭讀出（PNG、JPEG、WebP），否則用請求的尺寸 |
 | `busy_ms` | 副本處理這個請求的時間（從送出到收到回應的最後一個位元組），乘以部署占用的 GPU 數（CPU 上為 1）：也就是 GPU 時間 |
 | tokens | 不計。金鑰的每分鐘 token 數不適用；每分鐘請求數照樣適用 |
+
+只會編輯圖片的模型（Qwen-Image-Edit、LongCat-Image-Edit）無法只靠文字產生圖片：對它要求生成會回應 400
+`generation_not_supported`，並說明請改用 `/v1/images/edits`。
+
+### 圖片編輯
+
+`POST /v1/images/edits`（1.5.5）接受要編輯的圖片，加上說明要改什麼的提示，回應方式和 `/v1/images/generations`
+相同。由同樣兩種推論引擎提供，只給會編輯圖片的模型：FLUX.2 [klein]（也能從文字產生圖片）、Qwen-Image-Edit、
+LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯、最多接受幾張輸入圖片：diffusers pipeline 由它自己
+說明（`model_index.json`）；stable-diffusion.cpp 的檔案則從檔名判斷（「edit」、「kontext」、FLUX.2 / klein），管理員
+也可以在新增模型時指定（`image_edit`：幾張圖片，0 表示不編輯；`image_generate`：能不能從文字產生圖片）。只由本機部署
+提供。
+
+兩種請求格式，和 OpenAI 的 API 相同：
+
+- **`multipart/form-data`**（OpenAI SDK 的 `client.images.edit` 送的格式）：`model`、`prompt`，圖片以名為 `image`
+  或 `image[]` 的檔案欄位送出，其他欄位和圖片生成相同，以表單欄位送出。
+- **JSON**：`"images": [{"image_url": "data:image/png;base64,…"}, {"image_url": "https://…"}]`。data: URL 直接使用；
+  http(s) 網址**由閘道下載**，規則和對話中的媒體相同（見[對話中的圖片、音訊與影片](#images-audio-and-video-in-chat)：
+  除非開啟 `MEDIA_ALLOW_PRIVATE_HOSTS`，否則只連公開位址；每次重新導向都會再檢查；最多 `MEDIA_FETCH_MAX_MB`），而且
+  要先確認金鑰可以使用這個模型才會下載。`file_id` 會被拒絕：400 `file_id_not_supported`（Forgeyard 不保存上傳的檔案）。
+
+| 欄位 | 閘道怎麼處理 |
+|---|---|
+| `image`、`image[]`（multipart）、`images`（JSON） | 1 張到部署的 *Input images*（`max_input_images`，預設 1，不超過模型能接受的數量；FLUX.2 [klein] 可接受 4 張，Qwen-Image-Edit 1 張）；超過時回應 400 `too_many_input_images`；沒有圖片時回應 400 `missing_image`。每張都必須是 PNG、JPEG 或 WebP（從檔案開頭的位元組判斷；HEIC、GIF 等回應 400 `unsupported_image_format`），最多 `MEDIA_FETCH_MAX_MB`（413 `media_too_large`），寬高都不超過部署的 *Largest input*（`max_input_side`：vLLM-Omni 為 2,048，stable-diffusion.cpp 為 1,024）；超過時回應 400 `input_image_too_large`。尺寸從圖片的檔頭讀出，絕不解碼：檔頭讀不出尺寸時回應 400 `invalid_image` |
+| `mask` | 拒絕：400 `mask_not_supported`。編輯依提示進行；目前還不提供用遮罩做局部重繪 |
+| `prompt`、`n`、`num_inference_steps`、`negative_prompt`、`guidance_scale`、`true_cfg_scale`、`seed`、`response_format`、`stream` | 和[圖片生成](#images)相同，上限也相同 |
+| `size` | 和[圖片生成](#images)相同。**沒指定（或 `auto`）時，採用第一張輸入圖片的長寬比例**，像素數為部署的 *Default size*，不超過它的 *Largest side*，每一邊都是模型要求的倍數：一張 800x600 的照片，在 1024x1024 的部署上會變成 1024x768。送給推論引擎的請求一定帶有尺寸，否則推論引擎會直接產生和第一張輸入一樣大的圖片 |
+| `output_format` | 推論引擎編輯時能產生的格式：vLLM-Omni 為 `png`、`jpeg` 或 `webp`；stable-diffusion.cpp 為 `png` 或 `jpeg`（其他回應 400 `unsupported_output_format`） |
+| `quality`、`background`、`input_fidelity`、`moderation`、`user` | 接受但忽略 |
+
+推論引擎收到的是閘道重新組成的請求：上面這些欄位，加上檢查過的圖片（以 `image[]` 檔案送出）。其他東西都不會送過去：
+不送網址（vLLM-Omni 會從你的網路內部自己下載它的 `url` 欄位，以及字串形式的 `mask_image`、`reference_image`），
+也不送遮罩、LoRA 路徑或其他任何欄位。
+
+檢查的順序：先在讀取請求時檢查格式（`mask`、`file_id`、其他 scheme 的網址、不是 base64 的 data: URL、名稱不對的檔案欄位），
+再確認模型與金鑰能不能使用它。**不會編輯圖片的模型一律回應 400 `edits_not_supported`**（並說明請改用
+`/v1/images/generations`），不論請求有沒有附圖片，請求裡的網址也一個都不會下載。之後才計算圖片張數（`missing_image`、
+`too_many_input_images`）、下載網址、逐張檢查，再套用各部署的上限。
+
+圖片編輯和[圖片生成](#images)共用佇列、*Timeout* 與回應格式。計量方式和圖片生成相同，另外加上：
+
+| 單位 | 怎麼算 |
+|---|---|
+| `media_items` | 輸入圖片的張數 |
+| `bytes_in` | 輸入圖片的大小（位元組） |
+
+編輯請求的內容一律不保存：提示和輸入圖片都不會寫進記錄、檔案或資料庫。**不過濾內容**：Forgeyard 只檢查請求的格式，
+不檢查圖片的內容或提示要求什麼；編輯模型能把真實照片改得很逼真，所以開放給別人使用的部署，需要在前面加上過濾機制，
+並由營運者訂定使用規則。
+
+部署預留的記憶體也會計入輸入圖片（*Input images* 乘以每張需要的量，加上一次 VAE 編碼）：vLLM-Omni 的編輯 pipeline
+會把每張輸入縮放到約一百萬像素，stable-diffusion.cpp 則以原尺寸處理，所以在 stable-diffusion.cpp 上，*Largest input*
+調高時，估計值會隨它的平方增加。
 
 ### 影片生成
 
@@ -561,7 +616,15 @@ local_dirs = ["/data/models"]
 | 400 | `voice_cloning_not_supported` | 文字轉語音：帶了參考錄音、以音訊或連結當聲音、`task_type: "Base"`，或上傳聲音。1.3 不提供 | 使用模型自己的聲音 |
 | 400 | `response_format_not_supported` | 圖片：`response_format: url`。圖片只以 base64 傳回 | 拿掉它，或要求 `b64_json` |
 | 400 | `streaming_not_supported` | 圖片與視覺：`stream: true` | 拿掉它 |
-| 400 | `missing_image` | 視覺：沒有檔案欄位 `image`，或 JSON 沒有 `image` | 附上圖片 |
+| 400 | `missing_image` | 視覺：沒有檔案欄位 `image`，或 JSON 沒有 `image`。圖片編輯（1.5.5）：沒有輸入圖片 | 附上圖片 |
+| 400 | `generation_not_supported` | 圖片生成（1.5.5）：這個模型只會編輯圖片（Qwen-Image-Edit） | 把圖片和提示送到 `/v1/images/edits` |
+| 400 | `edits_not_supported` | 圖片編輯（1.5.5）：這個模型只從文字產生圖片，不會編輯 | 改用 `/v1/images/generations`，或改用會編輯的模型 |
+| 400 | `mask_not_supported` | 圖片編輯（1.5.5）：帶了 `mask` | 拿掉遮罩，在提示裡說明要改什麼 |
+| 400 | `file_id_not_supported` | 圖片編輯（1.5.5）：`images` 裡用了 `file_id` | 改以 `image_url` 或檔案送出圖片 |
+| 400 | `too_many_input_images` | 圖片編輯（1.5.5）：輸入圖片超過部署的 *Input images*（或超過 16 張） | 少送幾張，或調高 `max_input_images` |
+| 400 | `input_image_too_large` | 圖片編輯（1.5.5）：有輸入圖片的寬或高超過部署的 *Largest input* | 先縮小圖片，或調高 `max_input_side` |
+| 400 | `unsupported_image_format` | 圖片編輯（1.5.5）：輸入圖片不是 PNG、JPEG 或 WebP（例如 HEIC 照片、GIF） | 先轉換格式 |
+| 400 | `invalid_image` | 圖片編輯（1.5.5）：輸入圖片的檔頭讀不出尺寸，或 data: URL 不是 base64 | 重新送出檔案 |
 | 400 | `labels_required` | 視覺（1.4.4）：沒告訴零樣本偵測模型要找什麼，或沒給零樣本分類器它的標籤；文字分類（1.5.4）：零樣本模型沒收到 `labels` | 送 `labels` |
 | 400 | `labels_not_supported` | 視覺（1.4.4）：固定類別的偵測模型或分類器收到 `labels`；文字分類（1.5.4）：固定標籤的模型收到 `labels` | 拿掉 `labels`，或改用零樣本模型 |
 | 400 | `too_many_pairs` | 文字分類（1.5.4）：文字數 x `labels` 超過零樣本部署的 *Zero-shot pairs per request* | 少送幾段文字或幾個標籤，或調高 `max_pairs` |
@@ -590,7 +653,7 @@ local_dirs = ["/data/models"]
 | 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
 | 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **允許**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
 | 404 | `unknown_endpoint` | 閘道沒有這個路徑 | 使用上面列出的端點 |
-| 404 | `endpoint_not_supported` | `/v1/images/edits`、`/v1/images/variations`、`/v1/videos/sync` 或 `/v1/videos/{id}/remix`：1.3 不提供 | 改用 `/v1/images/generations`，或 `/v1/videos` 的工作 |
+| 404 | `endpoint_not_supported` | `/v1/images/variations`、`/v1/videos/sync` 或 `/v1/videos/{id}/remix`：不提供 | 改用 `/v1/images/edits`（附上 `n` 和提示），或 `/v1/videos` 的工作 |
 | 404 | `video_not_found` | 影片：這把金鑰沒有這段影片（別的金鑰的 id 也一樣回應） | 查看 `GET /v1/videos` |
 | 409 | `video_not_ready` | 影片：取還在 `queued` 或 `in_progress` 的工作的內容 | 輪詢到 `completed` |
 | 409 | `video_failed` | 影片：取失敗工作的內容 | 看工作的 `error`，重新要求 |
