@@ -269,8 +269,8 @@ def test_fy_kind_007_which_vision_images_run_zero_shot_detectors():
 def test_fy_kind_008_a_pre_release_vision_image_counts_as_its_release():
     """FY-KIND-008 (1.4.4): a pre-release tag of the vision image (PEP 440 aN, bN or rcN, CPU or -cuda, pinned or
     not) is read as the release it leads to, so 1.4.4rc1 runs zero-shot detectors and image classifiers and
-    1.4.3rc1 is refused as older than 1.4.4; the built-in recipe's own images (1.4.4rc1) are read as 1.4.4, not
-    passed as images of another name. A tag that is no PEP 440 pre-release stays unread."""
+    1.4.3rc1 is refused as older than 1.4.4; the built-in recipe's own pre-release images (1.5.4rc1 since 1.5.4) are
+    read as their release, not passed as images of another name. A tag that is no PEP 440 pre-release stays unread."""
     from types import SimpleNamespace as NS
 
     from forgeyard.models import recipes
@@ -288,8 +288,8 @@ def test_fy_kind_008_a_pre_release_vision_image_counts_as_its_release():
 
     recipe, _ = recipes.builtin_recipes()["vision"]
     images = [v.image for v in recipe.variants if v.image]
-    assert images and all("/forgeyard-vision:1.4.4rc1" in i for i in images), images
-    assert {vision.image_version(i) for i in images} == {(1, 4, 4)}
+    assert images and all("/forgeyard-vision:1.5.4rc1" in i for i in images), images
+    assert {vision.image_version(i) for i in images} == {(1, 5, 4)}
 
     zs = {"kind": "hf", "vision": {"task": "detect", "architecture": "Owlv2ForObjectDetection", "zero_shot": True}}
     assert vision.deploy_refusal("detect", zs, recipe) is None

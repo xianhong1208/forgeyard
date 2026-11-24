@@ -8,6 +8,9 @@ version until 1.0.
 
 ### Added
 
+- **The built-in `vision` and `transformers` recipes pin `forgeyard-vision` 1.5.4rc1** (CPU `sha256:da2ddf69…`,
+  linux/amd64 and arm64; `-cuda` `sha256:179143ed…`), published by the `v1.5.4rc1` pre-release, so image embeddings,
+  text classification and zero-shot classification deploy on the built-in `transformers` recipe. It was 1.4.4rc1.
 - **An admin learns when a machine's GPUs change.** No migration: everything lives in the machine's
   `runtime_info` and the audit log.
   - **GPUs the agent does not see.** At each connection the agent counts the host's GPUs on its PCI bus
@@ -40,8 +43,8 @@ version until 1.0.
   `max_pairs`). No code from a model's repository is run. A new built-in recipe `transformers` runs it (CPU and
   CUDA, `threads`, `max_images`, `max_pairs`), offered for CLIP-like and DINOv2 `embed` models and for text
   classifiers, after vLLM; a text embedding model is refused on it. On a CPU the weights are held in float32 (a
-  bge-m3 NLI pass: 1.4 s in float16, 0.2 s in float32) and the estimate counts them so (`cpu_float32`). Until the
-  recipe's pin moves to the 1.5.4 image, deploying on it answers 422 `vision_image_too_old`. The gateway's public
+  bge-m3 NLI pass: 1.4 s in float16, 0.2 s in float32) and the estimate counts them so (`cpu_float32`). It needs a
+  vision image from 1.5.4 on (pinned below); on an older one, deploying answers 422 `vision_image_too_old`. The gateway's public
   shapes, the catalog's rules and the console follow.
 
 - **Image embeddings and zero-shot classification through the gateway (1.5.4, #141 and #144; part 2: catalog,

@@ -450,7 +450,7 @@ local_dirs = ["/data/models"]
 
 每個回應另有 `model`、`width`、`height`（圖片的）和 `ms`（模型花的時間）。視覺伺服器的錯誤（`{"error": {"message", "code"}}`）照原狀態碼傳回：400 `invalid_image`、`invalid_option`、`missing_prompt`（分割時沒給點或方框）、`labels_required`（零樣本偵測模型沒給 `labels`）、`labels_not_supported`（固定類別的偵測模型或分類器收到 `labels`；兩者都是 1.4.4）、413 `image_too_large`。
 
-**零樣本偵測模型（1.4.4，#142）**（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OWL-ViT、OWLv2）找的是每個請求說的東西，而不是固定的類別清單：目錄標示 *找出你指定的東西*（`vision.zero_shot`）。送簡單的名稱，`labels: ["cat", "remote control"]`（或表單欄位 `labels=cat, remote control`）；重複和空的名稱會被去掉。視覺伺服器依各家族的方式詢問（Grounding DINO 是一句小寫提示「cat. remote control.」，每個方框取分數最高的那個名稱；OWL 是每個名稱一個查詢），所以名稱會照送出的樣子傳回。它們的分數比固定類別的偵測模型低：從 0.3（Grounding DINO）或 0.1 到 0.2（OWLv2）開始。它們需要 1.4.4 起的視覺映像檔，內建配方已經使用（固定在 `forgeyard-vision` 1.4.4rc1）；自訂配方指定較舊的映像檔時，部署會回 422 `vision_image_too_old`（本機建置照原樣接受）。
+**零樣本偵測模型（1.4.4，#142）**（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OWL-ViT、OWLv2）找的是每個請求說的東西，而不是固定的類別清單：目錄標示 *找出你指定的東西*（`vision.zero_shot`）。送簡單的名稱，`labels: ["cat", "remote control"]`（或表單欄位 `labels=cat, remote control`）；重複和空的名稱會被去掉。視覺伺服器依各家族的方式詢問（Grounding DINO 是一句小寫提示「cat. remote control.」，每個方框取分數最高的那個名稱；OWL 是每個名稱一個查詢），所以名稱會照送出的樣子傳回。它們的分數比固定類別的偵測模型低：從 0.3（Grounding DINO）或 0.1 到 0.2（OWLv2）開始。它們需要 1.4.4 起的視覺映像檔，內建配方已經使用（固定在 `forgeyard-vision` 1.5.4rc1）；自訂配方指定較舊的映像檔時，部署會回 422 `vision_image_too_old`（本機建置照原樣接受）。
 
 每個有回應的請求會計入（`GET /api/usage` 和 **用量** 頁）：
 
@@ -1251,8 +1251,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
 | | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
-| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda`（torch +cu130） |
-| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.4rc1`（linux/amd64 與 arm64） |
+| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda`（torch +cu130） |
+| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.5.4rc1`（linux/amd64 與 arm64） |
 | `transformers`（1.5.4） | `cuda`、`cpu` | 同 `vision` | 和 `vision` 同一個映像檔（固定在同樣的 digest） |
 
 `vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`：vLLM 的編譯快取會在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，所以重新啟動或被喚醒時會載入第一次啟動編譯好的結果（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts)）。自訂配方可以用 `enabled: false` 關閉它，或用 `enabled: true` 為其他推論引擎開啟它（只限容器 variant）。
@@ -1292,7 +1292,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 - `POST /v1/embeddings`：`input` 是一段文字，或文字、`{"text": …}` 和 `{"image": "<base64 或 data: URI>"}` 項目組成的清單（Jina 的格式；圖片 URL 由閘道取得，引擎從不連網）；以 OpenAI 的格式回應，每個向量都做 L2 正規化，順序和送出的一樣；`encoding_format` 是 `float` 或 `base64`；`dimensions` 只能是模型自己的。文字會截到模型的長度（CLIP 77 個 token、SigLIP 64 個），計在 `usage.truncated_inputs`；`usage` 也計 `images` 和 `kilopixels`。只吃圖片的模型（DINOv2）拒絕文字（400 `text_not_supported`）。
 - `POST /classify`（和 `/v1/classify`）：vLLM 的請求和回應（`input`、`truncate_prompt_tokens`、`use_activation`；`data[index, label, probs, num_classes]`、`usage`）。零樣本模型另外接受 `labels`（必填，最多 32 個不重複的名稱）、`multi_label`（false）和 `hypothesis_template`（`"This text is about {}."`），結果和 transformers 的零樣本 pipeline 一樣：`probs` 依請求裡標籤的順序，回應會把它們列回來（`labels`、`multi_label`）；單一標籤模式下的機率加起來是 1。固定標籤的模型收到 `labels` 回 400 `labels_not_supported`，零樣本模型沒收到則回 `labels_required`；配對太多回 `too_many_pairs`。
 
-在 CPU 上權重以 float32 保存（半精度在 CPU 上慢好幾倍：bge-m3 的一次 NLI 計算在 float16 要 1.4 秒，float32 只要 0.2 秒，四個執行緒），所以估算把 16 位元權重的參數以每個 4 位元組計算（配方估算欄位 `cpu_float32`），再加 1.25 GiB；GPU 上則和 `vision` 一樣是檔案大小加 1 GiB。這些任務需要 1.5.4 起的視覺映像檔：在內建配方固定的映像檔移到新版之前（發布新映像檔的 release 之後馬上移），用它部署或估算會回 422 `vision_image_too_old`。閘道這一側：見[嵌入](#embeddings)和[文字分類](#text-classification)。
+在 CPU 上權重以 float32 保存（半精度在 CPU 上慢好幾倍：bge-m3 的一次 NLI 計算在 float16 要 1.4 秒，float32 只要 0.2 秒，四個執行緒），所以估算把 16 位元權重的參數以每個 4 位元組計算（配方估算欄位 `cpu_float32`），再加 1.25 GiB；GPU 上則和 `vision` 一樣是檔案大小加 1 GiB。這些任務需要 1.5.4 起的視覺映像檔，內建配方釘選的就是它（`forgeyard-vision` 1.5.4rc1）；自訂配方如果指定較舊的映像檔，部署或估算會回 422 `vision_image_too_old`。閘道這一側：見[嵌入](#embeddings)和[文字分類](#text-classification)。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：推論引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 

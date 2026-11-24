@@ -123,8 +123,8 @@ def opts(**over):
 
 
 def test_fy_atf_004_a_recipe_image_older_than_1_5_4_is_a_skip_with_its_reason(at, monkeypatch):
-    """FY-ATF-004: until the transformers recipe's pin moves, its estimate answers 422 vision_image_too_old: the first
-    deployment is a SKIP naming that reason, every later one too, nothing is deployed and nothing fails; another error
+    """FY-ATF-004: on a recipe whose vision image is older than 1.5.4, the estimate answers 422 vision_image_too_old:
+    the first deployment is a SKIP naming that reason, every later one too, nothing is deployed and nothing fails; another error
     stays a failure. --transformers-recipe names the recipe every request uses."""
     monkeypatch.setattr(at, "photo", lambda path: (None, "offline"))
     old = (422, {"detail": {"code": "vision_image_too_old", "message": "Image embeddings … need Forgeyard's vision image 1.5.4 or "

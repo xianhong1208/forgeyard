@@ -510,8 +510,8 @@ and on a GPU it shares the card by default.
 - **No code from a model's repository runs** (`auto_map` is refused), and the image takes models from the model
   cache only (`HF_HUB_OFFLINE`).
 - **Its image follows releases:** the built-in recipe's image is pinned by digest and moves to the new vision image
-  right after the release that publishes it; until then a deployment on it answers 422 `vision_image_too_old`, and a
-  custom recipe (an engine copy) can name a newer image.
+  right after the release that publishes it. A custom recipe (an engine copy) that names an image older than its
+  tasks need answers 422 `vision_image_too_old`.
 
 ## API keys, limits and usage
 

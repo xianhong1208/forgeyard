@@ -599,7 +599,7 @@ field `labels=cat, remote control`); repeats and empty names are dropped. The vi
 its own way (Grounding DINO one lower-case prompt, "cat. remote control.", and each box takes the name whose
 words score it highest; OWL one query per name), so a name comes back as it was sent. Their scores run lower
 than a fixed detector's: start at 0.3 (Grounding DINO) or 0.1 to 0.2 (OWLv2). They need a vision image from
-1.4.4 on, which the built-in recipe runs (it pins `forgeyard-vision` 1.4.4rc1); on a custom recipe that names an
+1.4.4 on, which the built-in recipe runs (it pins `forgeyard-vision` 1.5.4rc1); on a custom recipe that names an
 older one, deploying one answers 422 `vision_image_too_old` (a local build is taken as it is).
 
 What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
@@ -1712,8 +1712,8 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
-| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
-| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.5.4rc1-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.5.4rc1` (linux/amd64 and arm64) |
 | `transformers` (1.5.4) | `cuda`, `cpu` | as `vision` | the same image as `vision` (pinned to the same digests) |
 
 `vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`: vLLM's
@@ -1862,8 +1862,8 @@ runs once per text and label, so texts x labels per request is at most this). Th
 On a CPU it holds the weights in float32 (half precision is several times slower there: a bge-m3 NLI pass took 1.4 s
 in float16, 0.2 s in float32 on four threads), so the estimate counts a 16-bit checkpoint's parameters at 4 bytes each
 (recipe estimate field `cpu_float32`) plus 1.25 GiB; on a GPU the files plus 1 GiB, like `vision`. The tasks need a
-vision image from 1.5.4 on: until the built-in recipe's pin moves to it (right after the release that publishes it),
-deploying or estimating on it answers 422 `vision_image_too_old`. The gateway's side: [Embeddings](#embeddings) and
+vision image from 1.5.4 on, which the built-in recipe pins (`forgeyard-vision` 1.5.4rc1); on a custom recipe that names
+an older one, deploying or estimating answers 422 `vision_image_too_old`. The gateway's side: [Embeddings](#embeddings) and
 [Text classification](#text-classification).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
