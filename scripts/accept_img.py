@@ -490,7 +490,8 @@ def exercise(c: Client, d: dict, model: str, spec: dict, side: int, args, check,
         check(f"{model}: response_format url is refused", getattr(e, "code", None) == "response_format_not_supported",
               f"400 {getattr(e, 'code', None)}: {str(e)[:120]}")
     refused(f"more images than the cap ({most}) are refused", {"prompt": PROMPT, "n": most + 1}, "too_many_images")
-    refused(f"a side over the cap ({side}) is refused", {"prompt": PROMPT, "size": f"{side * 2}x{side * 2}"},
+    # Over the cap yet within the 2048-pixel bound of every size, so the cap answers (not the general size check).
+    refused(f"a side over the cap ({side}) is refused", {"prompt": PROMPT, "size": f"{side + 64}x{side + 64}"},
             "image_too_large")
     refused("more steps than the cap are refused", {"prompt": PROMPT, "num_inference_steps": 1000}, "too_many_steps")
     refused("an empty prompt is refused", {"prompt": "  "}, "invalid_request")

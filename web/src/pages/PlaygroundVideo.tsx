@@ -162,6 +162,15 @@ export function Videos({ model }: { model: string }) {
     }
   };
 
+  // A finished video is deleted at expires_at. The clock above only ticks while a job is at work, so wake up at that
+  // moment: the player and the download link turn into the expired notice even when nothing else re-renders.
+  useEffect(() => {
+    if (!job || job.status !== "completed" || !job.expires_at) return;
+    const left = job.expires_at * 1000 - Date.now();
+    const timer = setTimeout(() => setNow(Date.now() / 1000), Math.min(Math.max(left + 250, 0), 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [job]);
+
   const shown = job;
   const expired = shown?.expires_at ? shown.expires_at <= now : false;
   return (

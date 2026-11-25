@@ -415,7 +415,10 @@ def exercise(c: Client, d: dict, model: str, spec: dict, size: str, args, check,
         check(f"{model}: {label}", s == 400 and f'"{code}"' in text, f"{s} {text[:160]}")
 
     refused(f"more than {seconds} s is refused", {"prompt": PROMPT, "seconds": str(seconds + 1)}, "video_too_long")
-    refused("a size over the cap is refused", {"prompt": PROMPT, "size": f"{w * 2}x{h * 2}"}, "video_too_large")
+    # Over the deployment's cap (its own size) yet within the 2048-pixel bound every size has, so the cap answers and
+    # not the general size check: twice 1280x704 (Wan2.2-TI2V-5B) is over 2048 and got invalid_size (1.5.5 lab).
+    over = f"{w + 64}x{h}" if w >= h else f"{w}x{h + 64}"
+    refused("a size over the cap is refused", {"prompt": PROMPT, "size": over}, "video_too_large")
     # 1.5.5: start images are checked input_reference files (--image: exercise_image); a reference the engine would
     # fetch itself stays refused.
     refused("a URL reference for the engine is refused", {"prompt": PROMPT, "image_reference": '{"image_url": '
