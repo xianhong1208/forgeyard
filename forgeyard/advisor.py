@@ -93,6 +93,9 @@ class Finding:
     fix_label: str = "Fix it"
     scope: str = "server"
     pages: tuple[str, ...] = ()
+    # 1.6.0 (#39): what the detail is made of (names, counts, times), for the console to write it in another
+    # language. Only findings that have it send it.
+    facts: Optional[dict] = None
 
     @property
     def key(self) -> str:
@@ -105,7 +108,7 @@ class Finding:
     def out(self) -> dict:
         return {"id": self.id, "key": self.key, "severity": self.severity, "title": self.title, "detail": self.detail,
                 "fix_url": self.fix_url, "fix_label": self.fix_label, "scope": self.scope, "pages": list(self.pages),
-                "snoozable": self.snoozable}
+                "snoozable": self.snoozable, **({"facts": self.facts} if self.facts is not None else {})}
 
 
 def _names(items: Iterable[str], most: int = 3) -> str:
@@ -446,7 +449,7 @@ def admins_without_mfa(ctx: Context) -> Iterator[Finding]:
                    "only add it.")
     yield Finding("admins-without-mfa", "warning" if required else "info",
                   f"{_plural(len(bare), 'admin')} without two-factor sign-in", detail, "/account", "Open My account",
-                  pages=("users",))
+                  pages=("users",), facts={"admins": bare, "required": required})
 
 
 @check
@@ -483,7 +486,9 @@ def mfa_setup_pending(ctx: Context) -> Iterator[Finding]:
     yield Finding("mfa-setup-pending", "info",
                   f"{_plural(len(waiting) + len(overdue), 'person', 'people')} still to add two-factor sign-in",
                   " ".join(parts) + " Each person adds it in My account; an admin can only remind them.",
-                  "/users", "Open Users", pages=("users",))
+                  "/users", "Open Users", pages=("users",),
+                  facts={"waiting": sorted(n for n, _ in waiting), "overdue": sorted(overdue),
+                         "first_ends": min(by for _, by in waiting).isoformat() if waiting else None})
 
 
 # --- machines

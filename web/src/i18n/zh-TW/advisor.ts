@@ -99,6 +99,17 @@ export default {
   "advisor.finding.registrations-pending": "有人在等候核准",
   "advisor.finding.admins-without-mfa": "有管理員沒有開啟雙重驗證",
   "advisor.finding.mfa-setup-pending": "有人還沒依規定開啟雙重驗證",
+  "advisor.names.more": "{names} 和另外 {more} 人",
+  "advisor.detail.adminsWithoutMfa.one":
+    "{names} 只用密碼登入。管理員帳號能變更這裡的所有設定：請到「我的帳號」加入驗證器 App（每位管理員各自替自己的帳號加入）。",
+  "advisor.detail.adminsWithoutMfa.other":
+    "{names} 只用密碼登入。管理員帳號能變更這裡的所有設定：請到「我的帳號」加入驗證器 App（每位管理員各自替自己的帳號加入）。",
+  "advisor.detail.adminsWithoutMfa.required": "目前規定管理員必須開啟雙重驗證：寬限期過後，還沒有驗證器的管理員就只能先加入驗證器。",
+  "advisor.detail.mfaPending.waiting.one": "{count} 人還在寬限期內（{names}；最早的期限是 {date}）。",
+  "advisor.detail.mfaPending.waiting.other": "{count} 人還在寬限期內（{names}；最早的期限是 {date}）。",
+  "advisor.detail.mfaPending.overdue.one": "{count} 人已經逾期（{names}）：加入驗證器之前，他們只能做這件事。",
+  "advisor.detail.mfaPending.overdue.other": "{count} 人已經逾期（{names}）：加入驗證器之前，他們只能做這件事。",
+  "advisor.detail.mfaPending.tail": "每個人都要到「我的帳號」自己加入，管理員只能提醒他們。",
   "advisor.finding.replica-certificate": "有機器沒有給副本用的憑證",
   "advisor.finding.replica-margin-low": "有 GPU 快滿了",
   "advisor.finding.replica-traffic-plain": "連到某台機器的流量沒有加密：請更新 agent",

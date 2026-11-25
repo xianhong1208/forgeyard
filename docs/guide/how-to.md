@@ -1621,8 +1621,9 @@ same switch is at the end of the menu. The page changes at once, without reloadi
 - Numbers, sizes, times and dates follow the language (*41 秒前*, *2026年11月23日*).
 - The server keeps writing its messages in English. The console translates the common ones by their code (for
   example `model_waking`, `cannot_wake`, `budget_exhausted`) and names each **Setup health** finding's kind in
-  Chinese, with the server's own words (which name the machines and models) under it. A message without a
-  translation is shown as the server sent it.
+  Chinese, with the server's own words (which name the machines and models) under it. The two-factor findings
+  (1.6.0) are written in Chinese in full, from the names, counts and dates the server sends with them. A message
+  without a translation is shown as the server sent it.
 - Every page is translated: the frame (menus, sign-in, Get started and Setup health), **Machines**, **Serving**,
   **Models**, **Cloud**, **Playground**, **API keys**, **Usage**, **Users**, the **Audit log**, your account and
   **Trust this server**. Names you choose (machines, models, keys), what engines and agents print, and the API

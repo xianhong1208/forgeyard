@@ -5,7 +5,7 @@ Expected values come from the requirement: off changes nothing; admins / everyon
 later of the setting and the account; overdue → 403 `mfa_enrolment_required` everywhere but the setup, who-am-I and
 sign-out; API keys never affected; nobody (the owner included) left without a way in."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -247,7 +247,7 @@ def test_fy_mfa_032_setup_health_warns_about_admins_and_counts_the_people_left(o
     has an authenticator."""
     add_user(owner, "uma", password=PW)
     (f,) = findings("admins-without-mfa")
-    assert f.severity == "info"
+    assert f.severity == "info" and f.out()["facts"] == {"admins": ["owner"], "required": False}
     t0 = now[0]
     require(owner, "admins", 7)
     (f,) = findings("admins-without-mfa")
@@ -260,6 +260,9 @@ def test_fy_mfa_032_setup_health_warns_about_admins_and_counts_the_people_left(o
     (p,) = findings("mfa-setup-pending")
     assert p.title == "2 people still to add two-factor sign-in"
     assert "1 person still in the grace period (uma" in p.detail and "1 person past it (owner)" in p.detail
+    facts = p.out()["facts"]  # what the console writes the detail from in another language
+    assert (facts["waiting"], facts["overdue"]) == (["uma"], ["owner"])
+    assert abs(datetime.fromisoformat(facts["first_ends"]) - (t0 + 7 * DAY)) < timedelta(minutes=1)  # uma's account
     set_level("everyone", 30)
     enrol(owner, clock)
     assert findings("admins-without-mfa") == []

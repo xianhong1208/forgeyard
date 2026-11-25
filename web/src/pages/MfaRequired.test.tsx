@@ -8,6 +8,7 @@ import { MemoryRouter, useLocation } from "react-router";
 import App from "../App";
 import { AuthProvider } from "../auth";
 import { daysLeft } from "../components/MfaRequired";
+import { formatDate, formatTime } from "../i18n/format";
 import { LANG_KEY } from "../i18n/lang";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, has_mfa: false,
@@ -85,7 +86,7 @@ describe("people it is required of", () => {
         return { status: 200, body: { factor: FACTOR, recovery_codes: CODES, factors: [FACTOR], recovery_codes_left: 10, max_factors: 5 } };
       }
       return undefined;
-    }, { ...OWNER, mfa_enrolment: { by: "2026-11-20T00:00:00Z", due: true } });
+    }, { ...OWNER, mfa_enrolment: { by: "2026-11-20T12:00:00Z", due: true } });
     mount("/machines");
     expect(await screen.findByRole("heading", { level: 1, name: "Add two-factor sign-in to continue" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Machines" })).toBeNull();
@@ -115,10 +116,10 @@ describe("people it is required of", () => {
     expect(screen.getByRole("link", { name: "現在就加入" })).toBeTruthy();
     cleanup();
     server((url) => (url === "/api/auth/mfa/factors" ? { status: 200, body: { factors: [], recovery_codes_left: 0, max_factors: 5 } } : undefined),
-      { ...OWNER, mfa_enrolment: { by: "2026-11-20T00:00:00Z", due: true } });
+      { ...OWNER, mfa_enrolment: { by: "2026-11-20T12:00:00Z", due: true } });
     mount("/users");
     expect(await screen.findByRole("heading", { level: 1, name: "請先開啟雙重驗證" })).toBeTruthy();
-    expect(screen.getByText(/你的帳號必須開啟雙重驗證，寬限期已在 2026年11月20日 結束。請在這裡加入驗證器 App/)).toBeTruthy();
+    expect(screen.getByText(`你的帳號必須開啟雙重驗證，寬限期已在 ${formatDate("2026-11-20T12:00:00Z", "zh-TW")} 結束。請在這裡加入驗證器 App，加入之後，其他功能就會立刻恢復。`)).toBeTruthy();
     const { serverMessage } = await import("../i18n/server");
     expect(serverMessage("mfa_enrolment_required", "x")).toBe("請先到「我的帳號」加入驗證器 App：你的帳號必須開啟雙重驗證。");
   });
@@ -130,7 +131,7 @@ describe("admins", () => {
   const people = [
     OWNER,
     { ...OWNER, id: 2, username: "erin", is_owner: false, mfa_enrolment: { by: "2026-12-01T00:00:00Z", due: false } },
-    { ...OWNER, id: 3, username: "zed", is_owner: false, role: "user", mfa_enrolment: { by: "2026-11-20T00:00:00Z", due: true } },
+    { ...OWNER, id: 3, username: "zed", is_owner: false, role: "user", mfa_enrolment: { by: "2026-11-20T12:00:00Z", due: true } },
   ];
 
   it("FY-WEB-1014 Users: the setting is saved as chosen, with the counts and each person's deadline", async () => {
@@ -200,4 +201,32 @@ it("FY-WEB-1016 My account: adding an authenticator reloads the sessions, so thi
   fireEvent.click(within(panel).getByRole("button", { name: "Turn on two-factor sign-in" }));
   expect(await within(sessions).findByText("two-factor")).toBeTruthy();
   expect(calls(fetch, "/api/auth/sessions").length).toBeGreaterThanOrEqual(2);
+});
+
+const FIRST = "2026-12-09T10:46:00+00:00";
+
+it("FY-WEB-1017 Setup health's two-factor findings in Traditional Chinese: the detail written from its facts, names, counts and date", async () => {
+  localStorage.setItem(LANG_KEY, "zh-TW");
+  const base = { key: "", fix_url: "/account", fix_label: "Open My account", scope: "server", pages: ["users"], snoozable: true };
+  const findings = [
+    { ...base, id: "admins-without-mfa", key: "a@server", severity: "warning", title: "1 admin without two-factor sign-in",
+      detail: "owner signs in with a password alone.", facts: { admins: ["owner"], required: true } },
+    { ...base, id: "mfa-setup-pending", key: "p@server", severity: "info", title: "6 people still to add two-factor sign-in",
+      detail: "1 person still in the grace period (owner; …).", fix_url: "/users", fix_label: "Open Users",
+      facts: { waiting: ["owner"], overdue: ["ann", "bob", "cy", "dee", "eve"], first_ends: FIRST } },
+  ];
+  const counts = { error: 0, warning: 1, info: 1 };
+  server((url) => (url === "/api/advisor" ? { status: 200, body: { findings, snoozed: [], counts, badge: 1, snooze_days: 30, checked_at: "2026-11-25T00:00:00Z" } }
+    : url === "/api/users" ? { status: 200, body: { users: [OWNER] } }
+      : url === "/api/users/mfa-policy" ? { status: 200, body: { mfa_required: "everyone", mfa_grace_days: 14, max_grace_days: 90, in_grace_period: 1, setup_overdue: 5 } }
+        : undefined), { ...OWNER, has_mfa: true });
+  mount("/users");
+  expect(await screen.findByText("owner 只用密碼登入。管理員帳號能變更這裡的所有設定：請到「我的帳號」加入驗證器 App（每位管理員各自替自己的帳號加入）。"
+    + "目前規定管理員必須開啟雙重驗證：寬限期過後，還沒有驗證器的管理員就只能先加入驗證器。")).toBeTruthy();
+  const at = `${formatDate(FIRST, "zh-TW")} ${formatTime(FIRST, "zh-TW")}`;  // the reader's time zone
+  const pending = await screen.findByText(`1 人還在寬限期內（owner；最早的期限是 ${at}）。5 人已經逾期（ann、bob、cy 和另外 2 人）：`
+    + "加入驗證器之前，他們只能做這件事。每個人都要到「我的帳號」自己加入，管理員只能提醒他們。");
+  expect(pending.getAttribute("lang")).toBeNull();
+  expect(screen.queryByText(/signs in with a password alone/)).toBeNull();
+  expect(screen.queryByText(/still in the grace period/)).toBeNull();
 });

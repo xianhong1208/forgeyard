@@ -50,7 +50,8 @@ version until 1.0.
   codes and ends its sessions, audited as `user.mfa_reset` with the actor `cli`. The way back in for an owner (or the
   only admin) who lost both the phone and the codes. Works with the server running and needs no secret key.
 - **Setup health**: `admins-without-mfa` becomes a warning while two-factor sign-in is required of admins, and a new
-  note `mfa-setup-pending` counts the people still in the grace period and past it.
+  note `mfa-setup-pending` counts the people still in the grace period and past it. Both send `facts` (the names,
+  counts and first deadline) with the finding, so the console writes their detail in Traditional Chinese too.
 
 ### Changed
 
