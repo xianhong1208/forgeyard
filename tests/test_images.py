@@ -199,7 +199,8 @@ def test_fy_img_004_the_build_context_has_what_both_images_copy_and_no_local_bui
 
 def test_fy_img_005_the_agent_image_builds_for_arm64_without_rocm_and_has_labels():
     """FY-IMG-005: the agent image's ROCm helpers (libdrm-amdgpu, the libdrm_amdgpu.so link) are
-    installed only on amd64 (ROCm is x86_64 only); tini and the workload account on every platform;
+    installed only on amd64 (ROCm is x86_64 only); tini, libgomp1 (1.5.5: the built-in process engines link it) and
+    the workload account on every platform;
     NVML comes from the wheel's [nvidia] extra on both; OCI labels like the server's."""
     text = (ROOT / "Dockerfile.agent").read_text()
     run = text[text.index('arch="${TARGETARCH'):text.index("COPY --from=dockercli")]
@@ -207,6 +208,7 @@ def test_fy_img_005_the_agent_image_builds_for_arm64_without_rocm_and_has_labels
     assert "libdrm-amdgpu1" in branch and "ln -s libdrm_amdgpu.so.1" in branch and 'test -n "$amdgpu"' in branch
     outside = run.replace(branch, "")
     assert "libdrm" not in outside and "tini" in outside and "useradd --system --uid 990" in outside
+    assert "libgomp1" in outside
     assert "ARG TARGETARCH" in text and "[nvidia]" in text
     for label in ('org.opencontainers.image.source="https://github.com/xianhong1208/forgeyard"',
                   'org.opencontainers.image.licenses="Apache-2.0"', 'org.opencontainers.image.revision="${REVISION}"'):

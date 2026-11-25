@@ -193,6 +193,19 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：** 把 *KV cache type* 改回 `f16`（在部署頁面按 **編輯**，在 **進階** 裡）。在 ROCm 映像檔有編譯的 AMD 卡上，FP8 會用 `rocm` 執行。
 
+## CPU 推論引擎的結束碼是 127：缺少共用函式庫
+
+**你會看到：** 在機器的 CPU 上執行的部署（`llama-cpp` 或 `sd-cpp` 的 `cpu-process` 變體）一直停在 **稍後重試**，副本顯示 *exited with code 127: the engine needs libgomp.so.1, which this machine does not have. Update the agent …*，輸出的最後是 `error while loading shared libraries: libgomp.so.1: cannot open shared object file`。比 1.5.5 舊的 agent 只會顯示 *exited with code 127*。
+
+**原因：** 這些推論引擎是 agent 下載的發行壓縮檔，以一般程序的方式執行，所以用的是 agent 所在環境的共用函式庫。它們需要 GCC 的 OpenMP 執行環境（`libgomp.so.1`），而 1.5.5 之前的 agent 映像檔沒有包含它。
+
+**做法：**
+
+- 用 agent 映像檔執行的 agent：用機器頁面上 **更新 agent** 的指令更新它（[做法](how-to.md#update-an-agent)）。1.5.5 以後的映像檔已經包含這個函式庫；
+- 直接在主機上執行的 agent（用 install.sh 安裝，或從原始碼執行）：在主機上安裝這個函式庫（Debian 和 Ubuntu 用 `apt install libgomp1`，Fedora 和 RHEL 用 `dnf install libgomp`）。
+
+副本會自己重試，下一次啟動就找得到這個函式庫。
+
 ## 部署放不下
 
 **你會看到：** **部署** 回應 *Nothing can take a replica that needs … GiB per GPU*，接著每台機器一行說明。

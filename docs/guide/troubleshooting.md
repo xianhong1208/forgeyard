@@ -325,6 +325,26 @@ places an FP8 deployment on the `vulkan` variant.
 **Do:** set *KV cache type* back to `f16` (**Edit** on the deployment's page, under **Advanced**). On
 an AMD card the ROCm image is built for, FP8 runs on `rocm`.
 
+## A CPU engine exits with code 127: a shared library is missing
+
+**You see:** a deployment on a machine's CPU (the `cpu-process` variant of `llama-cpp` or `sd-cpp`) stays in
+backoff, and its replica says *exited with code 127: the engine needs libgomp.so.1, which this machine does not have.
+Update the agent …*. Its output ends with `error while loading shared libraries: libgomp.so.1: cannot open shared
+object file`. An agent older than 1.5.5 says only *exited with code 127*.
+
+**Why:** these engines are release archives that the agent downloads and runs as a plain process, so they use the
+shared libraries of the place the agent runs in. They link GCC's OpenMP runtime (`libgomp.so.1`), which agent images
+before 1.5.5 did not include.
+
+**Do:**
+
+- an agent that runs from the agent image: update it with the machine page's **Update the agent** command
+  ([how](how-to.md#update-an-agent)). Images of 1.5.5 and later include the library;
+- an agent that runs on the host itself (install.sh, or from source): install the library on the host
+  (`apt install libgomp1` on Debian and Ubuntu, `dnf install libgomp` on Fedora and RHEL).
+
+The replica tries again by itself, and its next start finds the library.
+
 ## A deployment does not fit
 
 **You see:** *Deploy* answers *Nothing can take a replica that needs … GiB per GPU*, followed by one
