@@ -12,6 +12,10 @@ env:
   UV_PYTHON_DOWNLOADS: never
   UV_PYTHON_PREFERENCE: only-system
 
+# The pytest steps run under `timeout` well inside the job's limit: on a hang it sends SIGABRT, Python's
+# faulthandler (-X faulthandler: on for the whole run, including interpreter exit, which pytest's own handler
+# no longer covers) prints every thread's stack into the log, and the step fails. A job cancelled at its
+# limit keeps no log (#286). pytest-timeout still ends a single test that hangs after 5 minutes.
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -24,7 +28,7 @@ jobs:
       - run: python -m pip install uv
       - run: uv sync --locked --extra server
       - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync python -m pytest -q
+      - run: uv run --no-sync timeout --signal=ABRT --kill-after=60s 40m python -X faulthandler -m pytest -q
 
   backend-postgres:
     runs-on: ubuntu-latest
@@ -48,7 +52,7 @@ jobs:
           python-version-file: .python-version
       - run: python -m pip install uv
       - run: uv sync --locked --extra postgres --extra server
-      - run: uv run --no-sync python -m pytest -q
+      - run: uv run --no-sync timeout --signal=ABRT --kill-after=60s 40m python -X faulthandler -m pytest -q
 
   frontend:
     runs-on: ubuntu-latest
@@ -163,7 +167,8 @@ jobs:
           /tmp/vision/bin/pip install --disable-pip-version-check --require-hashes \
             --extra-index-url https://download.pytorch.org/whl/cpu -r images/vision/requirements-cpu.txt
           /tmp/vision/bin/pip install --disable-pip-version-check pytest==8.4.2 httpx==0.28.1
-          /tmp/vision/bin/python -m pytest -q -p no:cacheprovider --noconftest tests/test_vision_server.py \
+          timeout --signal=ABRT --kill-after=60s 10m /tmp/vision/bin/python -X faulthandler -m pytest -q \
+            -p no:cacheprovider --noconftest tests/test_vision_server.py \
             tests/test_transformers_server.py
       - name: Tiny models for the smoke test (embed, classify)
         run: |
