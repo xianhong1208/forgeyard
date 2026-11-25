@@ -4,12 +4,15 @@ GET /api/recipes/{name} (each machine's variant and whether the image or program
 that use it), the image listing the server keeps per machine (nodes.runtime_info["images"]), who may look and who may
 change, and the model names the console's routes reserve."""
 
+import pytest
 from sqlalchemy import select
 
 from forgeyard.db import Node, new_session
 from forgeyard.machines import engineimages
 from forgeyard.models import reach
+from forgeyard.workloads import images
 from tests.conftest import add_user, sign_in
+from tests.image_helpers import build_image
 from tests.machines_helpers import connect, hello, joined, machine
 from tests.model_helpers import add_catalog
 from tests.test_cache_api import deployment
@@ -304,3 +307,89 @@ def test_fy_page_009_an_engines_program_deployments_and_models(owner):
         assert db.scalar(select(Node.id).where(Node.name == "box-c")) == c["node_id"]
     finally:
         db.close()
+
+
+# ------------------------------------------------------------------ 1.5.6 (#282): an engine image as current state
+RELAYS = LISTS + ["relay", "relay_images"]
+
+
+@pytest.fixture()
+def img(monkeypatch):
+    """A pinned engine image recorded in the lock (the server can relay it)."""
+    image = build_image("ghcr.io/acme/engine:1.0", arches=("amd64",))
+    lock = {**images.load_lock(), image.ref: image.lock_entry()}
+    monkeypatch.setattr(images, "load_lock", lambda path=None: lock)
+    return image
+
+
+def test_fy_page_010_how_a_missing_image_comes_and_its_size(owner, img):
+    """FY-PAGE-010: per machine, the engine page and the model page say how a missing engine image comes (`via`):
+    "server" for a machine that fetches through the server and whose agent relays images (a pinned, recorded image),
+    "auto" when it tries directly first, "direct" for a machine without the relay feature, set to direct, or for an
+    image the server cannot relay (tag-only); and its size when a machine's listing shows it: this machine's, else
+    another machine's that has the same image (None when no listing has it)."""
+    recipe(owner, "tts", img.ref)
+    recipe(owner, "tagged", TAGGED)
+    a = joined(owner, "box-a")
+    b = joined(owner, "box-b")
+    owner.put(f"/api/machines/{b['node_id']}/fetch-via", json={"fetch_via": "server"})
+    with connect(owner, a["credential"]) as wa, connect(owner, b["credential"]) as wb:
+        online(wa, features=LISTS, runtime_info=DOCKER)
+        online(wb, features=RELAYS, runtime_info=DOCKER)
+        page = owner.get("/api/recipes/tts").json()
+        rows = {m["name"]: m for m in page["machines"]}
+        assert rows["box-b"]["via"] == "server" and rows["box-b"]["size"] is None   # no listing has it yet
+        call = InThread(lambda: owner.get(f"/api/machines/{a['node_id']}/engine-images"))
+        answer_list(wa, [{"id": "sha256:" + "c" * 64, "tags": [img.name], "content": None, "size": 9_350_000}])
+        call.result()
+        call = InThread(lambda: owner.get(f"/api/machines/{b['node_id']}/engine-images"))
+        answer_list(wb, [])
+        call.result()
+        rows = {m["name"]: m for m in owner.get("/api/recipes/tts").json()["machines"]}
+        assert rows["box-a"]["present"] is True and rows["box-a"]["size"] == 9_350_000 and rows["box-a"]["via"] == "direct"
+        assert rows["box-b"]["present"] is False and rows["box-b"]["size"] == 9_350_000 and rows["box-b"]["via"] == "server"
+        assert {m["name"]: m for m in owner.get("/api/recipes/tagged").json()["machines"]}["box-b"]["via"] == "direct"
+        owner.put(f"/api/machines/{b['node_id']}/fetch-via", json={"fetch_via": "auto"})
+        assert {m["name"]: m for m in owner.get("/api/recipes/tts").json()["machines"]}["box-b"]["via"] == "auto"
+        owner.put(f"/api/machines/{b['node_id']}/fetch-via", json={"fetch_via": "direct"})
+        assert {m["name"]: m for m in owner.get("/api/recipes/tts").json()["machines"]}["box-b"]["via"] == "direct"
+        owner.put(f"/api/machines/{b['node_id']}/fetch-via", json={"fetch_via": "server"})
+        mid = gguf_id()
+        model = owner.get(f"/api/models/{mid}").json()
+        on_b = {m["name"]: m for m in model["machines"]}["box-b"]["engines"]
+        assert on_b["tts"]["via"] == "server" and on_b["tts"]["size"] == 9_350_000 and on_b["tts"]["present"] is False
+
+
+def test_fy_page_011_the_estimate_says_whether_the_chosen_machine_has_the_engine(owner, img):
+    """FY-PAGE-011: POST /api/deployments/estimate: each placed replica carries `engine` for the variant it was placed
+    with: present (by the machine's last listing), via and size, as on the engine page. The keys the answer had before
+    stay as they were."""
+    # A GPU variant first (another image), then the CPU one these machines run.
+    text = open("forgeyard/recipes/llama-cpp.yaml").read().split("\nvariants:")[0].replace("name: llama-cpp", "name: tts")
+    text += ("\nvariants:\n  - name: cuda\n    when: {vendor: nvidia}\n    runtime: container\n    image: ghcr.io/acme/engine-cuda:1.0\n"
+             f"  - name: cpu\n    when: {{vendor: cpu}}\n    runtime: container\n    image: {img.ref}\n")
+    assert owner.post("/api/recipes", json={"yaml": text}).status_code == 201
+    gguf_id()
+    a = joined(owner, "box-a")
+    b = joined(owner, "box-b")
+    owner.put(f"/api/machines/{b['node_id']}/fetch-via", json={"fetch_via": "server"})
+    with connect(owner, a["credential"]) as wa, connect(owner, b["credential"]) as wb:
+        online(wa, features=LISTS, runtime_info=DOCKER)
+        online(wb, features=RELAYS, runtime_info=DOCKER)
+        call = InThread(lambda: owner.get(f"/api/machines/{a['node_id']}/engine-images"))
+        answer_list(wa, [{"id": "sha256:" + "c" * 64, "tags": [img.name], "content": None, "size": 4_000}])
+        call.result()
+        call = InThread(lambda: owner.get(f"/api/machines/{b['node_id']}/engine-images"))
+        answer_list(wb, [])
+        call.result()
+        body = {"name": "t", "model": "qwen3-1.7b-gguf", "recipe": "tts", "params": {"gpus": 0}}
+        here = owner.post("/api/deployments/estimate", json={**body, "machine_id": a["node_id"]})
+        assert here.status_code == 200, here.text
+        placed = here.json()["placement"]["placed"][0]
+        assert placed["machine_id"] == a["node_id"] and placed["variant"] == "cpu"
+        assert {"replica", "machine", "variant", "runtime", "image", "gpus", "cached", "leftover", "online"} <= set(placed)
+        assert placed["engine"]["kind"] == "image" and placed["engine"]["present"] is True
+        there = owner.post("/api/deployments/estimate", json={**body, "machine_id": b["node_id"]}).json()
+        eng = there["placement"]["placed"][0]["engine"]
+        assert eng["present"] is False and eng["via"] == "server" and eng["size"] == 4_000
+        assert eng["engine_name"] == img.ref

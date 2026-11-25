@@ -4,7 +4,9 @@
 // every field and every guard is tested on its own; the page only shows what this returns.
 import { t } from "../i18n/core";
 
-export type DockerKind = "nvidia" | "amd" | "cpu";
+// 1.5.6 (#282): "wsl", an NVIDIA machine running Windows: Docker Engine inside a WSL2 distribution, with the NVIDIA
+// Container Toolkit. WSL2 has no /dev/nvidia* nodes (the GPU comes through /dev/dxg), so only --gpus all.
+export type DockerKind = "nvidia" | "amd" | "cpu" | "wsl";
 
 // What the person types. Empty name / port range = the agent's own default (host name, 30000-32767).
 export type DockerForm = { modelDir: string; name: string; server: string; portRange: string };
@@ -174,6 +176,8 @@ export function runCommand(kind: DockerKind, form: DockerForm, join: DockerJoin)
   const lines = ["sudo docker run -d --name forgeyard-agent --restart always --network host"];
   if (kind === "nvidia") {
     lines.push("--gpus all", NVIDIA_DEVICES);
+  } else if (kind === "wsl") {
+    lines.push("--gpus all");
   } else if (kind === "amd") {
     // Numeric ids: Docker looks group names up in the image's /etc/group, which has no "render".
     lines.push("--device /dev/kfd --device /dev/dri", ...AMD_GROUPS, "-v /opt/rocm:/opt/rocm:ro");
@@ -190,6 +194,17 @@ export function runCommand(kind: DockerKind, form: DockerForm, join: DockerJoin)
   if (name) lines.push(`-e FORGEYARD_NAME=${name}`);
   lines.push(join.image);
   return lines.join(" \\\n  ");
+}
+
+// 1.5.6 (#282): a model directory on the Windows drives (/mnt/c, /mnt/d…) of a WSL2 machine works, but every file goes
+// through WSL's file sharing, many times slower than the distribution's own disk: the page says so (not an error).
+export function windowsDriveDir(v: string): boolean {
+  return /^\/mnt\/[a-z](\/|$)/i.test(v.trim());
+}
+
+// A machine whose agent reports a WSL2 kernel (platform.release(): "5.15.167.4-microsoft-standard-WSL2"): Windows.
+export function onWsl(kernel: string | null | undefined): boolean {
+  return /microsoft-standard-wsl2/i.test(kernel ?? "");
 }
 
 // ------------------------------------------------------------------ remembered per browser

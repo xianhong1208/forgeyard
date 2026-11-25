@@ -271,12 +271,17 @@ def context_hint(db: DbSession, body: DeploymentIn, recipe: Recipe, m: CatalogMo
 @router.post("/deployments/estimate")
 def estimate(body: DeploymentIn, _: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
     """The estimate and where the replicas would go right now, before anything is created; for a model
-    with a context length, also the model's maximum and the largest context that fits now."""
+    with a context length, also the model's maximum and the largest context that fits now. Each placed replica also
+    says whether its machine has the engine's image or program (1.5.6)."""
     ctx, recipe, m = build_context(db, body)
     if autoscale.setting(ctx.params).on:
         ctx.replicas = autoscale.setting(ctx.params).floor   # 1.5.0: it starts with its minimum
     _previewing(ctx, body, m)
-    return {"estimate": ctx.estimate.as_dict(), "placement": scheduler.preview(db, ctx), "params": ctx.params,
+    from forgeyard.models import pages  # pages imports this module's neighbours
+
+    # 1.5.6 (#282): each placed replica says whether its machine has the engine image now, and how it comes.
+    plan = pages.placed_engines(db, recipe, scheduler.preview(db, ctx))
+    return {"estimate": ctx.estimate.as_dict(), "placement": plan, "params": ctx.params,
             "recipe": recipe.name, "model": m.name, "context_hint": context_hint(db, body, recipe, m)}
 
 

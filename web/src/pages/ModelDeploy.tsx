@@ -9,6 +9,7 @@ import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { engineRuns } from "../lib/engines";
+import { engineLine } from "../lib/pages";
 import { inputParamApplies } from "../lib/imageEdit";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
@@ -105,6 +106,10 @@ export function ModelDeployPage() {
   const advanced = relevant.filter(([, p]) => p.advanced);
   const usable = (machines?.machines ?? []).filter((m) => m.status !== "revoked");
   const same = sameModelStart(deps?.deployments ?? [], view.model, view.recipe);
+  // 1.5.6 (#282): once a machine is chosen, whether it has the engine's image now and how it comes (from the estimate
+  // that placed a replica there; nothing while the estimate is for another choice).
+  const placedThere = f.machine ? est?.placement.placed.find((x) => String(x.machine_id) === f.machine) : undefined;
+  const chosenEngine = placedThere?.engine ? engineLine(placedThere.machine, placedThere.engine) : null;
 
   return (
     <>
@@ -181,7 +186,8 @@ export function ModelDeployPage() {
                   <select id="d-machine" value={f.machine} onChange={(e) => set("machine", e.target.value)}>
                     <option value="">{t("deploy.bestFit")}</option>
                     {usable.map((m) => <option key={m.id} value={m.id}>{m.name} · {t.maybe(`common.status.${m.status}`, m.status)}</option>)}
-                  </select></div>
+                  </select>
+                  {chosenEngine && <p className="field-hint deploy-engine-there">{chosenEngine}</p>}</div>
               </div>
               {view.device === "gpu" && (f.share || recipe.share) === "exclusive" && est?.placement.share_hint && (
                 <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
@@ -355,7 +361,8 @@ export function PlacementView({ p }: { p: Placement }) {
             <li key={x.replica}><IconCheck size={15} aria-hidden="true" className="ok-ic" />
               <span>{t.rich("deploy.placed", { replica: x.replica, machine: <strong>{x.machine}</strong> })} {x.gpus.length ? `GPU ${x.gpus.map((g) => `#${g}`).join(", ")}` : "CPU"} · {x.variant}{x.runtime === "process" ? t("deploy.placedProcess") : ""}
                 {x.gpu_memory_utilization && <> · <span className="mono">--gpu-memory-utilization {x.gpu_memory_utilization}</span></>}
-                {x.previous && t("deploy.placedNow")}{x.cached && t("deploy.placedCached")}{!x.online && t("deploy.placedOffline")}</span></li>
+                {x.previous && t("deploy.placedNow")}{x.cached && t("deploy.placedCached")}{!x.online && t("deploy.placedOffline")}
+                {x.engine && x.engine.present !== true && engineLine(x.machine, x.engine) && <span className="placed-engine muted small">{engineLine(x.machine, x.engine)}</span>}</span></li>
           ))}
         </ul>
       ) : (

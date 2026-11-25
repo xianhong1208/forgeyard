@@ -94,6 +94,14 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
   `for i in 1 2 3 4; do taskset -c 2,3 sh -c 'while :; do :; done' & done`，再
   `taskset -c 2,3 uv run --no-sync python -m pytest -q`（或 `npx vitest run`），之後把那四個迴圈結束掉。
 
+**CI 在測試以外的地方卡住時。** pytest-timeout 會讓卡住 5 分鐘的測試失敗並指出是哪一個，但管不到收集測試、session 的
+hook 和直譯器結束；留下來的非 daemon 執行緒會讓 Python 停在結束那一步一直等。所以 CI 這樣跑 pytest：
+`uv run --no-sync timeout --signal=ABRT --kill-after=60s 40m python -X faulthandler -m pytest -q`。40 分鐘後（這一步平常
+要 18–23 分鐘）Python 會印出每個執行緒的 stack，這一步隨即失敗，不必等到 job 的 45 分鐘上限把它取消、連 log 都沒留下
+（#286）。一定要加 `-X faulthandler`：pytest 在直譯器結束前就會關掉自己的 handler。在 job 的 log 裡搜尋
+`Fatal Python error: Aborted`，下面列出的執行緒就是卡住的位置。FY-CIHANG-001 會檢查 workflow 裡每個 pytest 步驟都保有這層包裝。
+想在本機試，把同一行的上限改短（`timeout --signal=ABRT 10s …`）即可。
+
 ## 程式碼結構
 
 | 路徑 | 內容 |

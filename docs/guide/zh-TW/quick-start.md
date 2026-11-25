@@ -48,7 +48,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.5
+  docker.io/tonyhuang1101/forgeyard:1.5.6
 sudo docker logs forgeyard
 ```
 
@@ -87,24 +87,24 @@ Forgeyard 接著會顯示 **開始使用**：一份接下來步驟的檢查清�
 forgeyard-ca.der: OK
 
 ==> Checking this machine
-Linux x86_64, server https://192.168.1.20:7860, agent 1.5.5.
+Linux x86_64, server https://192.168.1.20:7860, agent 1.5.6.
 
 ==> Checking the server's certificate authority
 The CA matches sha256:3f9a….
 
-==> Downloading the agent 1.5.5
-forgeyard-1.5.5-py3-none-any.whl (335662 bytes, SHA-256 checked).
+==> Downloading the agent 1.5.6
+forgeyard-1.5.6-py3-none-any.whl (335662 bytes, SHA-256 checked).
 NVIDIA driver found: installing NVML support too.
 
 ==> Installing it in /opt/forgeyard/venv
 Installed with uv (uv 0.9.24).
-forgeyard 1.5.5, as /usr/local/bin/forgeyard (try: forgeyard agent config).
+forgeyard 1.5.6, as /usr/local/bin/forgeyard (try: forgeyard agent config).
 
 ==> Account for process workloads
 Created the system account 'forgeyard-run' (no password, no shell, no home).
 
 ==> Settings (/etc/forgeyard/agent.toml)
-# Forgeyard agent settings, written by `forgeyard agent init` (1.5.5).
+# Forgeyard agent settings, written by `forgeyard agent init` (1.5.6).
 …
 # GPUs: 2 x NVIDIA GeForce RTX 4090 (driver 580.95.05). Choose which ones Forgeyard may use on the Machines page.
 …
@@ -159,7 +159,7 @@ Next, on https://192.168.1.20:7860:
 1. 選擇 **部署它**，或從 **服務中** → **部署模型** 再挑選模型。
 2. 為這個部署取個名字，例如 `qwen`。這個名字就是程式呼叫時要用的**模型名稱**。
 3. 確認 **執行於**：Qwen3 0.6B 選 **GPU**，GGUF 模型選 **僅 CPU**（用 **部署它** 會自動幫你選好）。
-4. 頁面會顯示估算結果和它會在哪裡執行。選擇 **部署**。
+4. 頁面會顯示估算結果和它會在哪裡執行。選了 **機器** 之後，還會寫出那台機器是否已經有這個推論引擎的映像檔，沒有的話它怎麼來（拉取，或經由伺服器），知道大小時也會寫出來。選擇 **部署**。
 
 部署頁面會先顯示下載進度，再顯示推論引擎啟動。當它的副本變成 **健康**，就代表可以用了。第一次需要的時間和下載時間差不多；之後啟動只要幾秒。你可以直接在頁面上用 **試試看** 試用，或到 **試用區** 試。
 

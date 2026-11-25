@@ -321,7 +321,7 @@ function EngineMachines({ p, machines }: { p: Page; machines: Machine[] | null }
                 <div className="cell-stack">
                   <span>{x.present === true ? <span className="chip chip-tone-ok">{t("enginepage.here")}</span> : x.present === false ? <span className="chip">{t("enginepage.notHere")}</span> : <span className="chip chip-tone-wait">{t("enginepage.notKnown")}</span>}
                     {x.download && <> <span className="chip chip-tone-wait">{t("enginepage.dl.under")}</span></>}</span>
-                  <span className="muted">{x.present === null && x.note ? x.note : whereText(x.kind, x.present)}{x.listed_at ? t("enginepage.listed", { when: when(x.listed_at) }) : ""}</span>
+                  <span className="muted">{x.present === null && x.note ? x.note : whereText(x.kind, x.present, x.via, x.size)}{x.listed_at ? t("enginepage.listed", { when: when(x.listed_at) }) : ""}</span>
                 </div>
               )}
             </td>

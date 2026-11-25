@@ -123,6 +123,15 @@ fixed time for something to happen, or read a page before the data it needed had
   `taskset -c 2,3 uv run --no-sync python -m pytest -q` (or `npx vitest run`), and kill the four
   loops afterwards.
 
+**When a CI run hangs outside a test.** pytest-timeout fails a test that hangs for 5 minutes and names it, but it
+does not cover collection, session hooks or interpreter exit, where a non-daemon thread left behind keeps Python
+waiting. So CI runs pytest as `uv run --no-sync timeout --signal=ABRT --kill-after=60s 40m python -X faulthandler -m
+pytest -q`: after 40 minutes (the step usually takes 18–23) Python prints every thread's stack and the step fails,
+before the job's 45-minute limit cancels it and its log is lost (#286). `-X faulthandler` is needed because pytest
+turns its own handler off before interpreter exit. Search the job log for `Fatal Python error: Aborted`; the
+threads listed under it show where the run stopped. FY-CIHANG-001 checks that every pytest step in the workflows
+keeps this wrapper. To try it locally, run the same command with a short limit (`timeout --signal=ABRT 10s …`).
+
 ## Layout
 
 | Path | What |

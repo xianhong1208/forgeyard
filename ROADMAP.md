@@ -487,6 +487,19 @@ and only does not report the GPUs it cannot see.
 No migration. Update the agents that run from the agent image with the machine page's command: with the 1.5.4 image,
 the CPU process engines of the built-in `llama-cpp` and `sd-cpp` recipes exit with code 127.
 
+## Shipped: 1.5.6 (2026-11-26), clearer machine pages and Windows machines
+
+1. ✅ **Clearer machine and model pages** (#292, for #282): the deploy page, a model's page and an engine's page say
+   whether a machine has the engine's image now and, when not, how it comes and its size; a finished download says
+   only how the model came. A machine whose GPU the engine cannot use (an APU for faster-whisper) is judged on its
+   CPU, with its system memory. Every machine command says to run it in bash on that machine.
+2. ✅ **Windows machines with WSL2** (#292, for #282): an NVIDIA command for an agent in Docker inside a WSL2
+   distribution on **Add a machine**, and a guide page. Not verified on real Windows hardware yet.
+3. ✅ **A hung CI test run leaves its stacks in the log** (#290, for #286).
+4. ✅ **ROADMAP: single sign-on and two-factor sign-in (1.6.0) in the community edition** (#293).
+
+No migration. The agents need no update: no agent code changed.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -495,8 +508,8 @@ GPUs, memory estimates, scheduling, the `/v1` gateway, cloud spill, per-key clou
 usage, local accounts and roles, the audit log of admin actions, scale to zero and autoscaling,
 Prometheus metrics, and TLS between the gateway and the machines.
 
-Some features for larger organisations are planned for a separate **enterprise edition**: single
-sign-on with MFA and SCIM, organisations and teams with quotas and cost reports, the per-request audit
+Some features for larger organisations are planned for a separate **enterprise edition**: SAML,
+SCIM, group-to-team sync, sign-in through SSO only, more than one identity provider, organisations and teams with quotas and cost reports, the per-request audit
 log and its export, PII masking, tunnels for machines at other sites, more than one server for high
 availability, and extended support (longer support periods, with fixes back-ported to older releases). They
 are marked *(enterprise edition)* in the table below.
@@ -516,7 +529,7 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.6.0: single sign-on** *(enterprise edition)* | Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication (#39). |
+| **1.6.0: single sign-on and two-factor sign-in** | Sign-in through one OIDC identity provider (Keycloak, Authentik, Entra ID, Google), with new accounts waiting for an admin by default and one claim mapped to a role; two-factor sign-in with TOTP and recovery codes, which an admin can require (#39). Passkeys follow in a later 1.6.x release. SAML, SCIM, group sync, SSO-only sign-in and several identity providers are in the enterprise edition. |
 | **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
 | **1.6.2: request log and audit export** *(enterprise edition)* | **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log and the request log can be sent out (syslog, OpenTelemetry), with tamper evidence (#40). |
 | **1.6.3: notifications and alerts** | Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**. Each kind of event goes to the channels chosen for it (#191). |
