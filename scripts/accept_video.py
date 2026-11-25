@@ -13,8 +13,8 @@ Through Forgeyard's API only (an admin session), for each model of --only, on --
      and downloads it through the gateway: it must be a real MP4 (its boxes read here, no ffmpeg needed:
      ftyp, moov with mvhd, a video track with its size in tkhd and its frames in stts, mdat), of the size
      asked and as long as asked (frames / fps);
-  3. shows the refusals: more seconds than the cap, a size over the cap, an image reference
-     (image-to-video is not offered), a thumbnail, another key's video (404 for its status, content and
+  3. shows the refusals: more seconds than the cap, a size over the cap, an image_reference (a URL the engine
+     would fetch itself; start images are input_reference, --image), a thumbnail, another key's video (404 for its status, content and
      delete), and the replica's own port without its key;
   4. the per-key cap: with one job of the key at work, two more: the second is 429 too_many_jobs with
      Retry-After; deleting a job at work cancels it (it is gone afterwards);
@@ -24,6 +24,17 @@ Through Forgeyard's API only (an admin session), for each model of --only, on --
      answers 410 video_expired (skip with --no-expiry);
   7. a replica that goes takes its jobs: asks for one more video, stops the deployment while it is at
      work, and the job reports failed (replica_gone) (skip with --no-restart);
+
+With --image (1.5.5), what the model does with a start image (`input_reference`), as its catalog entry says:
+
+  8. a model that takes one (Wan2.2-TI2V-5B: optional; an image-to-video pipeline: required): a video from a start
+     image uploaded with the SDK (videos.create(input_reference=<file>)) and one from JSON with a base64 data: URL,
+     each followed, fetched and read: an MP4 of the size and length asked (the image is scaled to the video's size);
+     the refusals of the image itself: a file_id, a picture wider than the deployment's Largest start image, a file
+     that is not an image; and a required one refuses a request without it (input_reference_required);
+  9. a model that takes none (Wan2.1-T2V-1.3B) refuses a start image, uploaded or by URL
+     (input_reference_not_supported), before reading it;
+ 10. the usage: one media item and the image's bytes per start image a job took.
 
 then removes what it created (deployments, the catalog entries it added, keys) and prints a report (also
 JSON with --out; --save-videos keeps the videos). Everything is named accept-video-*, and leftovers of an
@@ -49,6 +60,7 @@ import os
 import struct
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -56,11 +68,13 @@ sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import GIB, Client, Fail, log, machine  # noqa: E402
 from accept_m4 import ensure_sdk, raw_post, wait_all_ready  # noqa: E402
+from accept_img import code_of, data_url, scene_png  # noqa: E402
 import replica_port  # noqa: E402
 
 PREFIX = "accept-video-"
 PROMPT = "A red kite flying over a green hill on a sunny day, slow camera pan"
 SECOND_PROMPT = "Waves rolling onto a sandy beach at sunset"
+START_PROMPT = "The red square slowly turns and drifts to the right"   # 1.5.5: a video from a start image
 MODELS = {
     "wan2.1-t2v-1.3b": {"source": "hf://Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
                         "revision": "0fad780a534b6463e45facd96134c9f345acfa5b", "recipe": "vllm-omni-video",
@@ -211,6 +225,7 @@ def main() -> int:
     ap.add_argument("--job-timeout", type=float, default=1800, help="seconds one video may take")
     ap.add_argument("--venv", default=str(Path.home() / ".cache" / "forgeyard-accept-m4"),
                     help="where to install the openai SDK if it is missing")
+    ap.add_argument("--image", action="store_true", help="also check start images (image to video, 1.5.5)")
     ap.add_argument("--save-videos", help="keep every video in this directory")
     ap.add_argument("--keep", action="store_true", help="leave the deployments running afterwards")
     ap.add_argument("--out", help="also write the report as JSON here")
@@ -288,6 +303,8 @@ def main() -> int:
                 info["loaded_gib"] = round(((ready["vram_total"] - ready["vram_free"])
                                             - (before["vram_total"] - before["vram_free"])) / GIB, 2)
             exercise(c, d, dep_name, spec, size, args, check, httpx, openai, report, save)
+            if args.image:
+                exercise_image(c, d, dep_name, spec, size, args, check, httpx, openai, report, save)
             if index is not None:
                 after = accept_m3.settle_card(c, m["name"], card(index)["key"])
                 used = (after["vram_total"] - after["vram_free"]) - (before["vram_total"] - before["vram_free"])
@@ -398,9 +415,12 @@ def exercise(c: Client, d: dict, model: str, spec: dict, size: str, args, check,
         check(f"{model}: {label}", s == 400 and f'"{code}"' in text, f"{s} {text[:160]}")
 
     refused(f"more than {seconds} s is refused", {"prompt": PROMPT, "seconds": str(seconds + 1)}, "video_too_long")
-    refused("a size over the cap is refused", {"prompt": PROMPT, "size": f"{w * 2}x{h * 2}"}, "video_too_large")
-    # 1.5.5: start images are checked input_reference files (accept with --image in a later PR); a reference the engine
-    # would fetch itself stays refused.
+    # Over the deployment's cap (its own size) yet within the 2048-pixel bound every size has, so the cap answers and
+    # not the general size check: twice 1280x704 (Wan2.2-TI2V-5B) is over 2048 and got invalid_size (1.5.5 lab).
+    over = f"{w + 64}x{h}" if w >= h else f"{w}x{h + 64}"
+    refused("a size over the cap is refused", {"prompt": PROMPT, "size": over}, "video_too_large")
+    # 1.5.5: start images are checked input_reference files (--image: exercise_image); a reference the engine would
+    # fetch itself stays refused.
     refused("a URL reference for the engine is refused", {"prompt": PROMPT, "image_reference": '{"image_url": '
             '"http://169.254.169.254/"}'}, "input_reference_not_supported")
     other = _sdk(c.ok("POST", "/api/keys", {"name": f"{PREFIX}other"}), httpx, openai)
@@ -468,6 +488,107 @@ def exercise(c: Client, d: dict, model: str, spec: dict, size: str, args, check,
     except openai.APIStatusError as e:
         check(f"{model}: an expired video is gone", e.status_code == 410 and getattr(e, "code", None) == "video_expired",
               f"{e.status_code} {getattr(e, 'code', None)}")
+
+
+
+def exercise_image(c: Client, d: dict, model: str, spec: dict, size: str, args, check, httpx, openai, report: dict,
+                   save, key: dict | None = None) -> None:
+    """The start-image checks (1.5.5) on one ready video deployment `d` served as `model`: what its model does with a
+    start image (from the console's options for it: none, optional or required) decides what is asked. Videos are
+    followed to completed, fetched and read (size and length); the refusals; the usage. `key`: an API key to use;
+    without one accept-video-image-key is created."""
+    k = key or c.ok("POST", "/api/keys", {"name": f"{PREFIX}image-key"})
+    gw = k["gateway_url"]
+    sdk = _sdk(k, httpx, openai)
+    http = httpx.Client(verify=accept_m3.TLS, timeout=600) if accept_m3.TLS else httpx.Client(timeout=600)
+    auth = {"Authorization": f"Bearer {k['key']}"}
+    prefix = (k.get("api_key") or k).get("prefix") or k["key"][:12]
+    info = report["deployments"].setdefault(model, {})
+    o = c.ok("GET", f"/api/playground/videos/options?model={urllib.parse.quote(model)}")
+    takes, widest = o.get("image_input") or "none", int(o.get("max_input_side") or 0)
+    info["image_input"] = takes
+    params = d.get("params") or {}
+    seconds = int(params.get("max_seconds") or args.seconds)
+    w, h = (int(x) for x in size.split("x"))
+    fps = int(params.get("fps") or 0) or spec["fps"]
+    frames = (seconds * fps) // 4 * 4 + 1
+    # A start image of another shape than the video (a square), so the engine's scaling shows in the MP4's size.
+    side = min(w, h) // 32 * 32 or 64
+    start = scene_png(side, side)
+    extra = {"num_inference_steps": args.steps} if getattr(args, "steps", None) else None
+
+    def refused(label: str, body: dict | None, code: str, upload: bytes | None = None, ctype: str = "image/png") -> None:
+        if upload is not None:
+            r = http.post(f"{gw}/videos", headers=auth, data={"model": model, "prompt": START_PROMPT, "seconds": str(seconds),
+                                                              "size": size}, files={"input_reference": ("start.png", upload, ctype)})
+        else:
+            r = http.post(f"{gw}/videos", headers=auth, json={"model": model, "prompt": START_PROMPT, "seconds": str(seconds),
+                                                              "size": size, **(body or {})})
+        check(f"{model}: {label}", r.status_code == 400 and code_of(r.text) == code, f"{r.status_code} {r.text[:160]}")
+
+    if takes == "none":
+        refused("a start image is refused (it makes videos from text only), uploaded", None, "input_reference_not_supported",
+                upload=start)
+        refused("a start image is refused (it makes videos from text only), by URL",
+                {"input_reference": {"image_url": data_url(start)}}, "input_reference_not_supported")
+        return
+    before = usage_row(c, prefix)
+    took = {"items": 0, "bytes": 0}
+
+    def video(label: str, vid: str, status: str) -> None:
+        check(f"{model}: {label}: a job at once", status == "queued" and vid.startswith("video_"), f"{vid} {status}")
+        took["items"] += 1
+        took["bytes"] += len(start)
+        got, secs = follow(sdk, vid, args.job_timeout, label)
+        info[f"seconds_{label.split(',')[0].replace(' ', '_')}"] = round(secs, 1)
+        check(f"{model}: {label}: the video is made", got.status == "completed",
+              f"{got.status} after {secs:.0f} s" + (f": {got.error}" if got.error else ""))
+        if got.status != "completed":
+            return
+        data = sdk.videos.download_content(got.id).content
+        if save:
+            (save / f"{model}-{label.split(',')[0].replace(' ', '-')}.mp4").write_bytes(data)
+        try:
+            mp4 = mp4_info(data)
+        except ValueError as e:
+            check(f"{model}: {label}: a real MP4", False, str(e))
+            return
+        want = frames / fps
+        check(f"{model}: {label}: an MP4 of the size and length asked",
+              (mp4["width"], mp4["height"]) == (w, h) and abs(mp4["duration_s"] - want) <= 0.25,
+              f"{mp4['width']}x{mp4['height']}, {mp4['duration_s']:.2f} s ({mp4.get('frames')} frames); asked {size}, "
+              f"{want:.2f} s; the start image was {side}x{side}")
+        sdk.videos.delete(got.id)
+
+    v = sdk.videos.create(model=model, prompt=START_PROMPT, seconds=str(seconds), size=size,
+                          input_reference=("start.png", start, "image/png"), extra_body=extra)
+    video("start image uploaded with the SDK", v.id, v.status)
+    r = http.post(f"{gw}/videos", headers=auth, json={"model": model, "prompt": START_PROMPT, "seconds": str(seconds),
+                                                      "size": size, "input_reference": {"image_url": data_url(start)},
+                                                      **(extra or {})})
+    if r.status_code != 200:
+        check(f"{model}: start image as a data: URL (JSON)", False, f"{r.status_code} {r.text[:200]}")
+    else:
+        video("start image as a data: URL (JSON)", r.json()["id"], r.json()["status"])
+
+    # ---- the refusals
+    if takes == "required":
+        refused("a request without a start image is refused (it needs one)", {}, "input_reference_required")
+    refused("a file_id start image is refused", {"input_reference": {"file_id": "file-abc123"}}, "file_id_not_supported")
+    if widest:
+        refused(f"a start image wider than {widest} px is refused", None, "input_image_too_large",
+                upload=scene_png(widest + 32, 64))
+    refused("a start image that is not a picture is refused", None, "unsupported_image_format", upload=b"just some text",
+            ctype="image/png")
+
+    # ---- usage
+    after = usage_row(c, prefix)
+    items = after.get("media_items", 0) - before.get("media_items", 0)
+    got = after.get("bytes_in", 0) - before.get("bytes_in", 0)
+    check(f"{model}: usage counts one media item per start image a job took", items == took["items"],
+          f"{items} counted, {took['items']} taken")
+    check(f"{model}: usage counts the start images' bytes", got == took["bytes"], f"{got} counted, {took['bytes']} sent")
+    info.update(start_images=items, start_bytes_in=got)
 
 
 def restart_check(c: Client, d: dict, model: str, size: str, args, check, httpx, openai) -> None:

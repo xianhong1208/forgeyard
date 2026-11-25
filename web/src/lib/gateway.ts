@@ -3,7 +3,7 @@ import { formatNumber } from "../i18n/format";
 import { getLang, locale } from "../i18n/lang";
 // The gateway (M4): snippets for a new key, numbers for usage, and reading a streamed answer.
 
-import type { ApiKey } from "./types";
+import type { ApiKey, StartImage } from "./types";
 
 export const API_ENDPOINT: Record<string, string> = {
   "openai-chat": "/chat/completions",
@@ -267,6 +267,9 @@ export function pcmRate(headers: Headers): number {
 export type ImageOptions = {
   model: string; max_n: number; max_side: number; default_size: string; multiple: number; formats: string[];
   max_steps: number; max_prompt_chars: number;
+  // 1.5.5 (#143): whether it makes images from text; its edits: the most input images (0: none), the largest side
+  // of one, the formats an edit comes back in.
+  generate?: boolean; edit?: number; max_input_side?: number; edit_formats?: string[];
 };
 
 const IMAGE_PRESETS = ["256x256", "512x512", "768x768", "1024x1024", "1024x768", "768x1024", "1280x720", "720x1280",
@@ -289,6 +292,8 @@ export const IMAGE_MIME: Record<string, string> = { png: "image/png", jpeg: "ima
 export type VideoOptions = {
   model: string; default_size: string; max_side: number; max_pixels: number; multiple: number; seconds: number;
   max_seconds: number; fps: number; max_steps: number; max_prompt_chars: number; keep_minutes: number;
+  // 1.5.5 (#143): a start image: none, optional or required; the largest side of one.
+  image_input?: StartImage; max_input_side?: number;
 };
 
 // A video job as OpenAI's Videos API answers it.

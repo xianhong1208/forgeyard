@@ -13,6 +13,9 @@ export default {
   // The recommended list
   "addmodel.rec.loading": "Loading the list…",
   "addmodel.rec.languages": "Languages it speaks",
+  "addmodel.rec.can.edit": "Edits images",
+  "addmodel.rec.can.image-to-video": "Image to video",
+  "addmodel.rec.canTitle": "What it does with images given to it",
   "addmodel.rec.licenceFrom": "Licence of {source}, which this is converted from",
   "addmodel.rec.licence": "Licence",
   "addmodel.rec.sizeRam": "About {download} GiB to download; one copy needs about {memory} GiB of RAM.",
@@ -35,12 +38,12 @@ export default {
   "addmodel.group.tts.title": "Text to speech",
   "addmodel.group.tts.description":
     "Built-in voices for /v1/audio/speech. Qwen3-TTS speaks Chinese (Mandarin and dialects), English and eight more languages on NVIDIA GPUs with vLLM-Omni, or as GGUF with llama.cpp on an AMD APU or the CPU; Kokoro and Chatterbox are small English voices that run on a CPU. No voice cloning.",
-  "addmodel.group.images.title": "Images (text to image)",
+  "addmodel.group.images.title": "Images (text to image, edits)",
   "addmodel.group.images.description":
-    "Models for /v1/images/generations. Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell on NVIDIA GPUs with vLLM-Omni; GGUF versions for stable-diffusion.cpp on AMD (Vulkan) or NVIDIA (CUDA), and Stable Diffusion 1.5 small enough for a CPU. Apache-2.0 and OpenRAIL licences only.",
-  "addmodel.group.video.title": "Video (text to video)",
+    "Models for /v1/images/generations and /v1/images/edits. Z-Image-Turbo, SDXL, FLUX.1-schnell and FLUX.2 [klein] 4B (it also edits images) on NVIDIA GPUs with vLLM-Omni; stable-diffusion.cpp versions for AMD (Vulkan), NVIDIA (CUDA) or the CPU. Apache-2.0 and OpenRAIL licences only.",
+  "addmodel.group.video.title": "Video (text or image to video)",
   "addmodel.group.video.description":
-    "Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p and needs more memory. Apache-2.0.",
+    "Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p, also from a start image, and needs more memory. Apache-2.0.",
   "addmodel.group.detection.title": "Object detection, segmentation and depth",
   "addmodel.group.detection.description":
     "Vision models for /v1/vision/detect, /segment and /depth on Forgeyard's own vision server, including detectors that find what you name. Small and quick on a CPU, faster on an NVIDIA GPU. Apache-2.0 only.",

@@ -554,3 +554,58 @@ def test_fy_iedt_016_a_route_sends_edits_only_to_deployments_that_edit(ed):
     for _ in range(6):
         assert ed.api.post("/v1/images/generations", json={"model": "kgguf", "prompt": "x"}).status_code == 200
     assert ed.e["sd"].seen and all(s["path"] == "/v1/images/generations" for s in ed.e["sd"].seen)
+
+
+def test_fy_iedt_017_the_playground_options_say_what_a_model_does_with_images(ed):
+    """FY-IEDT-017 (1.5.5 PR 3): the Playground's image options add whether the model makes images from text, the most
+    input images an edit may give over its deployments (the deployment's Input images, not the model's 4), the largest
+    of them and the formats an edit comes back in; a model that edits nothing says 0 and no formats."""
+    o = ed.owner.get("/api/playground/images/options?model=klein").json()
+    assert (o["generate"], o["edit"], o["max_input_side"], o["edit_formats"]) == (True, 2, 2048, ["png", "jpeg", "webp"])
+    o = ed.owner.get("/api/playground/images/options?model=qedit").json()
+    assert (o["generate"], o["edit"], o["max_input_side"]) == (False, 1, 2048)
+    o = ed.owner.get("/api/playground/images/options?model=kgguf").json()
+    assert (o["generate"], o["edit"], o["max_input_side"], o["edit_formats"]) == (True, 4, 1024, ["png", "jpeg"])
+    o = ed.owner.get("/api/playground/images/options?model=sd").json()
+    assert (o["generate"], o["edit"], o["max_input_side"], o["edit_formats"]) == (True, 0, 0, [])
+    # A route over several deployments: what at least one takes (the most inputs, the largest side, every format).
+    from tests.cloud_helpers import deployment_id, set_tiers
+
+    set_tiers(ed.owner, "qedit", [[("local", deployment_id(ed.owner, "qedit")), ("local", deployment_id(ed.owner, "kgguf")),
+                                   ("local", deployment_id(ed.owner, "sd"))]])
+    o = ed.owner.get("/api/playground/images/options?model=qedit").json()
+    assert (o["generate"], o["edit"], o["max_input_side"], o["edit_formats"]) == (True, 4, 2048, ["png", "jpeg", "webp"])
+
+
+def test_fy_iedt_018_the_recommended_edit_models():
+    """FY-IEDT-018 (1.5.5 PR 3): the recommended list holds FLUX.2 [klein] 4B for vLLM-Omni and for stable-diffusion.cpp
+    (Comfy-Org's repository: its own diffusion file, the Qwen3-4B text encoder and not the fp4 copy, the FLUX.2 VAE, 4 steps
+    at guidance 1), both pinned, Apache-2.0 and marked as editing images; Wan2.2-TI2V-5B is marked image to video. No
+    non-commercial edit model is listed. `can` is checked: `edit` only on an image model, `image-to-video` only on a
+    video model, nothing twice. A file named like the klein one is read as editing 4 and making images from text."""
+    import yaml
+
+    from forgeyard.models import recommended as rec
+
+    data = rec.load()
+    by = {e.name: e for e in data.models}
+    vllm, sdcpp = by["flux.2-klein-4b"], by["flux.2-klein-4b-sdcpp"]
+    assert (vllm.source, vllm.revision, vllm.recipe, vllm.format) == (
+        "hf://black-forest-labs/FLUX.2-klein-4B", "e7b7dc27f91deacad38e78976d1f2b499d76a294", "vllm-omni-image", "diffusers")
+    assert (sdcpp.source, sdcpp.revision, sdcpp.recipe, sdcpp.format) == (
+        "hf://Comfy-Org/Flux-2-Klein-4B", "5b3abca5c0dc1ecd4eaf3340868d09063fc1c965", "sd-cpp", "safetensors")
+    assert sdcpp.file == "split_files/diffusion_models/flux-2-klein-4b.safetensors"
+    assert sdcpp.components == {"llm": "split_files/text_encoders/qwen_3_4b.safetensors", "vae": "split_files/vae/flux2-vae.safetensors"}
+    assert sdcpp.engine_args == {"sd-cpp": ["--cfg-scale", "1", "--steps", "4"]}
+    assert all(e.license == "apache-2.0" and e.can == ["edit"] and e.group == "images" for e in (vllm, sdcpp))
+    assert by["wan2.2-ti2v-5b"].can == ["image-to-video"] and by["wan2.1-t2v-1.3b"].can == []
+    assert {e.name for e in data.models if e.can} == {"flux.2-klein-4b", "flux.2-klein-4b-sdcpp", "wan2.2-ti2v-5b"}
+    assert not any(k in e.source.lower() for e in data.models for k in ("kontext", "klein-9b", "flux-3", "omnigen", "hidream", "longcat"))
+    assert editing.from_names(sdcpp.file, "Comfy-Org/Flux-2-Klein-4B") == (4, True)
+    raw = yaml.safe_load(rec.FILE.read_text())
+    for name, can, why in (("z-image-turbo", ["image-to-video"], "is for a video model"), ("wan2.1-t2v-1.3b", ["edit"], "is for an image model"),
+                           ("flux.2-klein-4b", ["edit", "edit"], "listed twice"), ("flux.2-klein-4b", ["inpaint"], "can")):
+        bad = json.loads(json.dumps(raw))
+        next(m for m in bad["models"] if m["name"] == name)["can"] = can
+        with pytest.raises(rec.RecommendedError, match=why):
+            rec.check(bad)

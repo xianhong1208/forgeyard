@@ -101,6 +101,33 @@ describe("Playground: Video (1.3)", () => {
     expect(await within(p).findByText("Your videos with this model")).toBeTruthy();
   });
 
+  it("FY-WEB-984: a finished video turns into the expired notice at expires_at, without the player or the download link", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const t0 = Math.floor(Date.now() / 1000);
+    const done = job("completed", { completed_at: t0, expires_at: t0 + 5 });
+    let posted = false;
+    server((url, init) => {
+      const method = init?.method ?? "GET";
+      if (url === "/api/routes") return { status: 200, body: ROUTES };
+      if (url === "/api/playground/videos/options?model=wan") return { status: 200, body: OPTIONS };
+      if (url === "/api/playground/videos?limit=20") return { status: 200, body: { object: "list", data: posted ? [done] : [] } };
+      if (url === "/api/playground/videos" && method === "POST") { posted = true; return { status: 200, body: done }; }
+      if (url === `/api/playground/videos/${done.id}`) return { status: 200, body: done };
+    });
+    mount("/playground");
+    const p = await panel();
+    fireEvent.change(within(p).getByLabelText("Prompt"), { target: { value: "A paper boat" } });
+    fireEvent.click(within(p).getByRole("button", { name: /Generate/ }));
+    const out = await within(p).findByRole("figure", { name: "Generated video" });
+    expect(out.querySelector("video")).toBeTruthy();
+    expect(within(out).getByRole("link", { name: /Download/ })).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    const after = within(p).getByRole("figure", { name: "Generated video" });
+    expect(within(after).getByText("This video expired and was deleted.")).toBeTruthy();
+    expect(after.querySelector("video")).toBeNull();
+    expect(within(after).queryByRole("link", { name: /Download/ })).toBeNull();
+  });
+
   it("FY-WEB-196: shows the gateway's refusal and a failed job's reason; Cancel deletes the job at work", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let answer: Reply = { status: 429, body: { error: { message: "You have 2 videos waiting or being made on 'wan' already (at most 2 at once).",

@@ -46,6 +46,8 @@
 
 1.5.4 加入**圖片嵌入**，以及能在 **CPU 或 GPU** 上執行的**文字分類**。Forgeyard 自己的 transformers 推論引擎在視覺映像檔上執行，在 `/v1/embeddings` 用 CLIP、SigLIP 2 或 DINOv2 為圖片和文字產生嵌入，用文字就能找到圖片；含圖片的請求絕不會送往雲端供應商。`/v1/classify` 讓零樣本模型從每個請求指定的標籤中挑選，中文也行（[作法](docs/guide/zh-TW/how-to.md#classify-text-without-training-zero-shot)）。agent 現在會清點主機上的 GPU，GPU 增加、移除或 agent 看不到時，設定健康檢查都會提醒（[作法](docs/guide/zh-TW/how-to.md#add-or-remove-a-gpu-on-a-machine)）。部署頁面上的「雲端備援」改名為**分流與備援**，因為後面的層級也可以放另一個本機部署。沒有資料庫遷移。想收到 GPU 的提醒，請用機器頁面上的指令更新 agent；1.5.3 的 agent 照常運作。
 
+1.5.5 加入**圖片編輯**和**圖片生成影片**。會編輯圖片的模型（例如推薦清單裡給 vLLM-Omni 和 stable-diffusion.cpp 用的 FLUX.2 [klein] 4B，Apache-2.0）可以在 `/v1/images/edits` 修改你給它的圖片；Wan2.2-TI2V-5B 可以讓影片從你的圖片開始（`/v1/videos` 的 `input_reference`）。閘道會檢查每一張圖片，位址也由閘道自己下載，推論引擎拿不到任何網址。試用區多了 **編輯圖片** 和 **起始圖片**，模型頁面也會說明模型能拿圖片做什麼（[編輯圖片](docs/guide/zh-TW/how-to.md#edit-an-image)、[從圖片產生影片](docs/guide/zh-TW/how-to.md#make-a-video-from-a-picture)）。沒有任何過濾機制會檢查這些圖片：把這樣的部署開放給其他人之前，請先讀模型卡。沒有資料庫遷移，agent 不必更新。
+
 ## 1.4 的新功能
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成

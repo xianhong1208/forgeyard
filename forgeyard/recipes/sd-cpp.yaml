@@ -95,7 +95,7 @@ params:
             help: How long the gateway waits for the images once a replica has the request (CPUs are slow).}
   max_prompt_chars: {type: int, default: 4000, min: 1, max: 32000, advanced: true, label: Longest prompt (characters),
                      help: Longer prompts are refused (400 prompt_too_long).}
-  max_input_images: {type: int, default: 1, min: 1, max: 16, label: Input images (most),
+  max_input_images: {type: int, default: 1, min: 1, max: 16, advanced: true, label: Input images (most),
                      help: "Edits: the most images a request may give (the model may take fewer). Each one adds to
                        the memory a request needs."}
   max_input_side: {type: int, default: 1024, min: 64, max: 8192, advanced: true, label: Largest input (pixels),

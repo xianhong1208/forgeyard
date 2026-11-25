@@ -843,6 +843,92 @@ the offline machine's cache. The deployment there finds it cached and downloads 
 **How long:** minutes per video, one at a time per replica; the others wait their turn on it.
 Raise *Longest job* under **Advanced** for long or large videos.
 
+## Edit an image
+
+From 1.5.5 a model that edits images changes pictures you give it, following an instruction: "make the sky
+purple", "put the sofa from the second picture in the room". It answers at `/v1/images/edits`, as OpenAI's API does.
+
+1. **Add a model that edits.** On **Models → Add a model → Recommended**, the **Images** group has FLUX.2 [klein] 4B
+   (Apache-2.0, marked *Edits images*), which also makes images from text:
+   - for an NVIDIA GPU (vLLM-Omni): about 35 GiB of GPU memory with the default caps (Forgeyard's estimate, not yet
+     measured);
+   - for stable-diffusion.cpp, from Comfy-Org's repository (the model, its Qwen3-4B text encoder and its VAE in one
+     place): an AMD GPU or APU (Vulkan), an NVIDIA GPU (CUDA), or the CPU (minutes per image). About 30 GiB at
+     1024x1024.
+
+   A model's page says *Edits images* (or *Edits images only*, for a model that makes nothing from text alone, such as
+   Qwen-Image-Edit) and how many input images it takes.
+2. **Deploy it** as usual. Under **Advanced**, *Input images* is how many pictures a request may give (1 by default;
+   FLUX.2 [klein] takes up to 4) and *Largest input* how wide or tall each may be (2,048 pixels on vLLM-Omni, 1,024 on
+   stable-diffusion.cpp). Each input image adds to the memory a request needs, and the estimate counts it.
+3. **Call it** with the OpenAI SDK:
+
+   ```python
+   import base64
+
+   out = client.images.edit(model="flux.2-klein-4b", image=open("room.png", "rb"),
+                            prompt="Make it a watercolour painting; keep everything where it is")
+   with open("room-watercolour.png", "wb") as f:
+       f.write(base64.b64decode(out.data[0].b64_json))
+   ```
+
+   Several pictures go as a list: `image=[open("room.png", "rb"), open("sofa.png", "rb")]`; the first one sets the
+   shape of the result, and the instruction can name the others ("the sofa from the second picture"). Without a
+   `size`, the result keeps the first picture's shape at the deployment's default size. In JSON, give the pictures as
+   addresses: a base64 `data:` URL, or an `http(s)` address that the server fetches (public addresses only, unless the
+   server allows private ones):
+
+   ```bash
+   curl https://192.168.1.20:7860/v1/images/edits -H "Authorization: Bearer $FORGEYARD_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model": "flux.2-klein-4b", "prompt": "Make the sky purple",
+          "images": [{"image_url": "https://example.com/street.jpg"}]}'
+   ```
+
+4. **Try it in the Playground:** a model that edits gets **Edit images** beside **Make from text** in its **Image**
+   panel. Drop, paste or choose 1 to *Input images* pictures (PNG, JPEG or WebP), write the instruction, choose a
+   size (*Like the first image* by default), how many and a format, and press **Edit**. The pictures you gave are
+   shown beside the results, each with a download link. A model that only edits opens in this mode.
+
+**Not taken:** a mask (OpenAI's `mask`: 400 `mask_not_supported`; describe the change in the instruction instead),
+a `file_id` (Forgeyard keeps no files), and `/v1/images/variations` (OpenAI has closed it too: send the picture to
+`/v1/images/edits` with `n` and an instruction such as "a variation of this picture"). The refusals and what to do:
+[An image edit is refused](troubleshooting.md#an-image-edit-is-refused).
+
+**Photos of people.** Forgeyard checks the request's shape, not what a picture shows or what the instruction asks,
+and an edit model changes real photos realistically. Before you open such a deployment to others, read its model card's
+responsible-use notes and licence (the model page links it) and put a filter in front if your users need one.
+Nothing of an edit is kept: not the instruction, not the pictures.
+
+## Make a video from a picture
+
+From 1.5.5 a video model that takes a **start image** makes a video that begins with your picture and follows the
+prompt (OpenAI's `input_reference` on `/v1/videos`).
+
+1. **Add a model that takes one.** On **Models → Add a model → Recommended**, the **Video** group has Wan2.2-TI2V-5B,
+   marked *Image to video*: the start image is optional, so it makes videos from text too. About 33 GiB of GPU memory
+   (not yet measured), an NVIDIA GPU (vLLM-Omni). Image-to-video pipelines that need a start image every time
+   (`WanImageToVideoPipeline`, for example Wan2.2-I2V-A14B, which needs a free 80 GB card) can be added from
+   **Search Hugging Face**; their page says *Image to video only*. Wan2.1-T2V-1.3B takes no start image.
+2. **Deploy it** as for videos. *Largest start image* under **Advanced** is how wide or tall the picture may be (2,048
+   pixels).
+3. **Call it** with the OpenAI SDK:
+
+   ```python
+   video = client.videos.create(model="wan2.2-ti2v-5b", prompt="The boats rock gently in the harbour",
+                                input_reference=open("harbour.png", "rb"), seconds="5", size="1280x704")
+   ```
+
+   Then poll and download it as in [Generate videos](#generate-videos). In JSON, give the picture as an address:
+   `"input_reference": {"image_url": "data:image/png;base64,…"}` or an `http(s)` address the server fetches.
+4. **Try it in the Playground:** the **Video** panel of such a model has a **Start image** field: optional, or
+   required (then **Generate** waits for a picture). The picture is shown beside the job and under the finished video.
+
+The engine scales the picture to the video's size: a picture with the video's shape keeps its framing. PNG, JPEG or
+WebP only (convert iPhone photos from HEIC first). The refusals and what to do are in
+[A video fails, or is refused](troubleshooting.md#a-video-fails-or-is-refused). As for edits, no filter checks the
+pictures: read the model card's responsible-use notes before you open the deployment to others.
+
 ## Classify text
 
 Text classification (1.4.4) labels texts with a small, fast model: sentiment, the language, toxicity. A BERT,

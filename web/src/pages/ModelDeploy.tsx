@@ -9,6 +9,7 @@ import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { engineRuns } from "../lib/engines";
+import { inputParamApplies } from "../lib/imageEdit";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
 import { sameModelStart } from "../lib/sleep";
@@ -251,6 +252,8 @@ export const FLOAT32_PART = "Model weights in float32";
 // The media parameters (1.3) only mean something for a model that takes media: hidden for one that
 // is known to take none of them (a catalog entry from before 1.3 is unknown, so they show).
 export function paramApplies(name: string, model: CatalogModel | undefined): boolean {
+  // 1.5.5 (#143): Input images and Largest input for a model that edits; Largest start image for one that takes it.
+  if (!inputParamApplies(name, model)) return false;
   // Text to speech (1.3): the input cap is for speech models only, and they take no media in chat.
   if (name === "max_input_chars") return !model || model.task === "tts";
   if (model?.task === "tts" && ["images", "image_tokens", "videos", "video_fps", "max_body_mb"].includes(name)) return false;

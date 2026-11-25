@@ -60,6 +60,9 @@ class Entry(BaseModel):
     license_from: Optional[str] = None
     inputs: list[Literal["image", "audio", "video"]] = Field(default_factory=list)  # besides text
     languages: list[str] = Field(default_factory=list, max_length=40)   # tts: the languages it speaks
+    # 1.5.5 (#143): what it does with images given to it, shown on the list: `edit` (an image model that edits images
+    # at /v1/images/edits), `image-to-video` (a video model that takes a start image at /v1/videos).
+    can: list[Literal["edit", "image-to-video"]] = Field(default_factory=list)
     # image models for stable-diffusion.cpp (1.3): the component files beside `file`, by role
     components: dict[str, str] = Field(default_factory=dict)
     engine_args: dict[str, list[str]] = Field(default_factory=dict)
@@ -132,6 +135,12 @@ def check(data: dict) -> Recommended:
                     sources.safe_relpath(path)
                 except sources.SourceError as err:
                     raise RecommendedError(f"{where}: components.{role}: {err}") from None
+        for able in e.can:
+            if (able == "edit") != (e.task == "image"):
+                raise RecommendedError(f"{where}: can: {able!r} is for {'an image' if able == 'edit' else 'a video'} "
+                                       "model")
+        if len(set(e.can)) != len(e.can):
+            raise RecommendedError(f"{where}: can: listed twice")
         if e.license_from is not None:
             try:
                 if sources.parse_source(e.license_from).kind != "hf":
