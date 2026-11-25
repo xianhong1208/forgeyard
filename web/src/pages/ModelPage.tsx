@@ -17,9 +17,9 @@ import { bytes } from "../lib/machines";
 import { embedSummary, embedsImages, embedsText, englishOnly, languagesLine } from "../lib/encoders";
 import { abilities, startImage } from "../lib/imageEdit";
 import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource, taskLabel } from "../lib/models";
-import { catalogKind, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText } from "../lib/pages";
+import { catalogKind, cpuMemory, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText, type MachineFit } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
-import type { CatalogModel, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelPage as Page, ModelPageMachine } from "../lib/types";
+import type { Accelerator, CatalogModel, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelPage as Page, ModelPageMachine } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { DeploymentRow } from "./Serving";
 
@@ -316,28 +316,21 @@ function ModelMachines({ p, recipe, machines, onDownload }: {
                 <td data-label={t("modelpage.col.machine")}><MachineCell id={x.machine_id} name={x.name} status={x.status} machines={machines} /></td>
                 <td data-label={t("modelpage.col.cache")} className="small"><CacheCell x={x} /></td>
                 <td data-label={t("modelpage.col.fits")} className="small">
-                  {!v ? <span className="muted">—</span> : (
-                    <div className="cell-stack">
-                      <span>{v.fits
-                        ? <span className={`chip ${online ? "chip-tone-ok" : "chip-tone-wait"}`}>{online ? t("modelpage.fits") : t("modelpage.wouldFit")}{f?.device === "cpu" ? t("modelpage.onCpu") : ""}</span>
-                        : v.share_fits ? <span className="chip chip-tone-wait">{t("modelpage.fitsShared")}</span> : <span className="chip chip-tone-bad">{t("modelpage.noFit")}</span>}
-                        {v.fits && v.leftover != null ? <span className="muted">{v.gpus?.length ? t("modelpage.leftOnGpu", { size: gib(v.leftover), gpus: v.gpus.join(", #") }) : t("modelpage.left", { size: gib(v.leftover) })}</span> : null}</span>
-                      {(!v.fits || !online) && v.reason && <span className="muted lp-reason" title={v.reason}>{v.reason}</span>}
-                    </div>
-                  )}
+                  {!v ? <span className="muted">—</span> : <FitCell f={f!} online={online} need={fit?.cpu?.estimate?.amount}
+                    accelerators={machines?.find((mm) => mm.id === x.machine_id)?.accelerators} />}
                 </td>
                 <td data-label={t("modelpage.col.engine")} className="small">
                   {eng?.variant ? (
                     <div className="cell-stack">
                       <span><Link to={engineHref(recipe!)} className="mono">{recipe}</Link> <span className="muted">· {eng.variant}</span></span>
-                      <span className="muted">{presenceText(eng.kind, eng.present)}</span>
+                      <span className="muted">{presenceText(eng.kind, eng.present, eng.via, eng.size)}</span>
                     </div>
                   ) : <span className="muted" title={eng?.note ?? undefined}>{recipe ? t("modelpage.noVariant") : "—"}</span>}
                 </td>
                 <td className="cell-actions">
                   <div className="catalog-actions">
                     {p.can_deploy && recipe && v?.fits && online && (
-                      <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}&recipe=${encodeURIComponent(recipe)}&machine=${x.machine_id}${f?.device === "cpu" ? "&device=cpu" : ""}`}>{t("modelpage.deployHere")}</Link>
+                      <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}&recipe=${encodeURIComponent(recipe)}&machine=${x.machine_id}${f?.device === "cpu" ? "&device=cpu" : ""}`}>{f?.device === "cpu" ? t("modelpage.deployHereCpu") : t("modelpage.deployHere")}</Link>
                     )}
                     {p.can_deploy && m.kind !== "local" && !x.cache.cached && !x.download && x.connected && (
                       <button type="button" className="btn btn-quiet btn-small" onClick={() => onDownload(x.machine_id)}>{t("modelpage.downloadHere")}</button>
@@ -350,6 +343,29 @@ function ModelMachines({ p, recipe, machines, onDownload }: {
         </table>
       </div>
     </>
+  );
+}
+
+// "Fits?": on a GPU, or on the CPU with the system memory it uses (1.5.6, #282: on an APU, not the GPU's part), or why
+// not (the CPU's reason on a machine with no GPU the engine can use).
+function FitCell({ f, online, need, accelerators }: { f: NonNullable<MachineFit>; online: boolean; need: number | undefined; accelerators: Accelerator[] | undefined }) {
+  const t = useT();
+  const v = f.verdict;
+  const cpu = f.device === "cpu";
+  const mem = cpu ? cpuMemory(v, need, accelerators) : null;
+  return (
+    <div className="cell-stack">
+      <span>{v.fits
+        ? <span className={`chip ${online ? "chip-tone-ok" : "chip-tone-wait"}`}>{online ? t("modelpage.fits") : t("modelpage.wouldFit")}{cpu ? t("modelpage.onCpu") : ""}</span>
+        : v.share_fits ? <span className="chip chip-tone-wait">{t("modelpage.fitsShared")}</span>
+          : <span className="chip chip-tone-bad">{cpu ? t("modelpage.noFitCpu") : t("modelpage.noFit")}</span>}
+        {v.fits && !cpu && v.leftover != null ? <span className="muted">{v.gpus?.length ? t("modelpage.leftOnGpu", { size: gib(v.leftover), gpus: v.gpus.join(", #") }) : t("modelpage.left", { size: gib(v.leftover) })}</span> : null}</span>
+      {mem && v.fits && mem.need !== null && mem.total !== null && (
+        <span className="muted">{t("modelpage.cpuUses", { need: gib(mem.need), total: gib(mem.total), free: gib(Math.max(0, mem.free ?? 0)) })}
+          {mem.apuGpu ? t("modelpage.cpuApu", { gpu: gib(mem.apuGpu) }) : ""}</span>
+      )}
+      {(!v.fits || !online) && v.reason && <span className="muted lp-reason" title={v.reason}>{v.reason}</span>}
+    </div>
   );
 }
 

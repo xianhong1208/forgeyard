@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.db import CatalogModel, Deployment, Node
-from forgeyard.machines import cache, engineimages
+from forgeyard.machines import cache, engineimages, relay
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import FEATURE_IMAGE_SAVE
 from forgeyard.models import cache_keys, prefetch, reach, render, scheduler, sources, trials
@@ -100,19 +100,28 @@ def cache_entry(db: DbSession, node: Node, m: CatalogModel, key: Optional[str]) 
     return out
 
 
-def engine_on(node: Node, recipe: Recipe) -> dict:
+def engine_on(node: Node, recipe: Recipe, sizes: Optional["ImageSizes"] = None) -> dict:
     """{variant, runtime, kind (image | program | command), engine_name, present (True | False | None: not known), listed_at,
-    note}: the variant of the engine this machine would run, and whether its image or program is there."""
+    note, via, size}: the variant of the engine this machine would run, and whether its image or program is there."""
     variant, why = prefetch.variant_for(node, recipe)
-    out: dict = {"variant": None, "runtime": None, "kind": None, "engine_name": None, "present": None, "listed_at": None,
-                 "note": None}
     if variant is None:
-        out["note"] = why
-        return out
-    out.update(variant=variant.name, runtime=variant.runtime)
+        return {"variant": None, "runtime": None, "kind": None, "engine_name": None, "present": None, "listed_at": None,
+                "note": why, "via": None, "size": None}
+    return engine_there(node, recipe, variant, sizes)
+
+
+def engine_there(node: Node, recipe: Recipe, variant, sizes: Optional["ImageSizes"] = None) -> dict:
+    """The same for a given variant (the one a deployment's replica was placed with). 1.5.6 (#282): `via`, how it comes
+    when it is not there ("direct": pulled or downloaded by the machine; "server": through the server; "auto": directly,
+    through the server when that fails; None for an installed command), and `size`, the image's size in bytes when a
+    machine's listing shows it (this machine's, else another's), else None."""
+    out: dict = {"variant": variant.name, "runtime": variant.runtime, "kind": None, "engine_name": None, "present": None,
+                 "listed_at": None, "note": None, "via": None, "size": None}
     if variant.runtime == "container":
         seen = engineimages.image_on(node, variant.image)
-        out.update(kind="image", engine_name=variant.image, present=seen["present"], listed_at=seen["listed_at"])
+        out.update(kind="image", engine_name=variant.image, present=seen["present"], listed_at=seen["listed_at"],
+                   via=_via(node, "image", reach.registry(variant.image), variant.image),
+                   size=seen["size"] if seen["size"] is not None else (sizes or ImageSizes([])).of(variant.image))
         if seen["present"] is None:
             out["note"] = ("Its images were never listed: they are once its agent is connected."
                            if not hub.connected(node.id) else "Its images are not listed yet.")
@@ -121,9 +130,45 @@ def engine_on(node: Node, recipe: Recipe) -> dict:
     if block is None:   # a command installed on the machine
         out.update(kind="command", engine_name=variant.command, present=True)
         return out
-    out.update(kind="program", engine_name=block.get("name"))
+    out.update(kind="program", engine_name=block.get("name"), via=_via(node, "engine", reach.engine_host(block)))
     out["present"] = True if reach.has_engine(node, block) else (False if node.model_cache else None)
     return out
+
+
+def _via(node: Node, phase: str, host: Optional[str], image: Optional[str] = None) -> str:
+    if not relay.relays(node, phase, image):
+        return "direct"
+    return relay.mode(node, host) or "direct"
+
+
+class ImageSizes:
+    """The size of an engine image as the machines' last listings show it (the first machine that has it)."""
+
+    def __init__(self, nodes: list[Node]):
+        self.nodes = nodes
+        self.found: dict[str, Optional[int]] = {}
+
+    def of(self, image: Optional[str]) -> Optional[int]:
+        if not image:
+            return None
+        if image not in self.found:
+            self.found[image] = next((s for s in (engineimages.image_on(n, image)["size"] for n in self.nodes)
+                                      if isinstance(s, int)), None)
+        return self.found[image]
+
+
+def placed_engines(db: DbSession, recipe: Recipe, placement: dict) -> dict:
+    """1.5.6 (#282): each replica a preview placed gets `engine`, whether that machine has the engine image or program
+    for the variant it was placed with now, and how it comes when not (engine_there). The deploy form says it once a
+    machine is chosen. The placement is the preview's answer only: nothing is stored."""
+    sizes = ImageSizes(machines(db))
+    variants = {v.name: v for v in recipe.variants}
+    for entry in placement.get("placed") or []:
+        node = db.get(Node, entry.get("machine_id"))
+        variant = variants.get(entry.get("variant"))
+        if node is not None and variant is not None:
+            entry["engine"] = engine_there(node, recipe, variant, sizes)
+    return placement
 
 
 def node_out(node: Node) -> dict:
@@ -169,10 +214,12 @@ def model_page(db: DbSession, m: CatalogModel, all_recipes: dict) -> dict:
     key = _key(m)
     active = {r.node_id: r for r in prefetch.active_rows(db, model_id=m.id)}
     rows = []
-    for node in machines(db):
+    nodes = machines(db)
+    sizes = ImageSizes(nodes)
+    for node in nodes:
         rows.append({**node_out(node), "cache": cache_entry(db, node, m, key),
                      "download": prefetch.row_out(active[node.id]) if node.id in active else None,
-                     "engines": {n: engine_on(node, all_recipes[n][0]) for n in names}})
+                     "engines": {n: engine_on(node, all_recipes[n][0], sizes) for n in names}})
     deps = db.scalars(select(Deployment).where(Deployment.model_id == m.id, trials.not_trial())
                       .order_by(Deployment.name)).all()
     return {"files": files_of(m), "machines": rows,
@@ -188,9 +235,11 @@ def engine_page(db: DbSession, recipe: Recipe) -> dict:
 
     active = {r.node_id: r for r in prefetch.active_rows(db, engine_only=recipe.name)}
     rows = []
-    for node in machines(db):
+    nodes = machines(db)
+    sizes = ImageSizes(nodes)
+    for node in nodes:
         conn = hub.get(node.id)
-        rows.append({**node_out(node), **engine_on(node, recipe),
+        rows.append({**node_out(node), **engine_on(node, recipe, sizes),
                      "can_list": conn is not None and FEATURE_IMAGE_SAVE in conn.features,
                      # 1.5.2 (#95): a download of this engine alone under way there.
                      "download": prefetch.row_out(active[node.id]) if node.id in active else None})

@@ -205,9 +205,10 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
-The join token works once, within 15 minutes. AMD and CPU-only machines:
+The join token works once, within 15 minutes. AMD, CPU-only and Windows machines:
 [Add an AMD machine](docs/guide/how-to.md#add-an-amd-machine),
 [Add a CPU-only machine](docs/guide/how-to.md#add-a-cpu-only-machine),
+[Add a Windows machine (WSL2)](docs/guide/how-to.md#add-a-windows-machine-wsl2) (not verified on real hardware yet),
 [Run the agent in Docker](docs/guide/how-to.md#run-the-agent-in-docker).
 
 ## Quick start

@@ -187,7 +187,9 @@ Forgeyard*. Even with all cards allowed, saving the choice once ticks this step 
 2. Give the deployment a name, for example `qwen`. It becomes the **model name** programs ask for.
 3. Check **Runs on**: **GPU** for Qwen3 0.6B, **CPU only** for the GGUF model (*Deploy it* chooses
    it for you).
-4. The page shows the estimate and where it will run. Choose **Deploy**.
+4. The page shows the estimate and where it will run. Once you choose a **Machine**, it also says
+   whether that machine has the engine's image yet, and how it comes if not (pulled, or through the
+   server), with its size when known. Choose **Deploy**.
 
 The deployment page shows the download, then the engine starting. It is ready when its replica is
 **healthy**. The first time, that takes as long as the download; later starts take seconds. Try it

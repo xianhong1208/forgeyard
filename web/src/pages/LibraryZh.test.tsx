@@ -390,7 +390,7 @@ describe("the model library in Traditional Chinese", () => {
       "視覺模型只能以寬鬆授權加入（Apache-2.0、MIT、BSD）；這個模型的授權是 未註明。");
     expect(searchLicenceProblem({ task: "depth", license: "cc-by-nc-4.0" } as SearchResult)).toBe("授權 cc-by-nc-4.0：視覺模型需要寬鬆授權");
     expect(fitsLine(SUGGESTION)).toBe("gpu-01 的 GPU #4、#5、cpu-01 的 CPU");
-    expect(presenceText("program", false)).toBe("程式不在這裡：部署時取得");
+    expect(presenceText("program", false)).toBe("程式不在這裡：部署時下載");
     expect(whereText("image", null)).toBe("還沒有列出");
     expect(taskLabel({ task: "rerank", task_label: "Rerank" })).toBe("重排序");
     setLang("en");
@@ -401,7 +401,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(compact(1234567)).toBe("1.2 M");
     expect(languagesText(["zh", "en", "ja", "ko"])).toBe("Chinese, English +2");
     expect(fitsLine(SUGGESTION)).toBe("gpu-01 (GPU #4, #5), cpu-01 (CPU)");
-    expect(presenceText("program", false)).toBe("program not here: fetched on deploy");
+    expect(presenceText("program", false)).toBe("program not here: downloaded on deploy");
     // English shows the server's own task label, even one the console would word differently.
     expect(taskLabel({ task: "rerank", task_label: "Reranking" })).toBe("Reranking");
   });

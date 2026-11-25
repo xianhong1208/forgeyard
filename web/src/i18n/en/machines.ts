@@ -97,6 +97,17 @@ export default {
     " Needs the NVIDIA Container Toolkit. The $(for d in …) line passes each NVIDIA device of the host (/dev/nvidia*) with --device as well, so the agent keeps its GPUs when the host runs systemctl daemon-reload.",
   "machines.docker.whyAmd":
     " Uses the host's ROCm tools, mounted read-only. The video and render groups are given by their number on the host: the image has no render group.",
+  // 1.5.6 (#282): where each command runs, and the Windows (WSL2) variant of the Docker command.
+  "machines.where.add": "Run it on the machine you are adding, in a Linux shell (bash). SSH in first if that is not this computer.",
+  "machines.where.wsl": "Run it on the Windows machine, in the shell of its WSL2 Linux distribution (type wsl in PowerShell to open it), not in PowerShell itself.",
+  "machines.docker.wsl": "Windows (WSL2)",
+  "machines.docker.whyWsl":
+    " Only --gpus all: WSL2 passes the GPU through /dev/dxg and has no /dev/nvidia* devices to list.",
+  "machines.wsl.needs":
+    "<strong>Not verified on real hardware yet.</strong> It needs the NVIDIA driver for Windows (it includes WSL support; install no Linux driver in the distribution), and in the WSL2 distribution Docker Engine with the NVIDIA Container Toolkit, so that docker run --gpus all works there. A Docker Desktop alternative without GPU support cannot run GPU models. Keep the model directory on the distribution's own disk, not under /mnt/c.",
+  "machines.wsl.help": "Add a Windows machine (WSL2)",
+  "machines.wsl.slowDir":
+    "{dir} is on a Windows drive: every file goes through WSL's file sharing, many times slower than the distribution's own disk. Use a directory there instead, such as /srv/forgeyard-models.",
   "machines.docker.help": "Run the agent in Docker",
   "machines.manual.get": "On the machine, get Forgeyard {version} and run {sync}, with {extra} on NVIDIA machines.",
   "machines.manual.save": "Save this as {file}, or let {init} write a complete one with every setting explained:",

@@ -68,7 +68,7 @@ describe("through the server", () => {
     expect(downloadLine(dl())).toBe("Downloading the model via the server: 512 MiB of 1.3 GiB (40%)");
     expect(downloadLine(dl({ state: "done", download: null, finished_at: new Date().toISOString() }))).toBe("Downloaded just now via the server");
     expect(downloadLine(dl({ state: "done", via: "direct", download: null, recipe: "llama-cpp", finished_at: new Date().toISOString() })))
-      .toBe("Downloaded just now, with the llama-cpp engine");
+      .toBe("Downloaded just now");
     expect(targetDetail(target({ via: "server" }))).toBe("1.2 GiB to download · 48 GiB free · via the server");
     expect(targetDetail(target({ via: "auto" }))).toBe("1.2 GiB to download · 48 GiB free");
     expect(targetDetail(target({ via: "server", model_cached: true, need_bytes: 0 }))).toBe("model already here · 48 GiB free");

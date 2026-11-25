@@ -566,6 +566,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .placement { margin-top: 6px; }
 .placed { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
 .placed li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; overflow-wrap: anywhere; }
+.placed-engine { display: block; margin-top: 2px; }
 .ok-ic { color: var(--ok); margin-top: 3px; }
 .nofit { display: flex; gap: 8px; align-items: center; padding: 8px 10px; margin-bottom: 8px; border-radius: var(--radius);
   background: var(--bad-soft); border: 1px solid #f2c4c0; color: #8a1a12; font-size: 13.5px; font-weight: 550; }
@@ -1596,6 +1597,7 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .tile-foot .chip-update { position: relative; z-index: 1; font-size: 12px; white-space: nowrap; } /* above the tile's stretched link */
 .agent-update .update-why { margin: 0 0 10px; }
 .update-steps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 12px; min-width: 0; }
+.where-line { margin: 8px 0 4px; font-size: 13.5px; font-weight: 550; }
 .update-steps > li { min-width: 0; }
 .update-step-title { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .update-alt { margin-top: 12px; font-size: 13px; }

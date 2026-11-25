@@ -177,4 +177,16 @@ export default {
   "deploy.outage.avoid.autoscale": "Or turn on automatic replicas, with at least 2.",
   "deploy.outage.avoid.min_replicas": "Or raise its fewest automatic replicas to 2.",
   "deploy.outage.avoid.cloud": "Meanwhile, keys that may use the cloud are answered by this deployment's cloud tier.",
+  // 1.5.6 (#282): whether the chosen machine has the engine's image or program now, and how it comes when not.
+  "deploy.engine.imageHere": "{machine} has the engine image.",
+  "deploy.engine.imageNot": "{machine} does not have the engine image yet: it is pulled when the replica starts{size}.",
+  "deploy.engine.imageNotServer": "{machine} does not have the engine image yet: it comes through the server when the replica starts{size}.",
+  "deploy.engine.imageNotAuto": "{machine} does not have the engine image yet: it is pulled when the replica starts, through the server if that fails{size}.",
+  "deploy.engine.imageUnknown": "Whether {machine} has the engine image is not known yet: its images were never listed.",
+  "deploy.engine.programHere": "{machine} has the engine program.",
+  "deploy.engine.programNot": "{machine} does not have the engine program yet: it is downloaded when the replica starts{size}.",
+  "deploy.engine.programNotServer": "{machine} does not have the engine program yet: it comes through the server when the replica starts{size}.",
+  "deploy.engine.programNotAuto": "{machine} does not have the engine program yet: it is downloaded when the replica starts, through the server if that fails{size}.",
+  "deploy.engine.programUnknown": "Whether {machine} has the engine program is not known yet: it has sent no cache report.",
+  "deploy.engine.size": " ({size})",
 } as const;
