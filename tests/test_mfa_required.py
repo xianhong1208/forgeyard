@@ -13,14 +13,22 @@ from sqlalchemy import select
 from forgeyard import advisor, cli
 from forgeyard.config import get_settings
 from forgeyard.db import MfaFactor, RecoveryCode, User, new_session, reset_engine, utcnow
-from forgeyard.security import mfa_policy
+from forgeyard.security import mfa, mfa_policy
 from tests.conftest import OWNER, add_user, sign_in
 from tests.gateway_helpers import api_client, new_key
-from tests.test_mfa import audit, browser, clock, enrol, rows, user_id  # noqa: F401 (clock is a fixture)
+from tests.test_mfa import T0, audit, browser, enrol, rows, user_id
 
 PW = "quiet-meadow-4821"
 DUE = "mfa_enrolment_required"
 DAY = timedelta(days=1)
+
+
+@pytest.fixture()
+def clock(monkeypatch):
+    """The time authenticator codes are checked at (as in test_mfa.py): fixed, so the codes the test makes match."""
+    t = [T0]
+    monkeypatch.setattr(mfa, "clock", lambda: t[0])
+    return t
 
 
 @pytest.fixture()
