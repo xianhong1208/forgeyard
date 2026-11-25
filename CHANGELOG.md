@@ -6,94 +6,135 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.5] — 2026-11-25
+
+Image edits and image to video (#143). A model that edits, such as FLUX.2 [klein] 4B, changes the pictures you give
+it at `/v1/images/edits`, and Wan2.2-TI2V-5B can start a video from your picture (`input_reference` at
+`/v1/videos`). The gateway checks every image and fetches every address itself; the engine gets checked files only.
+The Playground gains **Edit images** and a **Start image**, and model pages say what a model does with images. No
+filter checks the pictures: read the model card before you open such a deployment to others.
+
+**Update the agents that run from the agent image.** The 1.5.4 agent image lacks `libgomp.so.1`, which the
+llama.cpp and stable-diffusion.cpp release archives link, so on a machine whose agent runs from that image every
+CPU process deployment of the built-in `llama-cpp` and `sd-cpp` recipes exits with code 127 (#284). The 1.5.5 image
+installs `libgomp1`. Use the **Update the agent** command on each machine's page. An agent run on the host needs
+the library on the host (`apt install libgomp1`). Apart from that, a 1.5.4 agent works with a 1.5.5 server: the
+agent's protocol and the shared modules it imports did not change, and the only agent code change is a clearer
+reason for that exit code. Setup health lists a 1.5.4 agent as older than the server.
+
+**No migration.** Catalog entries from before are read from their pipeline class, so a Wan2.2-TI2V-5B added in 1.3
+takes start images without being added again. Back up before upgrading as always
+([how](docs/guide/how-to.md#back-up-and-restore)).
+
+**The API changes add endpoints, fields and parameters, with these changed answers:**
+
+- `POST /v1/images/edits` answered 404 `endpoint_not_supported` for every model. A model that edits is now served;
+  one that edits none answers 400 `edits_not_supported`.
+- `/v1/videos` refused every `input_reference` with 400 `input_reference_not_supported`. A model that takes a start
+  image now uses it; other video models still answer `input_reference_not_supported`; an `input_reference` that is
+  neither a file nor `{"image_url"}` (a bare string) answers 400 `invalid_request`.
+- `/v1/images/generations` to a model that only edits (Qwen-Image-Edit, LongCat-Image-Edit) was sent to an engine
+  that cannot make it; it now answers 400 `generation_not_supported`.
+- Adding an inpainting pipeline answers 422 `not_an_image_model`.
+- `/v1/images/variations` keeps 404 `endpoint_not_supported`, with a new message.
+
 ### Added
 
 - **Image edits at `/v1/images/edits` (#143).** The prompt and the images to edit, as `multipart/form-data` (what
   OpenAI's SDK sends for `images.edit`) or OpenAI's JSON form with `images[].image_url` (a base64 data: URL, or an
   http(s) URL the gateway fetches under the media rules), to models that edit: FLUX.2 [klein], Qwen-Image-Edit,
-  LongCat-Image-Edit, FLUX.1 Kontext, on vLLM-Omni and stable-diffusion.cpp. The gateway checks every input image
-  before anything is sent: how many (the deployment's new *Input images*, 1 by default, at most 16), its bytes
-  (`MEDIA_FETCH_MAX_MB`), its type by its first bytes (PNG, JPEG, WebP) and its size from its header without decoding
-  it (the new *Largest input*: 2,048 pixels on vLLM-Omni, 1,024 on stable-diffusion.cpp). It always sends an explicit
-  size (the first input's shape at the deployment's default pixels when the request gives none) and rebuilds the
-  engine's request with the checked files only: no URL, mask, LoRA path or other client field reaches the engine.
-  Edits share the image queue; usage counts the images made plus the input images (`media_items`) and their bytes
-  (`bytes_in`). Masks are refused (400 `mask_not_supported`), and so is `file_id`. What the model does is checked
-  before anything about the images: an edit to a model that edits none is 400 `edits_not_supported` with or without
-  images, and its URLs are never fetched.
-- What an image model does is in its catalog entry: `meta.image.edit` (input images it edits, 0 for none) and
-  `meta.image.generate` (whether it makes images from text), from its diffusers pipeline class, or for a
-  stable-diffusion.cpp file from its names, or as an admin says when adding it (`image_edit`, `image_generate`). No
-  migration: entries from before are read from their pipeline class.
-- Image recipes gain *Largest request* (`max_body_mb`, 64 MiB), and the estimate of a model that edits counts its
-  input images (vLLM-Omni's edit pipelines resize them to about a megapixel; stable-diffusion.cpp works on them at
-  their size).
+  LongCat-Image-Edit and FLUX.1 Kontext, on vLLM-Omni and stable-diffusion.cpp.
+  - The gateway checks every input image before anything is sent: how many (the deployment's new *Input images*, 1
+    by default, at most 16), its bytes (`MEDIA_FETCH_MAX_MB`), its type by its first bytes (PNG, JPEG, WebP), and its
+    size from its header without decoding it (the new *Largest input*: 2,048 pixels on vLLM-Omni, 1,024 on
+    stable-diffusion.cpp).
+  - It always sends an explicit size (the first input's shape at the deployment's default pixels when the request
+    gives none) and rebuilds the engine's request with the checked files only: no URL, mask, LoRA path or other
+    client field reaches the engine.
+  - Edits share the image queue. Usage counts the images made plus the input images (`media_items`) and their bytes
+    (`bytes_in`).
+  - Masks are refused (400 `mask_not_supported`), and so is `file_id`.
+  - What the model does is checked before anything about the images: an edit to a model that edits none is 400
+    `edits_not_supported` with or without images, and its URLs are never fetched.
+- What an image model does is in its catalog entry: `meta.image.edit` (how many input images it edits, 0 for none)
+  and `meta.image.generate` (whether it makes images from text). They come from its diffusers pipeline class, for a
+  stable-diffusion.cpp file from its names, or from the admin when adding it (`image_edit`, `image_generate`).
+- Image recipes gain *Largest request* (`max_body_mb`, 64 MiB). The estimate of a model that edits counts its input
+  images: vLLM-Omni's edit pipelines resize them to about a megapixel, and stable-diffusion.cpp works on them at
+  their size.
 - **Image to video at `/v1/videos` (#143).** A start image as OpenAI's `input_reference`: a file in
   `multipart/form-data` (what OpenAI's SDK sends for `videos.create`), or in JSON `{"image_url": …}` (a base64 data:
-  URL, or an http(s) URL the gateway fetches under the media rules once the key may use the model). It gets the checks
-  of an edit's input images (bytes, PNG / JPEG / WebP by its first bytes, its size from its header against the
-  deployment's new *Largest start image*, 2,048 pixels) and reaches the engine as the checked file only, with an
-  explicit size. Wan2.2-TI2V-5B takes one optionally; image-to-video pipelines vLLM-Omni 0.32.0 runs
-  (Wan2.2-I2V-A14B, SANA-Video I2V, HunyuanVideo-1.5 I2V) can now be added and need one (400
-  `input_reference_required` without it); other video models refuse it (400 `input_reference_not_supported`).
-  Usage counts the start image (`media_items`, `bytes_in`) when the job is accepted. The memory estimate is unchanged
-  by a start image (not yet measured with one).
-- What a video model does with a start image is in its catalog entry: `meta.video.image_input` (`none`, `optional`,
-  `required`), from its diffusers pipeline class. No migration: entries from before are read from their class, so a
-  Wan2.2-TI2V-5B added in 1.3 takes start images without being added again. The Playground's video options say it
-  too (`image_input`, `max_input_side`).
-- **The console for images given to a model (#143).** The Playground's **Image** panel has **Edit images** beside
-  **Make from text** for a model that edits: 1 to the deployment's *Input images* pictures (dropped, pasted or chosen;
-  PNG, JPEG or WebP), an instruction, a size (*Like the first image* by default), how many and a format, sent as
-  `/v1/images/edits` multipart; the pictures given are shown beside the results. A model that only edits opens in Edit.
-  The **Video** panel has a **Start image** for a model that takes one (optional, or required: then **Generate** waits
-  for it), sent as `input_reference`. The gateway's new error codes read in Traditional Chinese too.
-- Model pages and the catalog mark *Edits images* (*only*, for a model that makes nothing from text) with how many
-  input images it takes, and *Image to video* (start image optional or required). Such a model's page says that no
-  filter checks the pictures and links its model card's responsible-use notes and licence. The deploy form shows
-  *Input images* and *Largest input* (or *Largest start image*) only for a model that takes images; the Playground's
-  image options say what the model does with images (`generate`, `edit`, `max_input_side`, `edit_formats`).
-- Recommended models: FLUX.2 [klein] 4B (Apache-2.0; makes and edits images, up to 4 inputs) for vLLM-Omni, and from
-  Comfy-Org's repository for stable-diffusion.cpp (AMD Vulkan, NVIDIA CUDA, the CPU); Wan2.2-TI2V-5B is marked
-  *Image to video*. Entries say what they do with images (`can`). Their memory is Forgeyard's estimate, not yet measured.
-- Acceptance: `scripts/accept_img.py --edit` (one and two inputs, multipart and JSON with a data: URL and an http(s)
-  URL, the refusals, usage) and `scripts/accept_video.py --image` (a video from a start image uploaded and as a data:
-  URL, checked for size and length; required / optional / none; the refusals; usage), both in `accept_all`'s img and
-  video groups (`--img-edit-url`).
-- Guide (English and Traditional Chinese): *Edit an image*, *Make a video from a picture*, the Playground's new
-  modes, and *An image edit is refused*.
+  URL, or an http(s) URL the gateway fetches under the media rules once the key may use the model).
+  - It gets the checks of an edit's input images (bytes; PNG, JPEG or WebP by its first bytes; its size from its
+    header against the deployment's new *Largest start image*, 2,048 pixels) and reaches the engine as the checked
+    file only, with an explicit size.
+  - Wan2.2-TI2V-5B takes one optionally. The image-to-video pipelines vLLM-Omni 0.32.0 runs (Wan2.2-I2V-A14B,
+    SANA-Video I2V, HunyuanVideo-1.5 I2V) can now be added, and they need one (400 `input_reference_required`
+    without it). Other video models refuse it (400 `input_reference_not_supported`).
+  - Usage counts the start image (`media_items`, `bytes_in`) when the job is accepted.
+  - The memory estimate does not change with a start image: it is not yet measured with one.
+- What a video model does with a start image is in its catalog entry: `meta.video.image_input` (`none`, `optional`
+  or `required`), from its diffusers pipeline class. The Playground's video options say it too (`image_input`,
+  `max_input_side`).
+- **The console for images given to a model (#143).**
+  - The Playground's **Image** panel has **Edit images** beside **Make from text** for a model that edits: 1 to the
+    deployment's *Input images* pictures (dropped, pasted or chosen; PNG, JPEG or WebP), an instruction, a size
+    (*Like the first image* by default), how many and a format, sent to `/v1/images/edits` as multipart. The pictures
+    given are shown beside the results. A model that only edits opens in Edit.
+  - The **Video** panel has a **Start image** for a model that takes one, sent as `input_reference`. When the model
+    requires one, **Generate** waits for it.
+  - Model pages and the catalog mark *Edits images* (*only*, for a model that makes nothing from text) with how many
+    input images it takes, and *Image to video* (start image optional or required). Such a model's page says that
+    no filter checks the pictures and links its model card's responsible-use notes and licence.
+  - The deploy form shows *Input images* and *Largest input* (or *Largest start image*) under **Advanced**, and only
+    for a model that takes images. The Playground's image options say what the model does with images (`generate`,
+    `edit`, `max_input_side`, `edit_formats`).
+  - The gateway's new error codes read in Traditional Chinese too.
+- **Recommended models:** FLUX.2 [klein] 4B (Apache-2.0; makes and edits images, up to 4 inputs) for vLLM-Omni, and
+  from Comfy-Org's repository for stable-diffusion.cpp (AMD Vulkan, NVIDIA CUDA, the CPU). Wan2.2-TI2V-5B is marked
+  *Image to video*. Entries say what they do with images (`can`). Their memory is Forgeyard's estimate, not yet
+  measured.
+- **Acceptance:** `scripts/accept_img.py --edit` (one and two inputs; multipart, and JSON with a data: URL and an
+  http(s) URL; the refusals; usage) and `scripts/accept_video.py --image` (a video from a start image uploaded and as
+  a data: URL, checked for size and length; required, optional and none; the refusals; usage). Both run in
+  `accept_all`'s `img` and `video` groups (`--img-edit-url`).
+- **CI checks the engines' libraries.** The `agent-image` job runs `scripts/check_engine_libs.py`: it downloads every
+  built-in process engine's archive, unpacks it the way the agent does, runs `ldd` on every ELF file in it inside
+  the built image, and fails on a library reported "not found" (#284).
+- The guide, in both languages: *Edit an image*, *Make a video from a picture*, the Playground's new modes, and *An
+  image edit is refused*.
 
 ### Changed
 
-- *Input images* is under **Advanced** on the deploy form, with *Largest input*.
-
-- `/v1/images/variations` stays closed (404 `endpoint_not_supported`), now saying to send the image to
+- `/v1/images/variations` stays closed (404 `endpoint_not_supported`); its message now says to send the image to
   `/v1/images/edits` with `n` and a prompt.
-- `/v1/videos`: `input_reference` sent in another shape than a file or `{"image_url"}` (a bare string) is now 400
+- `/v1/videos`: an `input_reference` sent in another shape than a file or `{"image_url"}` (a bare string) is now 400
   `invalid_request`; a start image to a text-to-video model stays 400 `input_reference_not_supported`. vLLM-Omni's
   `image_reference`, `video_reference`, `audio_reference` and `input_references` stay refused.
+- **A process engine that exits with code 127 because the loader cannot find a library says so in its reason**
+  (#284): *exited with code 127: the engine needs libgomp.so.1, which this machine does not have. Update the agent
+  …*. The reason comes from the agent, so a 1.5.4 agent still says only *exited with code 127*.
+- The built-in `vision` and `transformers` recipes keep `forgeyard-vision` 1.5.4rc1: `images/vision` did not change
+  since 1.5.4.
 
 ### Fixed
 
-- **CPU engines run from the agent image exit with code 127 (found in #143's lab run).** The `cpu-process` variants
-  of `llama-cpp` and `sd-cpp` are release archives the agent runs as a plain process, and both link GCC's OpenMP
-  runtime `libgomp.so.1`, which the agent image (Debian 13 slim) did not have: on a machine whose agent runs from the
-  image, every such deployment stayed in backoff with *exited with code 127*. The agent image now installs `libgomp1`
-  on amd64 and arm64 (about 0.4 MB); nothing else those archives link is missing (checked with `ldd` on every ELF
-  file in both). The `agent-image` CI job now runs `scripts/check_engine_libs.py`: it downloads every built-in
-  process engine's archive, unpacks it the way the agent does and runs `ldd` inside the built image, and fails on a
-  library reported "not found". A process engine that exits with 127 because the loader cannot find a library now
-  says so in its reason: *exited with code 127: the engine needs libgomp.so.1, which this machine does not have.
-  Update the agent …*. **Update the agents that run from the image** with the machine page's **Update the agent**
-  command once 1.5.5 is out; agents run on the host need the library on the host (`apt install libgomp1`).
-- **Playground: a finished video turns into the expired notice when it expires.** The panel's clock only ran while a
-  job was at work, so after the video's `expires_at` the player and the download link stayed although the content
-  answered 410 Gone (since 1.3; easy to hit with a short `keep_minutes`). The acceptance scripts' "over the cap"
-  sizes stay within the 2048-pixel bound, so the cap answers and not the general size check.
+- **CPU engines run from the agent image exited with code 127** (#284, found in #143's lab run). The `cpu-process`
+  variants of `llama-cpp` and `sd-cpp` are release archives the agent runs as a plain process, and both link GCC's
+  OpenMP runtime `libgomp.so.1`, which the agent image (Debian 13 slim) did not have. On a machine whose agent runs
+  from the image, every such deployment stayed in backoff with *exited with code 127*. The agent image now installs
+  `libgomp1` on amd64 and arm64 (about 0.4 MB). Nothing else those archives link is missing: `ldd` on every ELF file
+  in both found no other. **Update the agents that run from the image**; agents run on the host need the library on
+  the host (`apt install libgomp1`).
+- **Playground: a finished video turns into the expired notice when it expires.** The panel's clock ran only while
+  a job was at work, so after the video's `expires_at` the player and the download link stayed although the content
+  answered 410 Gone (since 1.3; easy to hit with a short `keep_minutes`).
 - A model that only edits (Qwen-Image-Edit, LongCat-Image-Edit) could be added as an image model, and every
   `/v1/images/generations` request was then sent to an engine that cannot make it. It now answers 400
-  `generation_not_supported`, pointing to `/v1/images/edits`, and Try it sends it an edit. An inpainting pipeline,
-  which needs a mask, is refused when added (422 `not_an_image_model`).
+  `generation_not_supported`, pointing to `/v1/images/edits`, and **Try it** sends it an edit. An inpainting
+  pipeline, which needs a mask, is refused when added (422 `not_an_image_model`).
+- The acceptance scripts' "over the cap" sizes stay within the 2,048-pixel bound, so the deployment's cap answers
+  and not the general size check.
 
 ## [1.5.4] — 2026-11-24
 

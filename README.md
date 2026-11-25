@@ -117,7 +117,9 @@ Wan2.2-TI2V-5B makes a video that starts from your picture (`input_reference` on
 every picture and fetches addresses itself; no engine gets a URL. The Playground has **Edit images** and a **Start
 image**, and model pages say what a model does with pictures ([edit an image](docs/guide/how-to.md#edit-an-image),
 [a video from a picture](docs/guide/how-to.md#make-a-video-from-a-picture)). No filter checks the pictures: read the
-model card before you open such a deployment to others. No migration; the agents need no update.
+model card before you open such a deployment to others. No migration. Update the agents that run from the agent
+image with the machine page's command: with the 1.5.4 image, the CPU process engines of the built-in `llama-cpp` and
+`sd-cpp` recipes exit with code 127 ([release notes](CHANGELOG.md#155--2026-11-25)).
 
 ## What's new in 1.4
 
@@ -150,7 +152,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.4
+  docker.io/tonyhuang1101/forgeyard:1.5.5
 sudo docker logs forgeyard
 ```
 
@@ -196,7 +198,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
@@ -288,7 +290,7 @@ lists each release's acceptance runs and pass counts. So far:
 
 Not checked on real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes, discrete AMD
 cards, the one-line install on a host
-with systemd, and Wan2.2-TI2V-5B video. Video generation is checked with vLLM-Omni (Wan2.1-T2V-1.3B, 832x480 for 5 s, on the A100). Image generation on NVIDIA is checked with vLLM-Omni (Stable Diffusion XL and Z-Image-Turbo on the A100)
+with systemd. Video generation is checked with vLLM-Omni (Wan2.1-T2V-1.3B, 832x480 for 5 s, and Wan2.2-TI2V-5B from a start image, on the A100). Image generation on NVIDIA is checked with vLLM-Omni (Stable Diffusion XL and Z-Image-Turbo on the A100)
 and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Turbo GGUF on the A100). Reports from other machines are welcome (see
 [CONTRIBUTING.md](CONTRIBUTING.md)).
 
@@ -322,6 +324,10 @@ and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Tur
 | RT-DETRv2 R18 and R50, SAM 2.1 Hiera tiny, Depth Anything V2 Small | Forgeyard's vision server (`vision`) | CPU (as a process, before the 1.4 image is published) |
 | **Image embeddings and text classification (1.5.4)** | | |
 | CLIP ViT-B/32 LAION-2B and DINOv2 small embeddings; DistilBERT multilingual sentiment; bge-m3-zeroshot-v2.0-c and roberta-base-zeroshot-v2.0-c (zero-shot) | Forgeyard's transformers server (`transformers`) | CPU; NVIDIA A100 (CUDA); AMD Strix Halo (CPU) |
+| **Image edits and image to video (1.5.5)** | | |
+| FLUX.2 [klein] 4B: image edits | vLLM-Omni (`vllm-omni-image`) | NVIDIA A100 |
+| FLUX.2 [klein] 4B: image edits | stable-diffusion.cpp (`sd-cpp`) | CPU (process); AMD Strix Halo (Vulkan) |
+| Wan2.2-TI2V-5B: a video from a start image | vLLM-Omni (`vllm-omni-video`) | NVIDIA A100 |
 | **Cloud** | | |
 | Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
 
