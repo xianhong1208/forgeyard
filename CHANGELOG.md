@@ -27,6 +27,8 @@ version until 1.0.
   deploy page with **Runs on** → **CPU only**.
 - **Every machine command says where it runs (#282).** **Add a machine** (each way) and **Update the agent** say to run
   the command on that machine in a Linux shell (bash), and to SSH in first when it is another computer.
+- **ROADMAP: 1.6.0 single sign-on (OIDC) and two-factor sign-in move to the community edition** (#39). The enterprise
+  edition keeps SAML, SCIM, group sync, SSO-only sign-in and several identity providers.
 - **A CI test run that hangs leaves its stacks in the log.** The pytest steps run under `timeout --signal=ABRT` 40
   minutes into the 45-minute job (10 minutes for the vision server's tests) with `python -X faulthandler`, so a hang
   outside a single test (collection, session hooks, a thread left behind at interpreter exit) prints every thread's
