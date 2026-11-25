@@ -13,7 +13,7 @@ from forgeyard import audit
 from forgeyard.api import links
 from forgeyard.api.deps import Caller, fail, normalise_username, public_base, require_admin, user_out
 from forgeyard.db import User, get_db
-from forgeyard.security import sessions
+from forgeyard.security import mfa, sessions
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -43,7 +43,8 @@ def _get(db: DbSession, user_id: int) -> User:
 @router.get("")
 def list_users(_: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     users = db.scalars(select(User).order_by(User.status != "pending", User.username)).all()
-    return {"users": [user_out(u) for u in users]}
+    with_mfa = mfa.users_with_factor(db)
+    return {"users": [user_out(u, has_mfa=u.id in with_mfa) for u in users]}
 
 
 @router.post("", status_code=201)
@@ -127,3 +128,24 @@ def force_sign_out(user_id: int, caller: Caller = Depends(require_admin), db: Db
     audit.record(db, "user.signed_out", actor=caller.user, target=user.username, ip=caller.ip, count=ended)
     db.commit()
     return {"ended": ended}
+
+
+@router.post("/{user_id}/mfa-reset")
+def reset_two_factor(user_id: int, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """For someone who lost their authenticator and their recovery codes: remove every factor and recovery code, and
+    end their sessions. They sign in with their password alone and can add an authenticator again. The owner's
+    factors are the owner's to change, in My account; nobody resets their own here (that would skip the password or
+    code My account asks for)."""
+    user = _get(db, user_id)
+    if user.id == caller.user.id:
+        raise fail(409, "self_protected", "Change your own two-factor sign-in in My account.")
+    if user.is_owner:
+        raise fail(409, "owner_protected", "Only the owner can change the owner's two-factor sign-in.")
+    removed = mfa.remove_all(db, user.id)
+    if not removed:
+        raise fail(409, "mfa_not_enabled", f"{user.username} has no two-factor sign-in to reset.")
+    ended = sessions.revoke_all(db, user.id, "mfa_reset")
+    audit.record(db, "user.mfa_reset", actor=caller.user, target=user.username, ip=caller.ip, factors=removed,
+                 sessions_ended=ended)
+    db.commit()
+    return {"factors_removed": removed, "sessions_ended": ended, "user": user_out(user, has_mfa=False)}

@@ -33,4 +33,5 @@ export const ENDED_TEXT: Record<string, string> = labels({
   signed_out_by_admin: "auth.ended.signed_out_by_admin",
   password_changed: "auth.ended.password_changed",
   account_disabled: "auth.ended.account_disabled",
+  mfa_reset: "auth.ended.mfa_reset",
 });

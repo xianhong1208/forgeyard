@@ -2,7 +2,7 @@
 
 Encrypted in the database: Hugging Face tokens on deployments and the server's own (1.3.1, a
 `server_settings` row), model replicas' internal keys, the values of workload environment variables,
-and cloud providers' API keys (1.2). Passwords, sessions, API keys and join tokens are not
+cloud providers' API keys (1.2) and the secrets of two-factor authenticator apps (1.6.0). Passwords, sessions, API keys and join tokens are not
 encrypted but hashed (they are only ever compared, never read back).
 
     stored value   fy1:<key id>:<base64url(nonce || ciphertext || tag)>

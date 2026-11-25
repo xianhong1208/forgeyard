@@ -1974,3 +1974,26 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 }
 /* A long fact chip (what an embedding model takes) wraps on a phone instead of widening the page. */
 .mk-facts .chip { max-width: 100%; height: auto; min-height: 21px; white-space: normal; overflow-wrap: anywhere; gap: 4px; }
+
+/* ---------------------------------------------------------------- two-factor sign-in (1.6.0, #39) */
+.two-factor h2 { display: inline-flex; align-items: center; gap: 8px; }
+.two-factor h3 { margin: 0 0 10px; font-size: 15px; }
+.mfa-factors { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.mfa-factors li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); }
+.mfa-factor-main { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.mfa-recovery { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.mfa-recovery p { margin: 0; flex: 1 1 16rem; }
+.mfa-enrol, .mfa-codes, .mfa-confirm { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.mfa-enrol-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 16px 22px; align-items: start; margin-bottom: 16px; }
+.mfa-qr p, .mfa-key p { margin: 0 0 8px; }
+.qr { display: block; padding: 6px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); max-width: 100%; height: auto; }
+.mfa-key details summary { cursor: pointer; color: var(--info); margin-bottom: 8px; }
+.recovery-list { columns: 2; column-gap: 24px; margin: 12px 0; padding-left: 2.2em; font-size: 14px; line-height: 1.9; }
+.mfa-confirm .strong { margin: 0; }
+.mfa-confirm p { margin: 0; }
+.auth-switch { margin-top: 4px; }
+@media (max-width: 600px) {
+  .mfa-enrol-grid { grid-template-columns: minmax(0, 1fr); }
+  .recovery-list { columns: 1; }
+}

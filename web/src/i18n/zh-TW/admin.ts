@@ -42,6 +42,12 @@ export default {
   "admin.users.disabled": "已停用 {name}；對方的工作階段已結束。",
   "admin.users.deleted": "已刪除 {name}。",
   "admin.users.deleteConfirm": "要刪除 {name} 嗎？對方的工作階段會立刻結束。這個動作無法復原。",
+  "admin.users.twoFactor": "雙重驗證",
+  "admin.users.twoFactorTitle": "用密碼和驗證器 App 登入",
+  "admin.users.resetMfa": "重設雙重驗證",
+  "admin.users.resetMfaConfirm":
+    "要重設 {name} 的雙重驗證嗎？對方的驗證器 App 和備用碼都會被移除，工作階段也會結束。之後對方只用密碼登入，可以再到「我的帳號」重新加入驗證器。",
+  "admin.users.mfaReset": "已重設 {name} 的雙重驗證，對方的工作階段已結束。",
 
   // Audit log
   "admin.audit.index": "09 · 稽核紀錄",
@@ -79,6 +85,10 @@ export default {
   "admin.action.auth.login": "已登入",
   "admin.action.auth.login_failed": "登入失敗",
   "admin.action.auth.logout": "已登出",
+  "admin.action.auth.mfa_enrolled": "已加入驗證器 App",
+  "admin.action.auth.mfa_removed": "已移除驗證器 App",
+  "admin.action.auth.recovery_code_used": "已用備用碼登入",
+  "admin.action.auth.recovery_codes_created": "已產生新的備用碼",
   "admin.action.auth.other_sessions_ended": "其他工作階段已登出",
   "admin.action.auth.password_changed": "密碼已變更",
   "admin.action.auth.password_set_by_link": "已用連結設定密碼",
@@ -141,6 +151,7 @@ export default {
   "admin.action.user.budget_changed": "使用者的預算已變更",
   "admin.action.user.created": "使用者已建立",
   "admin.action.user.deleted": "使用者已刪除",
+  "admin.action.user.mfa_reset": "已重設雙重驗證",
   "admin.action.user.password_link_issued": "已發出密碼連結",
   "admin.action.user.registered": "使用者已註冊",
   "admin.action.user.signed_out": "使用者已在所有地方登出",
@@ -154,7 +165,7 @@ export default {
 
   // My account
   "admin.account.index": "我的帳號",
-  "admin.account.lead": "你的密碼，以及以你的身分登入的瀏覽器。",
+  "admin.account.lead": "你的密碼、雙重驗證，以及以你的身分登入的瀏覽器。",
   "admin.account.title": "帳號",
   "admin.account.username": "使用者名稱",
   "admin.account.role": "角色",

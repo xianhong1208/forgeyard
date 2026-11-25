@@ -385,7 +385,9 @@ It makes a new key (the old file, if any, is kept as `secret.key.lost-<time>`) a
 
 - drops the Hugging Face tokens: enter them again on each deployment of a gated model;
 - places model replicas again, so they restart with new internal keys;
-- drops cloud providers' keys: enter them again on **Cloud → Providers**.
+- drops cloud providers' keys: enter them again on **Cloud → Providers**;
+- removes the authenticator apps of two-factor sign-in (and the recovery codes of an account left without one):
+  those people sign in with their password alone and add their authenticator again in **My account**.
 
 It refuses to run when the key is not actually lost.
 

@@ -80,6 +80,9 @@ class Session(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # When this session last proved a second factor (1.6.0, #39): at sign-in with a code, or when its person
+    # added an authenticator. NULL: signed in with the password alone.
+    mfa_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="sessions")
 
@@ -94,6 +97,47 @@ class PasswordLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MfaFactor(Base):
+    """A second factor of an account (1.6.0, #39): an authenticator app (TOTP, RFC 6238)."""
+
+    __tablename__ = "mfa_factors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="totp")                 # totp
+    name: Mapped[str] = mapped_column(String(64))
+    # The shared secret (base32), encrypted with the server's secret key and bound to this column.
+    secret: Mapped[str] = mapped_column(EncryptedText("mfa_factors.secret"))
+    # The last time step a code was accepted for: that step and every earlier one never count again.
+    last_step: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RecoveryCode(Base):
+    """A single-use code that stands in for an account's second factor. Only its SHA-256 is stored."""
+
+    __tablename__ = "recovery_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    hash: Mapped[str] = mapped_column(String(64))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LoginChallenge(Base):
+    """A sign-in half done: the password was right and the second factor is still to come (5 minutes, 5 tries).
+    The browser holds a random token; only its SHA-256 is stored."""
+
+    __tablename__ = "login_challenges"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)           # sha256(token) hex
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class AuditEvent(Base):

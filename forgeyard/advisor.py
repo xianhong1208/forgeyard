@@ -427,6 +427,20 @@ def registrations_pending(ctx: Context) -> Iterator[Finding]:
                       pages=("users",))
 
 
+@check
+def admins_without_mfa(ctx: Context) -> Iterator[Finding]:
+    """1.6.0 (#39): active admins who sign in with a password alone."""
+    from forgeyard.security import mfa
+
+    with_mfa = mfa.users_with_factor(ctx.db)
+    bare = sorted(u.username for u in ctx.users if u.role == "admin" and u.status == "active" and u.id not in with_mfa)
+    if bare:
+        yield Finding("admins-without-mfa", "info", f"{_plural(len(bare), 'admin')} without two-factor sign-in",
+                      f"{_names(bare)} {'signs' if len(bare) == 1 else 'sign'} in with a password alone. An admin "
+                      "account can change everything here: add an authenticator app in My account (each admin "
+                      "does it for their own account).", "/account", "Open My account", pages=("users",))
+
+
 # --- machines
 @check
 def agent_outdated(ctx: Context) -> Iterator[Finding]:

@@ -14,14 +14,14 @@ export type KeyBackupDone = { kid: string; file: string };
 
 // POST the form, then hand the answer to the browser as a file. Not api(): the answer is a file,
 // and a 401 here is a wrong password (code wrong_password) unless the session really ended.
-export async function downloadKeyBackup(password: string, passphrase: string, confirm: string): Promise<KeyBackupDone> {
+export async function downloadKeyBackup(password: string, passphrase: string, confirm: string, code?: string): Promise<KeyBackupDone> {
   let res: Response;
   try {
     res = await fetch("/api/secret-key/backup", {
       method: "POST",
       credentials: "same-origin",
       headers: { "X-Forgeyard": "1", "Content-Type": "application/json", Accept: "application/octet-stream" },
-      body: JSON.stringify({ password, passphrase, passphrase_confirm: confirm }),
+      body: JSON.stringify({ password, passphrase, passphrase_confirm: confirm, ...(code ? { code: code.replace(/\s+/g, "") } : {}) }),
     });
   } catch {
     throw new ApiError(0, { code: "network", message: "Cannot reach the Forgeyard server." });
@@ -61,6 +61,7 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
   const [password, setPassword] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [code, setCode] = useState("");
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +79,7 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
   }, [onClose, done]);
 
   const problem = passphraseProblem(passphrase, confirm, password);
+  const needsCode = Boolean(info.data?.has_mfa);
   const ready = password.length > 0 && problem === null && !busy;
 
   const submit = async (e: FormEvent) => {
@@ -87,14 +89,16 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
     setBusy(true);
     setError(null);
     try {
-      const d = await downloadKeyBackup(password, passphrase, confirm);
+      const d = await downloadKeyBackup(password, passphrase, confirm, needsCode ? code : undefined);
       setPassword("");
+      setCode("");
       setPassphrase("");
       setConfirm("");
       setDone(d);
     } catch (err) {
       setError(errorText(err));
       if (err instanceof ApiError && err.code === "wrong_password") setPassword("");
+      if (err instanceof ApiError && err.code === "mfa_code_invalid") setCode("");
     } finally {
       setBusy(false);
     }
@@ -148,6 +152,14 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
                   <input id="keybak-password" type="password" autoComplete="current-password" value={password}
                     onChange={(e) => setPassword(e.target.value)} />
                 </div>
+                {needsCode && (
+                  <div className="field">
+                    <label htmlFor="keybak-code">{t("advisor.backup.code")}</label>
+                    <input id="keybak-code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code}
+                      aria-describedby="keybak-code-hint" onChange={(e) => setCode(e.target.value)} />
+                    <p className="field-hint" id="keybak-code-hint">{t("advisor.backup.codeHint")}</p>
+                  </div>
+                )}
                 <div className={`field${touched && problem && !passphrase ? " has-error" : ""}`}>
                   <label htmlFor="keybak-passphrase">{t("advisor.backup.passphrase")}</label>
                   <input id="keybak-passphrase" type="password" autoComplete="off" value={passphrase} aria-describedby="keybak-passphrase-hint"

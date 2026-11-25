@@ -10,6 +10,8 @@ export type User = {
   status: "active" | "pending" | "disabled";
   is_owner: boolean;
   has_password: boolean;
+  // 1.6.0 (#39): the account has an authenticator app (two-factor sign-in). Older servers leave it out.
+  has_mfa?: boolean;
   created_at: string;
   last_login_at: string | null;
 };
@@ -32,6 +34,7 @@ export type SecretKeyInfo = {
   includes_ca: boolean;
   tls_mode: TlsMode;
   has_password: boolean;
+  has_mfa?: boolean;
   passphrase_min: number;
   backed_up: { kid: string; by: string; at: string; how?: string } | null;
 };

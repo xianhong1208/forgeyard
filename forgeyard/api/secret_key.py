@@ -3,7 +3,8 @@
 - `GET /api/secret-key`: what a backup would hold (key id, whether the CA is in it) and the last
   confirmed backup. Admins only.
 - `POST /api/secret-key/backup`: the admin's password again (checked like a sign-in: the same
-  back-off, and a wrong one is audited) and a passphrase they choose (12+ characters, typed twice,
+  back-off, and a wrong one is audited), a current code from their authenticator app when they have one
+  (1.6.0, #39), and a passphrase they choose (12+ characters, typed twice,
   not their password). Answers the file (forgeyard/security/keybackup.py has the format) with
   Cache-Control: no-store, as an attachment named after the key id and the date. Neither the
   passphrase nor the file is kept or logged. A download counts as the backup the setup advisor asks
@@ -11,6 +12,8 @@
 """
 
 from __future__ import annotations
+
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
@@ -21,7 +24,7 @@ from forgeyard import advisor, audit
 from forgeyard.api.deps import Caller, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import ServerSetting, get_db, utcnow
-from forgeyard.security import crypto, keybackup, passwords, tls
+from forgeyard.security import crypto, keybackup, mfa, passwords, tls
 from forgeyard.security.ratelimit import limiter, retry_after
 
 router = APIRouter(prefix="/api/secret-key", tags=["secret key"])
@@ -45,6 +48,7 @@ def secret_key_info(caller: Caller = Depends(require_admin), db: DbSession = Dep
         "includes_ca": c.tls is not None,
         "tls_mode": tls.mode(),
         "has_password": caller.user.password_hash is not None,
+        "has_mfa": mfa.has_factor(db, caller.user.id),
         "passphrase_min": keybackup.PASSPHRASE_MIN,
         "backed_up": last if last and last.get("kid") == c.kid else None,
     }
@@ -54,6 +58,8 @@ class BackupIn(BaseModel):
     password: str = Field(max_length=1024)
     passphrase: str = Field(max_length=keybackup.PASSPHRASE_MAX)
     passphrase_confirm: str = Field(max_length=keybackup.PASSPHRASE_MAX)
+    # A current code from the admin's authenticator app; needed when they have one.
+    code: Optional[str] = Field(default=None, max_length=64)
 
 
 @router.post("/backup")
@@ -77,12 +83,20 @@ def download_backup(body: BackupIn, caller: Caller = Depends(require_admin), db:
     if body.passphrase == body.password:
         raise fail(422, "passphrase_is_password", "Choose a passphrase that is not your password: the backup must stay "
                                                   "safe if your password is ever known.")
+    two_factor = mfa.has_factor(db, user.id)
+    if two_factor and not (body.code or "").strip():
+        raise fail(400, "mfa_code_required", "Type the code your authenticator app shows now.")
     if not passwords.verify_password(user.password_hash, body.password):
         limiter.login_failed(user.username, caller.ip)
         audit.record(db, "secret_key.backup_failed", actor=user, ip=caller.ip, reason="wrong_password")
         db.commit()
         # 401 with its own code: the console tells it apart from an ended session.
         raise fail(401, "wrong_password", "That is not your password.")
+    if two_factor and mfa.check_totp(db, user.id, body.code) is None:
+        limiter.login_failed(user.username, caller.ip)
+        audit.record(db, "secret_key.backup_failed", actor=user, ip=caller.ip, reason="wrong_code")
+        db.commit()
+        raise fail(400, "mfa_code_invalid", "That code is not right.")
     limiter.login_succeeded(user.username)
     try:
         contents = keybackup.current(settings)

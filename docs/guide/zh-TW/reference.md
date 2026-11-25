@@ -1208,6 +1208,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `certificate-name-missing` | 錯誤 | 你自己的憑證沒有包含 `PUBLIC_URL` 的主機 |
 | `certificate-expiring` | 警告 | 你自己的憑證在 30 天內到期，或 Forgeyard 的 CA 在 90 天內到期。14 天內到期則是錯誤 |
 | `registrations-pending` | 提示 | 有人在等待核准 |
+| `admins-without-mfa` | 提示 | 有管理員只用密碼登入（沒有開啟雙重驗證） |
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
 | `replica-traffic-plain` | 警告 | 送往某台機器的流量沒有加密：它的 agent 比 1.4.5 舊，閘道以純 HTTP 連它；修正連結會開啟它的更新指令（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)） |
 | `replica-certificate` | 錯誤 | 某台機器的 agent 以 TLS 提供副本，卻沒有這台伺服器簽發的憑證，或憑證已過期、沒有在更新（剩不到 3 天）：連不到它的副本（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)） |

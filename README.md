@@ -69,6 +69,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
   fingerprint when they join, and stored secrets are encrypted. Admins download the key and the CA
   as one passphrase-encrypted backup file from the console (1.4.2). From 1.4.5 the gateway reaches every replica
   over TLS too, with a certificate the CA signs for that machine (its key never leaves it).
+- **Two-factor sign-in (1.6.0).** Anyone can add an authenticator app (Google Authenticator, Microsoft
+  Authenticator, 1Password, Aegis and the like) in My account; signing in then asks for its 6-digit code too, with
+  10 single-use recovery codes for a lost phone. Admins see who has it, Setup health names admins without it, and an
+  admin can reset it for someone who lost both.
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging

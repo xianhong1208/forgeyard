@@ -43,6 +43,12 @@ export default {
   "admin.users.disabled": "Disabled {name}; their sessions ended.",
   "admin.users.deleted": "Deleted {name}.",
   "admin.users.deleteConfirm": "Delete {name}? Their sessions end now. This cannot be undone.",
+  "admin.users.twoFactor": "two-factor",
+  "admin.users.twoFactorTitle": "Signs in with a password and an authenticator app",
+  "admin.users.resetMfa": "Reset two-factor",
+  "admin.users.resetMfaConfirm":
+    "Reset two-factor sign-in for {name}? Their authenticator apps and recovery codes are removed and their sessions end. They sign in with their password alone, and can add an authenticator again in My account.",
+  "admin.users.mfaReset": "Reset two-factor sign-in for {name}; their sessions ended.",
 
   // Audit log
   "admin.audit.index": "09 · Audit log",
@@ -81,6 +87,10 @@ export default {
   "admin.action.auth.login": "Signed in",
   "admin.action.auth.login_failed": "Sign-in failed",
   "admin.action.auth.logout": "Signed out",
+  "admin.action.auth.mfa_enrolled": "Authenticator app added",
+  "admin.action.auth.mfa_removed": "Authenticator app removed",
+  "admin.action.auth.recovery_code_used": "Signed in with a recovery code",
+  "admin.action.auth.recovery_codes_created": "New recovery codes made",
   "admin.action.auth.other_sessions_ended": "Other sessions signed out",
   "admin.action.auth.password_changed": "Password changed",
   "admin.action.auth.password_set_by_link": "Password set with a link",
@@ -143,6 +153,7 @@ export default {
   "admin.action.user.budget_changed": "Budget of a user changed",
   "admin.action.user.created": "User created",
   "admin.action.user.deleted": "User deleted",
+  "admin.action.user.mfa_reset": "Two-factor sign-in reset",
   "admin.action.user.password_link_issued": "Password link issued",
   "admin.action.user.registered": "User registered",
   "admin.action.user.signed_out": "User signed out everywhere",
@@ -156,7 +167,7 @@ export default {
 
   // My account
   "admin.account.index": "My account",
-  "admin.account.lead": "Your password and the browsers signed in as you.",
+  "admin.account.lead": "Your password, two-factor sign-in and the browsers signed in as you.",
   "admin.account.title": "Account",
   "admin.account.username": "Username",
   "admin.account.role": "Role",

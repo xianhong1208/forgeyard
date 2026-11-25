@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import { useAuth } from "../auth";
+import { TwoFactorPanel } from "../components/TwoFactor";
 import { Field, Notice, PageHeader, RoleChip } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { tPlural } from "../i18n/core";
@@ -16,6 +17,7 @@ type SessionRow = {
   expires_at: string;
   ip: string | null;
   user_agent: string | null;
+  two_factor?: boolean;
 };
 
 /** "2 hours", "90 minutes", "1 hour": the idle limit as people say it. */
@@ -84,6 +86,7 @@ export function AccountPage() {
       <PageHeader index={t("admin.account.index")} title={user?.username ?? ""} lead={t("admin.account.lead")} />
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       <div className="columns">
+        <div>
         <section className="panel">
           <h2>{t("admin.account.title")}</h2>
           <dl className="facts">
@@ -105,6 +108,8 @@ export function AccountPage() {
             <div><button className="btn btn-primary" disabled={busy || mismatch}>{busy ? t("admin.account.saving") : t("admin.account.changePassword")}</button></div>
           </form>
         </section>
+        <TwoFactorPanel say={setMessage} />
+        </div>
         <section className="panel">
           <div className="panel-head">
             <h2>{t("admin.account.sessions")}</h2>
@@ -120,6 +125,7 @@ export function AccountPage() {
                 <div className="session-main">
                   <span className="session-device">{device(s.user_agent)}</span>
                   {s.current && <span className="chip chip-here">{t("admin.account.thisBrowser")}</span>}
+                  {s.two_factor && <span className="chip chip-status-active" title={t("mfa.sessionChipTitle")}>{t("mfa.sessionChip")}</span>}
                 </div>
                 <div className="session-meta">
                   <span className="mono">{s.ip ?? t("admin.account.unknownIp")}</span>
