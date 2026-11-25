@@ -48,6 +48,8 @@
 
 1.5.5 加入**圖片編輯**和**圖片生成影片**。會編輯圖片的模型（例如推薦清單裡給 vLLM-Omni 和 stable-diffusion.cpp 用的 FLUX.2 [klein] 4B，Apache-2.0）可以在 `/v1/images/edits` 修改你給它的圖片；Wan2.2-TI2V-5B 可以讓影片從你的圖片開始（`/v1/videos` 的 `input_reference`）。閘道會檢查每一張圖片，位址也由閘道自己下載，推論引擎拿不到任何網址。試用區多了 **編輯圖片** 和 **起始圖片**，模型頁面也會說明模型能拿圖片做什麼（[編輯圖片](docs/guide/zh-TW/how-to.md#edit-an-image)、[從圖片產生影片](docs/guide/zh-TW/how-to.md#make-a-video-from-a-picture)）。沒有任何過濾機制會檢查這些圖片：把這樣的部署開放給其他人之前，請先讀模型卡。沒有資料庫遷移。從 agent 映像檔執行的 agent 請用機器頁面上的指令更新：用 1.5.4 的映像檔時，內建 `llama-cpp` 與 `sd-cpp` 配方的 CPU 行程推論引擎一啟動就會結束，結束代碼是 127（[版本說明](CHANGELOG.md#155--2026-11-25)（英文））。
 
+1.5.6 讓機器和模型頁面更清楚。部署頁面和模型頁面會說明機器上現在有沒有推論引擎的映像檔，沒有的話會怎麼取得、有多大。推論引擎用不到機器上的 GPU 時（例如 APU 上的 faster-whisper），改用 CPU 來判斷；每個機器指令也都會說明要在哪裡執行。**加入機器** 多了給執行 Windows 和 WSL2 的 NVIDIA 機器用的指令（[作法](docs/guide/zh-TW/how-to.md#add-a-windows-machine-wsl2)），還沒有在實際的 Windows 硬體上驗證。沒有資料庫遷移，agent 也不必更新（[版本說明](CHANGELOG.md#156--2026-11-26)（英文））。
+
 ## 1.4 的新功能
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
@@ -73,7 +75,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.5
+  docker.io/tonyhuang1101/forgeyard:1.5.6
 sudo docker logs forgeyard
 ```
 
@@ -116,7 +118,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD、純 CPU 與 Windows 機器：
