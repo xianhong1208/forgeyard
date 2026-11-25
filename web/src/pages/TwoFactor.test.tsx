@@ -16,7 +16,7 @@ const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "a
   created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 const SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 const URI = `otpauth://totp/Forgeyard:owner?secret=${SECRET}&issuer=Forgeyard&algorithm=SHA1&digits=6&period=30`;
-const CODES = Array.from({ length: 10 }, (_, i) => `abcd-efgh-jkmn-pq${i}${i}`.replace(/[01]/g, "2"));
+const CODES = Array.from({ length: 10 }, (_, i) => `abcd-efgh-jkmn-pq${"23456789ab"[i]}x`);
 const FACTOR = { id: 7, kind: "totp" as const, name: "Pixel", created_at: "2026-11-25T00:00:00Z", last_used_at: "2026-11-25T00:00:00Z" };
 
 type Reply = { status: number; body: unknown; headers?: Record<string, string> };
