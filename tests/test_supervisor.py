@@ -451,3 +451,67 @@ def test_fy_sup_016_settle_fails_instead_of_waiting_for_ever(tmp_path):
         asyncio.run(scenario())
     finally:
         reap_all(rt)
+
+
+LOADER_SAYS = ("/var/lib/forgeyard-agent/models/engines/sd/sd-server: error while loading shared libraries: "
+               "libgomp.so.1: cannot open shared object file: No such file or directory")
+
+
+def test_fy_sup_017_a_missing_shared_library_is_named_in_the_reason(tmp_path):
+    """FY-SUP-017 (1.5.5): an engine that exits with 127 because the loader cannot find a library it links (the agent
+    image had no libgomp.so.1) says which library and to update the agent, not only "exited with code 127"; the
+    restart policy still applies."""
+    sup, rt = make(tmp_path)
+
+    async def scenario():
+        sup.set_desired(desired(replica("r1", service("sd", runtime={"type": "process", "command": "sh", "args": [
+            "-c", f"echo starting; echo '{LOADER_SAYS}' >&2; exit 127"]}, ports=[]))))
+        await converge(sup, lambda s: s.records["r1"].state == "backoff")
+        rec = sup.records["r1"]
+        assert rec.exit_code == 127
+        assert rec.reason.startswith("exited with code 127: the engine needs libgomp.so.1, which this machine does not "
+                                     "have. Update the agent")
+        assert rec.reason.endswith("; restarting in 1 s")
+        assert len(rec.reason) < 400  # the status message keeps 400 characters of a replica's reason
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        reap_all(rt)
+
+
+def test_fy_sup_018_other_exits_keep_their_plain_reason(tmp_path):
+    """FY-SUP-018 (1.5.5): code 127 without the loader's line (a command not found), and the loader's line with
+    another exit code, keep the plain "exited with code N"."""
+    sup, rt = make(tmp_path)
+
+    async def scenario():
+        sup.set_desired(desired(
+            replica("r1", task("a", script="echo 'sh: 1: nosuch: not found' >&2; exit 127")),
+            replica("r2", task("b", script=f"echo '{LOADER_SAYS}' >&2; exit 1"))))
+        await converge(sup, lambda s: s.records["r1"].final and s.records["r2"].final)
+        assert sup.records["r1"].reason == "exited with code 127"
+        assert sup.records["r2"].reason == "exited with code 1"
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        reap_all(rt)
+
+
+def test_fy_sup_019_a_container_engine_keeps_its_plain_reason(tmp_path):
+    """FY-SUP-019 (1.5.5): the loader's line from a container (the engine image's own libraries, which an agent
+    update does not change) keeps the plain "exited with code 127"."""
+    fake = FakeDocker(tmp_path / "bin")
+    sup, _ = _ctr(tmp_path, fake)
+
+    async def scenario():
+        sup.set_desired(desired(replica("t1", {"name": "t", "kind": "task",
+                                               "runtime": {"type": "container", "image": "alpine"}})))
+        await converge(sup, lambda s: s.records["t1"].state == "running")
+        fake.set("fy-t-t1", status="exited", exit=127, logs=[LOADER_SAYS])
+        await converge(sup, lambda s: s.records["t1"].final)
+        assert sup.records["t1"].reason == "exited with code 127"
+        assert LOADER_SAYS in sup.tails["t1"]
+
+    asyncio.run(scenario())

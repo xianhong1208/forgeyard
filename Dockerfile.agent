@@ -36,13 +36,17 @@ ARG TARGETARCH
 # "libdrm_amdgpu.so" (the unversioned name, normally in libdrm-dev; ROCm 7.0 amd_smi_drm.cc and
 # amd_smi_utils.cc). Without them amdsmi reads memory but no ASIC information. ROCm is x86_64 only,
 # so the arm64 image leaves them out; NVML (nvidia-ml-py, above) is in both.
+# libgomp1 (GCC's OpenMP runtime, about 0.4 MB): the prebuilt engines of the built-in recipes' process
+# variants (llama.cpp's and stable-diffusion.cpp's release archives) link it, and the base image has
+# nothing else they need. Without it they exit with code 127 before they start. scripts/check_engine_libs.py
+# checks every such archive against this image in CI.
 # Package versions are not pinned: the base image is (by digest), and Debian's security updates
 # should land on the next build.
 # hadolint ignore=DL3008
 RUN set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     apt-get update; \
-    apt-get install -y --no-install-recommends tini; \
+    apt-get install -y --no-install-recommends tini libgomp1; \
     if [ "$arch" = "amd64" ]; then \
       apt-get install -y --no-install-recommends libdrm2 libdrm-amdgpu1; \
       amdgpu="$(find /usr/lib -name 'libdrm_amdgpu.so.1' -print -quit)"; \

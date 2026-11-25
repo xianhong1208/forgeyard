@@ -75,6 +75,17 @@ version until 1.0.
 
 ### Fixed
 
+- **CPU engines run from the agent image exit with code 127 (found in #143's lab run).** The `cpu-process` variants
+  of `llama-cpp` and `sd-cpp` are release archives the agent runs as a plain process, and both link GCC's OpenMP
+  runtime `libgomp.so.1`, which the agent image (Debian 13 slim) did not have: on a machine whose agent runs from the
+  image, every such deployment stayed in backoff with *exited with code 127*. The agent image now installs `libgomp1`
+  on amd64 and arm64 (about 0.4 MB); nothing else those archives link is missing (checked with `ldd` on every ELF
+  file in both). The `agent-image` CI job now runs `scripts/check_engine_libs.py`: it downloads every built-in
+  process engine's archive, unpacks it the way the agent does and runs `ldd` inside the built image, and fails on a
+  library reported "not found". A process engine that exits with 127 because the loader cannot find a library now
+  says so in its reason: *exited with code 127: the engine needs libgomp.so.1, which this machine does not have.
+  Update the agent …*. **Update the agents that run from the image** with the machine page's **Update the agent**
+  command once 1.5.5 is out; agents run on the host need the library on the host (`apt install libgomp1`).
 - **Playground: a finished video turns into the expired notice when it expires.** The panel's clock only ran while a
   job was at work, so after the video's `expires_at` the player and the download link stayed although the content
   answered 410 Gone (since 1.3; easy to hit with a short `keep_minutes`). The acceptance scripts' "over the cap"

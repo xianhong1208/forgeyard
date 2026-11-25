@@ -82,6 +82,12 @@ jobs:
         run: docker build -f Dockerfile.agent -t forgeyard-agent:ci .
       - name: Smoke test (contents, simulation, a real join and a restart)
         run: scripts/agent_image_smoke.sh forgeyard-agent:ci
+      # Every built-in process engine's archive, unpacked and checked with ldd inside the image: a library the
+      # image lacks fails here, not as "exited with code 127" on a machine (1.5.5: libgomp.so.1).
+      - name: Engine libraries (ldd of the built-in process engines inside the image)
+        run: |
+          uv sync --locked --no-dev
+          uv run --no-sync python scripts/check_engine_libs.py forgeyard-agent:ci
       - name: Image size
         run: docker image ls forgeyard-agent:ci
 
