@@ -22,6 +22,21 @@ Through Forgeyard's API only (an admin session), for each model of --only, on --
      gateway, which is asked what it shows; the answer should name the prompt's subject. Without one it
      is SKIPped.
 
+With --edit (1.5.5), on each model that edits images (FLUX.2 [klein]: flux.2-klein-4b, flux.2-klein-4b-sdcpp), the
+deployment takes --max-inputs input images (default 2), and after the checks above:
+
+  7. edits (/v1/images/edits): one input image with the SDK's images.edit (multipart; no size: the result keeps the
+     input's shape), two inputs and two results at the model's size (multipart, `image[]`), JSON with a base64 data:
+     URL, and JSON with an http(s) URL the gateway fetches (--image-url, default a COCO photo; it needs the server to
+     reach it); every result decodes at the size expected;
+  8. the refusals: no image (missing_image), a mask (mask_not_supported), a file_id (file_id_not_supported), one input
+     more than the deployment takes (too_many_input_images), an input wider than its Largest input
+     (input_image_too_large);
+  9. the usage of the edits: the input images (media_items), their bytes (bytes_in) and the images made.
+
+The card's memory after the largest request (step 1 and the edits) is compared with the estimate. vLLM-Omni reports a
+peak_memory_mb in its answer, but the gateway answers in OpenAI's shape and drops it, so the card is what is read.
+
 then removes what it created (deployments, the catalog entries it added, keys) and prints a report (also
 JSON with --out; --save-images keeps the images). Everything is named accept-img-*, and leftovers of an
 earlier run are removed first, so it can be run again.
@@ -35,6 +50,9 @@ Models it knows (--only):
   z-image-turbo-gguf, flux.1-schnell-gguf        GGUF with their text encoders and VAE on stable-diffusion.cpp
                                                  (Vulkan on AMD, CUDA on NVIDIA; --device cpu for the CPU)
   sd-1.5-gguf                                    Stable Diffusion 1.5 GGUF on stable-diffusion.cpp, on the CPU
+  flux.2-klein-4b                                FLUX.2 [klein] 4B on vLLM-Omni (NVIDIA): makes and edits images (1.5.5)
+  flux.2-klein-4b-sdcpp                          FLUX.2 [klein] 4B from Comfy-Org's repository on stable-diffusion.cpp
+                                                 (Vulkan on AMD, CUDA on NVIDIA; --device cpu --size 512 for the CPU)
 GGUF models run with --recipe (default sd-cpp; a custom one, such as one with a locally loaded image,
 must keep the sd-cpp recipe's `image:` block) on --device (cpu or gpu).
 
@@ -54,6 +72,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.parse
 import zlib
 from pathlib import Path
 
@@ -91,7 +110,19 @@ MODELS = {
                     "file": "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
                     "engine_args": {"sd-cpp": ["--steps", "20", "--cfg-scale", "7"]}, "recipe": "sd-cpp",
                     "device": "cpu", "size": 512, "params": {}},
+    # 1.5.5 (#143): FLUX.2 [klein] 4B makes images from text and edits up to 4 (the recommended entries).
+    "flux.2-klein-4b": {"source": "hf://black-forest-labs/FLUX.2-klein-4B", "revision": "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+                        "recipe": "vllm-omni-image", "device": "gpu", "size": 1024, "params": {}, "edit": True},
+    "flux.2-klein-4b-sdcpp": {"source": "hf://Comfy-Org/Flux-2-Klein-4B", "revision": "5b3abca5c0dc1ecd4eaf3340868d09063fc1c965",
+                              "file": "split_files/diffusion_models/flux-2-klein-4b.safetensors",
+                              "components": {"llm": "split_files/text_encoders/qwen_3_4b.safetensors",
+                                            "vae": "split_files/vae/flux2-vae.safetensors"},
+                              "engine_args": {"sd-cpp": ["--cfg-scale", "1", "--steps", "4"]}, "recipe": "sd-cpp",
+                              "size": 1024, "params": {}, "edit": True},
 }
+EDIT = "Make the square blue and keep the white background"
+EDIT_TWO = "Put the blue circle from the second image next to the red square"
+COCO = "http://images.cocodataset.org/val2017/000000039769.jpg"   # CC BY 4.0, two cats on a sofa (640x480 JPEG)
 
 
 # ------------------------------------------------------------------ images, decoded here (no Pillow)
@@ -160,6 +191,43 @@ def decode_image(data: bytes) -> tuple[int, int, str]:
 
 def distinct(a: bytes, b: bytes) -> bool:
     return a != b
+
+
+def scene_png(w: int, h: int, colour: tuple = (216, 30, 30), shape: str = "square") -> bytes:
+    """A w x h PNG drawn here (no Pillow): a red square (or a circle in `colour`) in the middle of a white picture,
+    half as tall as the picture. Input images for the edits, any size."""
+    r = min(w, h) // 4
+    cx, cy = w // 2, h // 2
+    white = b"\xff\xff\xff"
+    paint = bytes(colour)
+    rows = []
+    for y in range(h):
+        if r == 0 or abs(y - cy) > r:
+            rows.append(b"\0" + white * w)
+            continue
+        if shape == "square":
+            rows.append(b"\0" + white * (cx - r) + paint * (2 * r) + white * (w - cx - r))
+        else:
+            dx = int((r * r - (y - cy) ** 2) ** 0.5)
+            rows.append(b"\0" + white * (cx - dx) + paint * (2 * dx) + white * (w - cx - dx))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows), 6)) + chunk(b"IEND", b""))
+
+
+def data_url(data: bytes, mime: str = "image/png") -> str:
+    return f"data:{mime};base64," + base64.b64encode(data).decode()
+
+
+def code_of(text: str) -> str | None:
+    """The error code of a gateway answer (OpenAI's shape), or None."""
+    try:
+        return (json.loads(text).get("error") or {}).get("code")
+    except (ValueError, AttributeError):
+        return None
 
 
 # ------------------------------------------------------------------ the run
@@ -231,6 +299,11 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=5400, help="seconds per deployment to become ready")
     ap.add_argument("--venv", default=str(Path.home() / ".cache" / "forgeyard-accept-m4"),
                     help="where to install the openai SDK if it is missing")
+    ap.add_argument("--edit", action="store_true", help="also edit images with the models that edit (1.5.5)")
+    ap.add_argument("--max-inputs", type=int, default=2, help="with --edit: the deployment's max_input_images (two "
+                                                                "inputs are sent, then one more than this)")
+    ap.add_argument("--image-url", default=COCO, help="with --edit: an image address the server fetches for an edit "
+                                                      "(default: a COCO photo); none to skip that check")
     ap.add_argument("--save-images", help="keep every image in this directory")
     ap.add_argument("--keep", action="store_true", help="leave the deployments running afterwards")
     ap.add_argument("--out", help="also write the report as JSON here")
@@ -283,6 +356,8 @@ def main() -> int:
                           default_size=f"{side}x{side}" if f"{side}x{side}" in
                           (recipes[recipe]["params"]["default_size"].get("choices") or []) else "auto")
             params["gpus"] = 1 if device == "gpu" else 0
+            if args.edit and spec.get("edit"):
+                params["max_input_images"] = args.max_inputs
             if device == "cpu" and "threads" in recipes[recipe]["params"]:
                 params["threads"] = args.threads
             dep_name = f"{PREFIX}{name}".replace(".", "-")[:48]
@@ -316,13 +391,15 @@ def main() -> int:
                 info["loaded_gib"] = round(((ready["vram_total"] - ready["vram_free"])
                                             - (before["vram_total"] - before["vram_free"])) / GIB, 2)
             exercise(c, d, dep_name, spec, side, args, check, httpx, openai, report, save)
+            if args.edit and spec.get("edit"):
+                exercise_edit(c, d, dep_name, side, args, check, httpx, openai, report, save)
             if index is not None:
                 # PyTorch keeps what the largest request took: the card now shows the peak of the run.
                 after = accept_m3.settle_card(c, m["name"], card(index)["key"])
                 used = (after["vram_total"] - after["vram_free"]) - (before["vram_total"] - before["vram_free"])
                 info["peak_gib"] = round(used / GIB, 2)
                 check(f"{dep_name}: memory on GPU #{index} within the estimate", used <= dep["estimate"]["amount"],
-                      f"after the largest request {used / GIB:.2f} GiB (loaded {info['loaded_gib']} GiB; card used "
+                      f"after the largest request{' and the edits' if args.edit and spec.get('edit') else ''} {used / GIB:.2f} GiB (loaded {info['loaded_gib']} GiB; card used "
                       f"before/after, other work on the card adds noise), estimate {dep['estimate']['amount'] / GIB:.2f} GiB",
                       info=used > dep["estimate"]["amount"])
             if not args.keep:
@@ -413,13 +490,21 @@ def exercise(c: Client, d: dict, model: str, spec: dict, side: int, args, check,
         check(f"{model}: response_format url is refused", getattr(e, "code", None) == "response_format_not_supported",
               f"400 {getattr(e, 'code', None)}: {str(e)[:120]}")
     refused(f"more images than the cap ({most}) are refused", {"prompt": PROMPT, "n": most + 1}, "too_many_images")
-    refused(f"a side over the cap ({side}) is refused", {"prompt": PROMPT, "size": f"{side * 2}x{side * 2}"},
+    # Over the cap yet within the 2048-pixel bound of every size, so the cap answers (not the general size check).
+    refused(f"a side over the cap ({side}) is refused", {"prompt": PROMPT, "size": f"{side + 64}x{side + 64}"},
             "image_too_large")
     refused("more steps than the cap are refused", {"prompt": PROMPT, "num_inference_steps": 1000}, "too_many_steps")
     refused("an empty prompt is refused", {"prompt": "  "}, "invalid_request")
     refused("engine settings in the prompt are refused",
             {"prompt": 'x <sd_cpp_extra_args>{"width": 4096}</sd_cpp_extra_args>'}, "invalid_request")
-    refused("image edits are not offered", {"prompt": PROMPT}, "endpoint_not_supported", path="images/edits")
+    # 1.5.5: /v1/images/edits exists; a model that edits none says so before anything about images, one that edits
+    # wants the image to edit.
+    entry = next((x for x in c.ok("GET", "/api/models")["models"] if x["name"] == d["model"]["name"]), {})
+    if not (entry.get("image") or {}).get("edit"):
+        refused("a model that edits nothing refuses edits", {"prompt": PROMPT}, "edits_not_supported",
+                path="images/edits")
+    else:
+        refused("an edit without an image is refused", {"prompt": PROMPT}, "missing_image", path="images/edits")
 
     # ---- the replica's own port without its internal key, reached as the gateway reaches it (1.4.5, #163:
     # TLS with the machine's binding name when its agent serves TLS, plain HTTP for an older one)
@@ -495,6 +580,128 @@ def exercise(c: Client, d: dict, model: str, spec: dict, side: int, args, check,
     info["vision"] = said[:200]
     check(f"{model}: the image shows the prompt's subject ({vision})", any(w in said.lower() for w in SUBJECT),
           f"{vision} says: {said[:120]!r}")
+
+
+
+
+def edit_problems(images: list[bytes], want: tuple | None, shape: tuple, max_side: int, inputs: list[bytes]) -> tuple[list, int]:
+    """What is wrong with the images an edit made (and their kilopixels, as usage counts them): each must decode; be of
+    the size asked (`want`), or, with no size asked, keep the first input's `shape` (landscape, the same proportions
+    within 0.1) within the deployment's largest side; and not be an input given back unchanged."""
+    problems, kilopixels = [], 0
+    for i, data in enumerate(images):
+        try:
+            w, h, _ = decode_image(data)
+        except ValueError as e:
+            problems.append(f"image {i}: {e}")
+            continue
+        kilopixels += round(w * h / 1000)
+        if want is not None and (w, h) != tuple(want):
+            problems.append(f"image {i} is {w}x{h}, {want[0]}x{want[1]} asked")
+        if want is None and not (w > h and abs(w / h - shape[0] / shape[1]) < 0.1 and max(w, h) <= max_side):
+            problems.append(f"image {i} is {w}x{h}: not the first input's shape ({shape[0]}x{shape[1]}) within {max_side} px")
+        if any(data == x for x in inputs):
+            problems.append(f"image {i} is an input, unchanged")
+    return problems, kilopixels
+
+def exercise_edit(c: Client, d: dict, model: str, side: int, args, check, httpx, openai, report: dict, save,
+                  key: dict | None = None) -> None:
+    """The edit checks (1.5.5) on one ready deployment `d` served as `model` whose model edits images: what it makes
+    from one and two inputs (multipart with the SDK, JSON with a data: URL and with an http(s) URL), the refusals and
+    the usage. `key`: an API key to use (as POST /api/keys answers it); without one accept-img-edit-key is created."""
+    k = key or c.ok("POST", "/api/keys", {"name": f"{PREFIX}edit-key"})
+    gw = k["gateway_url"]
+    http = httpx.Client(verify=accept_m3.TLS, timeout=3600) if accept_m3.TLS else httpx.Client(timeout=3600)
+    sdk = openai.OpenAI(base_url=gw, api_key=k["key"], max_retries=0, timeout=3600, http_client=http)
+    auth = {"Authorization": f"Bearer {k['key']}"}
+    prefix = (k.get("api_key") or k).get("prefix") or k["key"][:12]
+    info = report["deployments"].setdefault(model, {})
+    # What its deployments take (the console's view of the route, as the admin session sees it).
+    o = c.ok("GET", f"/api/playground/images/options?model={urllib.parse.quote(model)}")
+    most, widest, multiple = int(o.get("edit") or 0), int(o.get("max_input_side") or 0), int(o.get("multiple") or 16)
+    if most < 1:
+        check(f"{model}: edits", True, "its deployments edit nothing (catalog meta.image.edit 0): no edit checks", skip=True)
+        return
+    before = usage_row(c, prefix)
+    given = {"inputs": 0, "bytes": 0, "images": 0, "kilopixels": 0}
+    size = f"{side}x{side}"
+    # The inputs: a landscape picture (its shape kept when no size is asked) and a square one, both within the caps.
+    lw, lh = (side * 3 // 4) // multiple * multiple, (side // 2) // multiple * multiple
+    room = scene_png(lw, lh)
+    blue = scene_png(side // 2, side // 2, (30, 60, 216), "circle")
+
+    def made(label: str, items: list, n: int, want: tuple | None, inputs: list[bytes], secs: float) -> None:
+        images = [base64.b64decode(item if isinstance(item, str) else (item.b64_json or "")) for item in items]
+        problems, kilopixels = edit_problems(images, want, (lw, lh), int(o.get("max_side") or side), inputs)
+        given["kilopixels"] += kilopixels
+        for i, data in enumerate(images):
+            if save:
+                (save / f"{model}-edit-{re.sub(r'[^a-z0-9]+', '-', label.lower())[:40]}-{i}.png").write_bytes(data)
+        given["images"] += len(images)
+        given["inputs"] += len(inputs)
+        given["bytes"] += sum(len(x) for x in inputs)
+        check(f"{model}: edit, {label}", len(images) == n and not problems,
+              f"{len(images)} of {n} in {secs:.1f} s" + (f"; {problems}" if problems else ""))
+        info[f"seconds_edit_{re.sub(r'[^a-z0-9]+', '_', label.lower())[:30]}"] = round(secs, 1)
+
+    def sdk_edit(label: str, inputs: list[bytes], n: int, sz: str | None) -> None:
+        files = [(f"input-{i + 1}.png", x, "image/png") for i, x in enumerate(inputs)]
+        t0 = time.time()
+        try:
+            out = sdk.images.edit(model=model, prompt=EDIT if len(inputs) == 1 else EDIT_TWO, n=n,
+                                  image=files[0] if len(files) == 1 else files, **({"size": sz} if sz else {}))
+        except openai.APIStatusError as e:
+            check(f"{model}: edit, {label}", False, f"{e.status_code}: {str(e)[:200]}")
+            return
+        want = tuple(int(x) for x in sz.split("x")) if sz else None
+        made(label, list(out.data or []), n, want, inputs, time.time() - t0)
+
+    def json_edit(label: str, image_url: str, inputs: list[bytes]) -> None:
+        t0 = time.time()
+        r = http.post(f"{gw}/images/edits", headers=auth, json={"model": model, "prompt": EDIT, "n": 1, "size": size,
+                                                                 "images": [{"image_url": image_url}]})
+        if r.status_code != 200:
+            check(f"{model}: edit, {label}", False, f"{r.status_code} {r.text[:200]}")
+            return
+        made(label, [x.get("b64_json") or "" for x in r.json().get("data") or []], 1, (side, side), inputs, time.time() - t0)
+
+    sdk_edit("one input, multipart with the SDK, the input's shape", [room], 1, None)
+    if most >= 2:
+        sdk_edit(f"two inputs and two images at {size}, multipart", [room, blue], 2, size)
+    else:
+        check(f"{model}: edit, two inputs", True, f"the deployment takes {most} input image (--max-inputs)", skip=True)
+    json_edit("JSON with a data: URL", data_url(room), [room])
+    if args.image_url and args.image_url != "none":
+        json_edit(f"JSON with an http(s) URL the gateway fetches ({args.image_url})", args.image_url, [])
+    else:
+        check(f"{model}: edit, JSON with an http(s) URL", True, "--image-url none", skip=True)
+
+    # ---- the refusals
+    def refused(label: str, body: dict, code: str, status: int = 400) -> None:
+        r = http.post(f"{gw}/images/edits", headers=auth, json={"model": model, "prompt": EDIT, **body})
+        check(f"{model}: {label}", r.status_code == status and code_of(r.text) == code, f"{r.status_code} {r.text[:160]}")
+
+    one = [{"image_url": data_url(blue)}]
+    refused("an edit without an image is refused", {}, "missing_image")
+    refused("a mask is refused", {"images": one, "mask": {"image_url": data_url(blue)}}, "mask_not_supported")
+    refused("a file_id is refused", {"images": [{"file_id": "file-abc123"}]}, "file_id_not_supported")
+    refused(f"{most + 1} input images are refused (it takes {most})", {"images": one * (most + 1)}, "too_many_input_images")
+    if widest:
+        wide = scene_png(widest + multiple, 64)
+        refused(f"an input wider than {widest} px is refused", {"images": [{"image_url": data_url(wide)}]},
+                "input_image_too_large")
+
+    # ---- usage: the inputs of the edits made, their bytes, the images made
+    after = usage_row(c, prefix)
+    got = {u: after.get(u, 0) - before.get(u, 0) for u in ("media_items", "bytes_in", "images", "kilopixels")}
+    fetched = 1 if args.image_url and args.image_url != "none" else 0
+    check(f"{model}: usage counts the input images of the edits", got["media_items"] == given["inputs"] + fetched,
+          f"{got['media_items']} counted, {given['inputs'] + fetched} given")
+    check(f"{model}: usage counts their bytes", got["bytes_in"] >= given["bytes"] and (fetched or got["bytes_in"] == given["bytes"]),
+          f"{got['bytes_in']} counted, {given['bytes']} sent" + (" plus the fetched one" if fetched else ""))
+    check(f"{model}: usage counts the edited images", got["images"] == given["images"] and got["kilopixels"] == given["kilopixels"],
+          f"{got['images']} images / {got['kilopixels']} kilopixels counted, {given['images']} / {given['kilopixels']} made")
+    info.update(edit_inputs=got["media_items"], edit_bytes_in=got["bytes_in"], edit_images=got["images"])
 
 
 if __name__ == "__main__":

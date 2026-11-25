@@ -2,6 +2,7 @@
 // deployments, the engines that run it, and its files (folded to one line). Everyone signed in may look; operators
 // and admins deploy and download it; admins change its display name and remove it.
 import { IconAlertTriangle, IconDownload, IconExternalLink, IconLanguage, IconLock, IconPencil, IconPhoto, IconPlus, IconTrash } from "@tabler/icons-react";
+import { AbilityChips } from "../components/AbilityChips";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -14,6 +15,7 @@ import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { embedSummary, embedsImages, embedsText, englishOnly, languagesLine } from "../lib/encoders";
+import { abilities, startImage } from "../lib/imageEdit";
 import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource, taskLabel } from "../lib/models";
 import { catalogKind, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
@@ -110,6 +112,7 @@ function ModelView({ p, machines, deployments, reload }: {
         {m.modalities && m.modalities.length > 0 && <span className="chip chip-tone-run"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>}
         {m.task === "embed" && m.embed && <span className={`chip${embedsImages(m.embed) ? " chip-tone-run" : ""}`}>{embedsImages(m.embed) && <><IconPhoto size={11} aria-hidden="true" />{" "}</>}{embedSummary(m.embed)}</span>}
         {m.classify?.zero_shot && <span className="chip chip-tone-wait">{t("modelpage.zeroShot")}</span>}
+        <AbilityChips m={m} />
         {m.languages && m.languages.length > 0 && <LanguagesChip m={m} />}
         <span><strong>{bytes(m.size_bytes)}</strong> {m.format}</span>
         {m.summary.params ? <span>{t.rich("modelpage.params", { params: <strong>{params(m.summary.params)}</strong> })}</span> : null}
@@ -119,6 +122,7 @@ function ModelView({ p, machines, deployments, reload }: {
         <span>{m.deployments ? <strong>{t("modelpage.deployed", { count: String(m.deployments) })}</strong> : t("modelpage.notDeployed")}</span>
       </p>
       <LanguageWarning m={m} />
+      <PhotosNote m={m} />
       <Jump links={[["overview", t("modelpage.jump.overview")], ["machines", t("modelpage.jump.machines")], ["deployments", t("modelpage.jump.deployments")],
         ["engines", t("modelpage.jump.engines")], ["files", t("modelpage.jump.files")]]} />
 
@@ -184,6 +188,19 @@ function LanguageWarning({ m }: { m: CatalogModel }) {
   return null;
 }
 
+// 1.5.5 (#143, Q8): a model that takes people's images (edits, a start image) gets no filter from Forgeyard: say so, and
+// point at the model card's responsible-use notes and licence.
+function PhotosNote({ m }: { m: CatalogModel }) {
+  const t = useT();
+  if (!abilities(m).length) return null;
+  const repo = hfRepo(m);
+  return (
+    <p className="lang-warn" role="note"><IconAlertTriangle size={16} aria-hidden="true" /> <span>{t("modelpage.photos")}{repo && (
+      <> <a href={`https://huggingface.co/${repo}`} target="_blank" rel="noreferrer" className="lp-ext">{t("modelpage.photosCard")} <IconExternalLink size={12} aria-hidden="true" /></a></>
+    )}</span></p>
+  );
+}
+
 // An admin changes the name the console shows; the catalog name stays, because deployments record it.
 function RenameForm({ m, onDone, onCancel }: { m: CatalogModel; onDone: (text: string) => void; onCancel: () => void }) {
   const t = useT();
@@ -240,6 +257,8 @@ function ModelAbout({ p }: { p: Page }) {
       {m.vision?.zero_shot ? <div className="fact"><dt>{t("modelpage.fact.classes")}</dt><dd>{t("modelpage.fact.findsWhatYouName")} <span className="muted small">{t.rich("modelpage.fact.zeroShot", { labels: <code>labels</code> })}</span></dd></div> : null}
       {!m.vision?.zero_shot && m.vision?.labels ? <div className="fact"><dt>{t("modelpage.fact.classes")}</dt><dd>{m.vision.labels}{m.vision.label_examples?.length ? <span className="muted small"> · {m.vision.label_examples.slice(0, 6).join(", ")}…</span> : null}</dd></div> : null}
       {m.image?.size ? <div className="fact"><dt>{t("modelpage.fact.nativeSize")}</dt><dd>{t("modelpage.fact.nativeSizeValue", { size: String(m.image.size) })}{m.image.pipeline ? <span className="muted small"> · {m.image.pipeline}</span> : null}</dd></div> : null}
+      {m.task === "image" && (m.image?.edit ?? 0) > 0 ? <div className="fact"><dt>{t("modelpage.fact.edits")}</dt><dd>{t.plural("modelpage.fact.editsValue", m.image?.edit ?? 0)}<span className="muted small">{m.image?.generate === false ? t("modelpage.fact.editsOnly") : ""}{t("modelpage.fact.editsHow")}</span></dd></div> : null}
+      {m.task === "video" && startImage(m.video?.image_input) !== "none" ? <div className="fact"><dt>{t("modelpage.fact.startImage")}</dt><dd>{startImage(m.video?.image_input) === "required" ? t("modelpage.fact.startRequired") : t("modelpage.fact.startOptional")}<span className="muted small">{t("modelpage.fact.startHow")}</span></dd></div> : null}
       {m.voices && m.voices.length ? <div className="fact"><dt>{t("modelpage.fact.voices")}</dt><dd>{m.voices.join(", ")}</dd></div> : null}
       <div className="fact"><dt>{t("modelpage.fact.added")}</dt><dd>{m.created_by ? t("modelpage.fact.addedBy", { name: m.created_by }) : ""}{t.lang === "en" ? added.toLocaleDateString() : t.date(added)}</dd></div>
     </dl>

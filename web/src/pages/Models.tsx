@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { AbilityChips } from "../components/AbilityChips";
 import { TrialCardChip } from "../components/EngineTrials";
 import { DownloadDialog, DownloadList } from "../components/DownloadTo";
 import { CheckBar, UpdateBadge } from "../components/EngineUpdates";
@@ -205,6 +206,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
           {m.modalities && m.modalities.length > 0 && (
             <span className="chip chip-tone-run" title={t("library.takesTitle")}><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>
           )}
+          <AbilityChips m={m} />
         </div>
       </td>
       <td data-label={t("library.col.format")} className="mono small cat-format">{m.format}</td>

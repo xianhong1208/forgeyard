@@ -467,6 +467,26 @@ code changed.
 No migration. Update the agents with the machine page's command to get the GPU notices; a 1.5.3 agent keeps working
 and only does not report the GPUs it cannot see.
 
+## Shipped: 1.5.5 (2026-11-25), image edits and image to video
+
+1. ✅ **Image edits** (#279, for #143): `/v1/images/edits` takes a prompt and the images to edit, as multipart or JSON,
+   for models that edit (FLUX.2 [klein], Qwen-Image-Edit, LongCat-Image-Edit, FLUX.1 Kontext) on vLLM-Omni and
+   stable-diffusion.cpp. The gateway checks every input image and fetches every address itself; the engine gets the
+   checked files only. Masks and variations stay closed.
+2. ✅ **Image to video** (#280, for #143): a start image as `input_reference` at `/v1/videos`, optional for
+   Wan2.2-TI2V-5B and required for the image-to-video pipelines vLLM-Omni runs, with the same checks.
+3. ✅ **The console, the recommended models and the acceptance** (#281, for #143): the Playground's **Edit images**
+   and **Start image**, model badges, FLUX.2 [klein] 4B recommended for vLLM-Omni and for stable-diffusion.cpp
+   (NVIDIA, AMD Vulkan, the CPU), `accept_img.py --edit` and `accept_video.py --image`, and a fix for a Playground
+   video that expired while on screen.
+4. ✅ **The CPU engines start from the agent image** (#284): the image gains `libgomp1`, which the llama.cpp and
+   stable-diffusion.cpp archives link; CI checks every built-in process engine's libraries inside the image, and an
+   engine that cannot find a library says which.
+5. ✅ **Accepted as a release candidate first** (#285, 1.5.5rc1).
+
+No migration. Update the agents that run from the agent image with the machine page's command: with the 1.5.4 image,
+the CPU process engines of the built-in `llama-cpp` and `sd-cpp` recipes exit with code 127.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -496,7 +516,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.5.5: image-to-image and image-to-video** | Edit an image or make variations of it from a prompt, and turn an image into a short video (#143). |
 | **1.6.0: single sign-on** *(enterprise edition)* | Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication (#39). |
 | **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
 | **1.6.2: request log and audit export** *(enterprise edition)* | **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log and the request log can be sent out (syslog, OpenTelemetry), with tamper evidence (#40). |

@@ -165,7 +165,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -207,7 +207,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -222,7 +222,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.4 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.5 inventory
 ```
 
 ### CPU only
@@ -236,7 +236,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
 ### Why these options
@@ -269,8 +269,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.4 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.5 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.5 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -289,18 +289,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.4 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.5 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.5.4`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.5.5`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.5` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models in containers keep running.
@@ -314,7 +314,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.5
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -441,8 +441,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.4 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.5 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.5 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -842,6 +842,92 @@ the offline machine's cache. The deployment there finds it cached and downloads 
 
 **How long:** minutes per video, one at a time per replica; the others wait their turn on it.
 Raise *Longest job* under **Advanced** for long or large videos.
+
+## Edit an image
+
+From 1.5.5 a model that edits images changes pictures you give it, following an instruction: "make the sky
+purple", "put the sofa from the second picture in the room". It answers at `/v1/images/edits`, as OpenAI's API does.
+
+1. **Add a model that edits.** On **Models → Add a model → Recommended**, the **Images** group has FLUX.2 [klein] 4B
+   (Apache-2.0, marked *Edits images*), which also makes images from text:
+   - for an NVIDIA GPU (vLLM-Omni): about 35 GiB of GPU memory with the default caps (Forgeyard's estimate, not yet
+     measured);
+   - for stable-diffusion.cpp, from Comfy-Org's repository (the model, its Qwen3-4B text encoder and its VAE in one
+     place): an AMD GPU or APU (Vulkan), an NVIDIA GPU (CUDA), or the CPU (minutes per image). About 30 GiB at
+     1024x1024.
+
+   A model's page says *Edits images* (or *Edits images only*, for a model that makes nothing from text alone, such as
+   Qwen-Image-Edit) and how many input images it takes.
+2. **Deploy it** as usual. Under **Advanced**, *Input images* is how many pictures a request may give (1 by default;
+   FLUX.2 [klein] takes up to 4) and *Largest input* how wide or tall each may be (2,048 pixels on vLLM-Omni, 1,024 on
+   stable-diffusion.cpp). Each input image adds to the memory a request needs, and the estimate counts it.
+3. **Call it** with the OpenAI SDK:
+
+   ```python
+   import base64
+
+   out = client.images.edit(model="flux.2-klein-4b", image=open("room.png", "rb"),
+                            prompt="Make it a watercolour painting; keep everything where it is")
+   with open("room-watercolour.png", "wb") as f:
+       f.write(base64.b64decode(out.data[0].b64_json))
+   ```
+
+   Several pictures go as a list: `image=[open("room.png", "rb"), open("sofa.png", "rb")]`; the first one sets the
+   shape of the result, and the instruction can name the others ("the sofa from the second picture"). Without a
+   `size`, the result keeps the first picture's shape at the deployment's default size. In JSON, give the pictures as
+   addresses: a base64 `data:` URL, or an `http(s)` address that the server fetches (public addresses only, unless the
+   server allows private ones):
+
+   ```bash
+   curl https://192.168.1.20:7860/v1/images/edits -H "Authorization: Bearer $FORGEYARD_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model": "flux.2-klein-4b", "prompt": "Make the sky purple",
+          "images": [{"image_url": "https://example.com/street.jpg"}]}'
+   ```
+
+4. **Try it in the Playground:** a model that edits gets **Edit images** beside **Make from text** in its **Image**
+   panel. Drop, paste or choose 1 to *Input images* pictures (PNG, JPEG or WebP), write the instruction, choose a
+   size (*Like the first image* by default), how many and a format, and press **Edit**. The pictures you gave are
+   shown beside the results, each with a download link. A model that only edits opens in this mode.
+
+**Not taken:** a mask (OpenAI's `mask`: 400 `mask_not_supported`; describe the change in the instruction instead),
+a `file_id` (Forgeyard keeps no files), and `/v1/images/variations` (OpenAI has closed it too: send the picture to
+`/v1/images/edits` with `n` and an instruction such as "a variation of this picture"). The refusals and what to do:
+[An image edit is refused](troubleshooting.md#an-image-edit-is-refused).
+
+**Photos of people.** Forgeyard checks the request's shape, not what a picture shows or what the instruction asks,
+and an edit model changes real photos realistically. Before you open such a deployment to others, read its model card's
+responsible-use notes and licence (the model page links it) and put a filter in front if your users need one.
+Nothing of an edit is kept: not the instruction, not the pictures.
+
+## Make a video from a picture
+
+From 1.5.5 a video model that takes a **start image** makes a video that begins with your picture and follows the
+prompt (OpenAI's `input_reference` on `/v1/videos`).
+
+1. **Add a model that takes one.** On **Models → Add a model → Recommended**, the **Video** group has Wan2.2-TI2V-5B,
+   marked *Image to video*: the start image is optional, so it makes videos from text too. About 33 GiB of GPU memory
+   (not yet measured), an NVIDIA GPU (vLLM-Omni). Image-to-video pipelines that need a start image every time
+   (`WanImageToVideoPipeline`, for example Wan2.2-I2V-A14B, which needs a free 80 GB card) can be added from
+   **Search Hugging Face**; their page says *Image to video only*. Wan2.1-T2V-1.3B takes no start image.
+2. **Deploy it** as for videos. *Largest start image* under **Advanced** is how wide or tall the picture may be (2,048
+   pixels).
+3. **Call it** with the OpenAI SDK:
+
+   ```python
+   video = client.videos.create(model="wan2.2-ti2v-5b", prompt="The boats rock gently in the harbour",
+                                input_reference=open("harbour.png", "rb"), seconds="5", size="1280x704")
+   ```
+
+   Then poll and download it as in [Generate videos](#generate-videos). In JSON, give the picture as an address:
+   `"input_reference": {"image_url": "data:image/png;base64,…"}` or an `http(s)` address the server fetches.
+4. **Try it in the Playground:** the **Video** panel of such a model has a **Start image** field: optional, or
+   required (then **Generate** waits for a picture). The picture is shown beside the job and under the finished video.
+
+The engine scales the picture to the video's size: a picture with the video's shape keeps its framing. PNG, JPEG or
+WebP only (convert iPhone photos from HEIC first). The refusals and what to do are in
+[A video fails, or is refused](troubleshooting.md#a-video-fails-or-is-refused). As for edits, no filter checks the
+pictures: read the model card's responsible-use notes before you open the deployment to others.
 
 ## Classify text
 
@@ -1488,7 +1574,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.4
+  docker.io/tonyhuang1101/forgeyard:1.5.5
 sudo docker logs forgeyard
 ```
 
@@ -1522,7 +1608,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.4 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.5 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1531,7 +1617,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.4 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.5 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1556,7 +1642,7 @@ right after it ([how](#upgrade-the-server-and-the-agents)).
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.4
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.5
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1564,7 +1650,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.4 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.5 .`
 
 ## Run the server as a service
 
@@ -1657,7 +1743,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.4 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.5 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1672,7 +1758,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.5
    ```
 
    On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus all`, so the

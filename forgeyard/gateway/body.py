@@ -13,7 +13,7 @@ from starlette.requests import Request
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, new_session
-from forgeyard.gateway import embeddings, imagegen, media as gmedia, multipart, speech
+from forgeyard.gateway import embeddings, imageedit, imagegen, media as gmedia, multipart, speech
 from forgeyard.gateway.errors import GatewayError
 
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
@@ -40,6 +40,7 @@ class Parsed:
     image: Optional[imagegen.Ask] = None           # an image request, checked (1.3)
     vision: Optional[str] = None                   # a vision request: its task (1.4)
     embed: Optional[embeddings.Ask] = None         # an embeddings request: its texts and images (1.5.4)
+    edit: Optional[imageedit.Inputs] = None        # an image edit: its input images (1.5.5); `image` holds the rest
     size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 
@@ -105,9 +106,28 @@ def parse_vision(body: bytes, content_type: str) -> Parsed:
     return parsed
 
 
+def parse_edit(body: bytes, content_type: str) -> Parsed:
+    """An image edit (1.5.5): multipart with `image` / `image[]` files, or JSON with `images[].image_url`
+    (forgeyard/gateway/imageedit.py). The fields are kept in `obj`, as image generation's checks read them."""
+    if "multipart/form-data" in (content_type or "").lower():
+        fields, inputs = imageedit.read_form(body, content_type)
+        model = fields.get("model")
+        if not model:
+            raise GatewayError(400, "invalid_request", "The form needs a 'model' field.", param="model")
+        parsed = Parsed(model=model, obj=fields, size=len(body))
+    else:
+        parsed = parse_body(body, content_type, "json")
+        inputs = imageedit.read_json(parsed.obj)
+    parsed.edit = inputs    # counted once the model is known to edit (forgeyard/gateway/imageedit.py `offered`)
+    parsed.stream = False   # a stream is refused by the checks; the flag never makes it one
+    return parsed
+
+
 def parse_body(body: bytes, content_type: str, kind: str, *, what: str = "the audio") -> Parsed:
     if kind == "vision":
         return parse_vision(body, content_type)
+    if kind == "edit":
+        return parse_edit(body, content_type)
     if kind == "multipart":
         if "multipart/form-data" not in (content_type or "").lower():
             raise GatewayError(400, "invalid_request", f"Send {what} as multipart/form-data.")

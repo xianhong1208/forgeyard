@@ -12,6 +12,9 @@ export default {
 
   "addmodel.rec.loading": "清單載入中…",
   "addmodel.rec.languages": "支援的語言",
+  "addmodel.rec.can.edit": "可編輯圖片",
+  "addmodel.rec.can.image-to-video": "圖片生成影片",
+  "addmodel.rec.canTitle": "給它圖片時能做什麼",
   "addmodel.rec.licenceFrom": "沿用 {source} 的授權（這個模型由它轉換而來）",
   "addmodel.rec.licence": "授權",
   "addmodel.rec.sizeRam": "大約要下載 {download} GiB；一個副本大約需要 {memory} GiB 的 RAM。",
@@ -32,12 +35,12 @@ export default {
   "addmodel.group.tts.title": "文字轉語音",
   "addmodel.group.tts.description":
     "給 /v1/audio/speech 用的內建語音。Qwen3-TTS 會說中文（普通話和方言）、英文和另外八種語言，在 NVIDIA GPU 上用 vLLM-Omni 執行，或以 GGUF 在 AMD APU 或 CPU 上用 llama.cpp 執行；Kokoro 和 Chatterbox 是在 CPU 上就能跑的小型英文語音。不提供聲音複製。",
-  "addmodel.group.images.title": "圖片（文字生成圖片）",
+  "addmodel.group.images.title": "圖片（文字生成圖片、編輯圖片）",
   "addmodel.group.images.description":
-    "給 /v1/images/generations 用的模型。Z-Image-Turbo、Stable Diffusion XL 和 FLUX.1-schnell 在 NVIDIA GPU 上用 vLLM-Omni 執行；GGUF 版本給 AMD（Vulkan）或 NVIDIA（CUDA）上的 stable-diffusion.cpp 用；Stable Diffusion 1.5 小到 CPU 也能跑。只收 Apache-2.0 和 OpenRAIL 授權。",
-  "addmodel.group.video.title": "影片（文字生成影片）",
+    "給 /v1/images/generations 和 /v1/images/edits 用的模型。Z-Image-Turbo、SDXL、FLUX.1-schnell 和 FLUX.2 [klein] 4B（它也能編輯圖片）在 NVIDIA GPU 上用 vLLM-Omni 執行；stable-diffusion.cpp 版本給 AMD（Vulkan）、NVIDIA（CUDA）或 CPU 用。只收 Apache-2.0 和 OpenRAIL 授權。",
+  "addmodel.group.video.title": "影片（文字或圖片生成影片）",
   "addmodel.group.video.description":
-    "給 /v1/videos 用的模型，在 NVIDIA GPU 上用 vLLM-Omni 以工作方式產生。Wan2.1 1.3B 在一張共用的卡上產生 480p 短片；Wan2.2 5B 產生 720p，需要更多記憶體。Apache-2.0。",
+    "給 /v1/videos 用的模型，在 NVIDIA GPU 上用 vLLM-Omni 以工作方式產生。Wan2.1 1.3B 在一張共用的卡上產生 480p 短片；Wan2.2 5B 產生 720p，也能從一張起始圖片開始，需要更多記憶體。Apache-2.0。",
   "addmodel.group.detection.title": "物件偵測、影像分割與深度",
   "addmodel.group.detection.description":
     "在 Forgeyard 自己的視覺伺服器上，給 /v1/vision/detect、/segment 和 /depth 用的視覺模型，也包括能找出你指定東西的偵測器。在 CPU 上又小又快，在 NVIDIA GPU 上更快。只收 Apache-2.0。",

@@ -27,7 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from forgeyard import removed
 from forgeyard.db import new_session
-from forgeyard.gateway import (classify, embeddings as gembeddings, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs,
+from forgeyard.gateway import (classify, embeddings as gembeddings, imageedit, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs,
                                vision)
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
@@ -92,6 +92,16 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
             route = proxy.fit_speech(route, parsed)  # 1.3: checked, voice cloning refused, counted
         elif endpoint == imagegen.ENDPOINT:
             route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
+        elif endpoint == imageedit.ENDPOINT:
+            # 1.5.5: what the model does first (a model that edits none: edits_not_supported, images or not), then
+            # how many images, then their URLs fetched by the gateway (only for a key that may use a model that edits),
+            # every input's bytes, type and header size checked, then the deployments that edit and take them.
+            imageedit.offered(route)
+            imageedit.count(parsed.edit)
+            await imageedit.fetch_all(parsed.edit)
+            imageedit.check(parsed.edit)
+            parsed.size = max(parsed.size, parsed.edit.bytes)
+            route = proxy.fit_edits(route, parsed)
         elif endpoint == classify.ENDPOINT:
             # 1.4.4: checked, only the known fields sent on; 1.5.4: zero-shot labels to zero-shot deployments only
             route = proxy.fit_classify(route, parsed)
@@ -204,16 +214,24 @@ async def classify_text(request: Request):
 
 
 @router.post("/images/edits")
-@router.post("/images/variations")
 async def images_edit(request: Request):
-    """Image edits and variations: not in 1.3 (vLLM-Omni's edit route fetches any URL it is given, and
-    variations are a retired DALL-E 2 feature)."""
+    """Image edits (1.5.5, #143): the prompt and the images to edit (multipart files or JSON image_url) to a model that
+    edits (forgeyard/gateway/imageedit.py); base64 images back."""
+    return await _api(request, "images/edits")
+
+
+@router.post("/images/variations")
+async def images_variations(request: Request):
+    """Variations: closed, as at OpenAI (DALL-E 2's endpoint no longer takes requests). An edit with `n` and a prompt
+    such as "a variation of this image" does the same."""
     try:
         await run_in_threadpool(_authenticate, request.headers.get("authorization"))
     except GatewayError as e:
         return e.response()
-    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway does not edit images or make variations "
-                                                       "(yet): it serves /v1/images/generations.").response()
+    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway makes no variations (OpenAI's endpoint "
+                                                       "no longer takes requests either). Send the image to "
+                                                       "/v1/images/edits with n and a prompt such as \"a variation of "
+                                                       "this image\".").response()
 
 
 # ------------------------------------------------------------------ videos (1.3)
@@ -378,7 +396,8 @@ async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
                                                  "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
-                                                 "/v1/audio/voices, /v1/images/generations, /v1/videos and "
+                                                 "/v1/audio/voices, /v1/images/generations, /v1/images/edits, "
+                                                 "/v1/videos and "
                                                  "/v1/vision/detect, /segment, /depth and /classify, and "
                                                  "/v1/classify.").response()
 
@@ -387,7 +406,8 @@ async def unknown(rest: str):
 def image_options(model: Optional[str], caller: KeyCaller) -> dict:
     """What an image model's deployments take (1.3), for the Playground's Image tab: the most images per
     request, the largest side, the default size, the multiple sizes must be of, the formats, the most
-    steps, the longest prompt (over every deployment of the route: what at least one takes)."""
+    steps, the longest prompt, and (1.5.5) what it does with images given to it (over every deployment of the
+    route: what at least one takes)."""
     if not model:
         raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
     route = proxy.check_access(caller, _route(model), model, imagegen.ENDPOINT)
@@ -395,10 +415,16 @@ def image_options(model: Optional[str], caller: KeyCaller) -> dict:
     if not ds:
         raise GatewayError(503, "no_target", f"{model!r} has no image deployment.")
     first = ds[0]
+    eds = [d for d in ds if d.edit > 0]
     return {"model": model, "max_n": max(d.max_n for d in ds), "max_side": max(d.max_side for d in ds),
             "default_size": f"{first.width}x{first.height}", "multiple": min(d.multiple for d in ds),
             "formats": sorted({f for d in ds for f in d.formats}, key=imagegen.FORMATS.index),
-            "max_steps": max(d.max_steps for d in ds), "max_prompt_chars": max(d.max_prompt for d in ds)}
+            "max_steps": max(d.max_steps for d in ds), "max_prompt_chars": max(d.max_prompt for d in ds),
+            # 1.5.5 (#143): whether it makes images from text, and its edits: the most input images a request may
+            # give (0: it edits nothing), the largest of them, the formats an edit comes back in.
+            "generate": any(d.generate for d in ds), "edit": max((d.edit for d in eds), default=0),
+            "max_input_side": max((d.max_input_side for d in eds), default=0),
+            "edit_formats": sorted({f for d in eds for f in d.edit_formats}, key=imagegen.FORMATS.index)}
 
 
 @console.get("/images/options")
@@ -416,7 +442,8 @@ async def playground_image_options(request: Request, model: Optional[str] = None
 def video_options(model: Optional[str], caller: KeyCaller) -> dict:
     """What a video model's deployments take (1.3), for the Playground's Video panel: sizes (the default, the
     largest side, the multiple), lengths (the default, the longest), frames per second, the longest prompt,
-    how long results are kept (over every deployment of the route: what at least one takes)."""
+    how long results are kept (over every deployment of the route: what at least one takes), and the start image
+    (1.5.5)."""
     if not model:
         raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
     route = proxy.check_access(caller, _route(model), model, videogen.ENDPOINT)
@@ -428,7 +455,8 @@ def video_options(model: Optional[str], caller: KeyCaller) -> dict:
             "max_pixels": max(f.max_pixels for f in fs), "multiple": min(f.multiple for f in fs),
             "seconds": first.seconds, "max_seconds": max(f.max_seconds for f in fs), "fps": first.fps,
             "max_steps": max(f.max_steps for f in fs), "max_prompt_chars": max(f.max_prompt for f in fs),
-            "keep_minutes": max(f.keep for f in fs) // 60}
+            "keep_minutes": max(f.keep for f in fs) // 60,
+            **dict(zip(("image_input", "max_input_side"), videogen.start_image(fs)))}   # 1.5.5 (#143)
 
 
 async def _console(request: Request):

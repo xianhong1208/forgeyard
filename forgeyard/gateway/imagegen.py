@@ -29,6 +29,9 @@ What the gateway does with an image request, before and after the engine:
 - **No prompt filtering**: Forgeyard checks the request's shape, not what it asks for. A deployment
   that needs a safety filter needs one in front of it.
 - **No cloud**: images are made by local deployments only (no provider spill in 1.3).
+- **Edits** (1.5.5, forgeyard/gateway/imageedit.py) go through the same checks, caps, queue and answer. A model that
+  only edits (`generate` false in its catalog entry: Qwen-Image-Edit) makes nothing from text: 400
+  `generation_not_supported`.
 """
 
 from __future__ import annotations
@@ -76,6 +79,12 @@ class Draws:
     queue: int = DEFAULT_QUEUE
     timeout: float = DEFAULT_TIMEOUT
     gpus: int = 0
+    # Edits (1.5.5, #143; forgeyard/gateway/imageedit.py): what its model makes from text, how many input images a
+    # request may give (0: it edits nothing), the largest of them, and the formats an edit comes back in.
+    generate: bool = True
+    edit: int = 0
+    max_input_side: int = 2048
+    edit_formats: tuple = ("png",)
 
 
 def _int(v, default: int, low: int = 0) -> int:
@@ -83,7 +92,8 @@ def _int(v, default: int, low: int = 0) -> int:
 
 
 def draws(recipe, params: dict, meta: Optional[dict] = None) -> Draws:
-    from forgeyard.models.estimate import image_caps
+    from forgeyard.models import editing
+    from forgeyard.models.estimate import edit_caps, image_caps
     from forgeyard.models.render import default_size
 
     meta = meta or {}
@@ -91,7 +101,11 @@ def draws(recipe, params: dict, meta: Optional[dict] = None) -> Draws:
     side, most = image_caps(meta, params)
     w, h = default_size(meta, params)
     multiple = (meta.get("image") or {}).get("multiple") if isinstance(meta.get("image"), dict) else None
-    return Draws(request=img.request, formats=tuple(img.output_formats), max_n=max(1, min(img.max_n, most)),
+    _, generate = editing.of(meta)
+    inputs, input_side = edit_caps(meta, params, recipe)
+    return Draws(generate=generate, edit=inputs, max_input_side=input_side,
+                 edit_formats=tuple(img.edit.output_formats) if img.edit is not None else ("png",),
+                 request=img.request, formats=tuple(img.output_formats), max_n=max(1, min(img.max_n, most)),
                  max_side=side, width=w, height=h, multiple=_int(multiple, 16, 1), steps=_int(params.get("steps"), 0),
                  max_steps=_int(params.get("max_steps"), 50, 1),
                  max_prompt=_int(params.get("max_prompt_chars"), DEFAULT_MAX_PROMPT, 1),
@@ -191,6 +205,13 @@ def takes(d: Optional[Draws], ask: Ask) -> Optional[str]:
     """Why this deployment cannot take the request (an error code), or None."""
     if d is None:
         return None
+    if not d.generate:
+        return "generation_not_supported"     # 1.5.5: an edit-only model (Qwen-Image-Edit) makes nothing from text
+    return caps(d, ask, d.formats)
+
+
+def caps(d: Draws, ask: Ask, formats: tuple) -> Optional[str]:
+    """Why this deployment's caps refuse the request (prompt, images, size, format, steps), or None."""
     if len(ask.prompt) > d.max_prompt or len(ask.negative or "") > d.max_prompt:
         return "prompt_too_long"
     if ask.n > d.max_n:
@@ -200,19 +221,24 @@ def takes(d: Optional[Draws], ask: Ask) -> Optional[str]:
             return "image_too_large"
         if ask.size[0] % d.multiple or ask.size[1] % d.multiple:
             return "invalid_size"
-    if ask.output_format is not None and ask.output_format not in d.formats:
+    if ask.output_format is not None and ask.output_format not in formats:
         return "unsupported_output_format"
     if ask.steps is not None and ask.steps > d.max_steps:
         return "too_many_steps"
     return None
 
 
+# A cap of a deployment that can make the request says more than another deployment's not making images from text.
 ORDER = ("prompt_too_long", "too_many_images", "image_too_large", "invalid_size", "unsupported_output_format",
-         "too_many_steps")
+         "too_many_steps", "generation_not_supported")
 
 
-def refusal(name: str, code: str, ask: Ask, all_d: list[Draws]) -> GatewayError:
-    """The error for a request no deployment of the route can take, saying what would work."""
+def refusal(name: str, code: str, ask: Ask, all_d: list[Draws], formats: Optional[list[tuple]] = None) -> GatewayError:
+    """The error for a request no deployment of the route can take, saying what would work. `formats`: the output
+    formats each deployment makes for this kind of request (edits: its edit formats)."""
+    if code == "generation_not_supported":
+        return _bad(f"{name!r} edits images and makes none from text alone: send the image to edit with the prompt to "
+                    "/v1/images/edits.", "model", code)
     if code == "prompt_too_long":
         most = max(d.max_prompt for d in all_d)
         return _bad(f"The prompt is {max(len(ask.prompt), len(ask.negative or ''))} characters; {name!r} takes at most "
@@ -230,7 +256,7 @@ def refusal(name: str, code: str, ask: Ask, all_d: list[Draws]) -> GatewayError:
         return _bad(f"{name!r} takes sizes whose sides are multiples of {m} (for example "
                     f"{max(m, (ask.size[0] // m) * m)}x{max(m, (ask.size[1] // m) * m)}).", "size", code)
     if code == "unsupported_output_format":
-        fmts = sorted({f for d in all_d for f in d.formats}, key=FORMATS.index)
+        fmts = sorted({f for fs in (formats or [d.formats for d in all_d]) for f in fs}, key=FORMATS.index)
         return _bad(f"{name!r} makes {', '.join(fmts)}, not {ask.output_format}.", "output_format", code)
     most = max(d.max_steps for d in all_d)
     return _bad(f"{name!r} takes at most {most} steps (num_inference_steps); this one asks for {ask.steps}.",

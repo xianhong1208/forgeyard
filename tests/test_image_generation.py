@@ -532,7 +532,8 @@ def test_fy_igen_009_engine_errors_in_openais_shape(img):
 def test_fy_igen_010_keys_allowlists_rpm_and_no_cloud(img, monkeypatch):
     """FY-IGEN-010: no key is 401; a key without the model is 403; rpm refuses the next request; an image
     route takes no provider target (422), and a key whose cloud setting is on gets 503 when no replica is
-    ready, never a provider. /v1/images/edits and variations are not offered (404)."""
+    ready, never a provider. Variations are not offered (404); 1.5.5: an edit for a model that edits nothing is 400
+    edits_not_supported (tests/test_image_edits.py)."""
     assert api_client(img.owner).post("/v1/images/generations", json={"model": "sd", "prompt": "x"}).status_code == 401
     narrow = new_key(img.owner, "narrow", models=["omni"])["key"]
     assert err(gen(api_client(img.owner, narrow), "sd"))["code"] == "model_not_allowed"
@@ -540,9 +541,11 @@ def test_fy_igen_010_keys_allowlists_rpm_and_no_cloud(img, monkeypatch):
     assert gen(api_client(img.owner, rpm), "sd").status_code == 200
     r = gen(api_client(img.owner, rpm), "sd")
     assert r.status_code == 429 and err(r)["code"] == "rate_limit_exceeded"
-    for path in ("/v1/images/edits", "/v1/images/variations"):
-        r = img.api.post(path, json={"model": "sd"})
-        assert r.status_code == 404 and err(r)["code"] == "endpoint_not_supported"
+    r = img.api.post("/v1/images/variations", json={"model": "sd"})
+    assert r.status_code == 404 and err(r)["code"] == "endpoint_not_supported"
+    one = "data:image/png;base64," + base64.b64encode(png(64, 64)).decode()
+    r = img.api.post("/v1/images/edits", json={"model": "sd", "prompt": "x", "images": [{"image_url": one}]})
+    assert r.status_code == 400 and err(r)["code"] == "edits_not_supported"
     from forgeyard.config import get_settings
     monkeypatch.setenv("PROVIDER_ALLOW_PRIVATE_HOSTS", "true")
     get_settings.cache_clear()
@@ -674,7 +677,8 @@ def test_fy_igen_013_the_inspector_reads_image_models():
         policy = fetch.Policy(allow_private=True)
         m = inspector.inspect_hf("acme/xl", None, None, endpoint=hf.url, policy=policy)
         assert m["format"] == "diffusers" and m["task_hint"] == "image" and m["modalities"] == []
-        assert m["image"] == {"size": 512, "multiple": 64} and m["diffusers"]["pipeline"] == "StableDiffusionXLPipeline"
+        assert m["image"] == {"size": 512, "multiple": 64, "edit": 0, "generate": True}
+        assert m["diffusers"]["pipeline"] == "StableDiffusionXLPipeline"
         comps = m["diffusers"]["components"]
         assert set(comps) == {"unet", "vae", "text_encoder"} and comps["unet"] == {
             "class": "UNet2DConditionModel", "params": 64, "bytes": 256, "dtype": "F32"}
@@ -829,7 +833,8 @@ def test_fy_igen_018_try_it_and_the_playground(img):
     assert out["request"]["size"] == "256x256"
     o = img.owner.get("/api/playground/images/options?model=sd").json()
     assert o == {"model": "sd", "max_n": 4, "max_side": 512, "default_size": "512x512", "multiple": 64,
-                 "formats": ["png", "jpeg", "webp"], "max_steps": 50, "max_prompt_chars": 4000}
+                 "formats": ["png", "jpeg", "webp"], "max_steps": 50, "max_prompt_chars": 4000,
+                 "generate": True, "edit": 0, "max_input_side": 0, "edit_formats": []}
     assert img.owner.get("/api/playground/images/options?model=nope").status_code == 404
     r = img.owner.post("/api/playground/images/generations", json={"model": "omni", "prompt": "a fox", "size": "512x512"})
     assert r.status_code == 200 and len(r.json()["data"]) == 1

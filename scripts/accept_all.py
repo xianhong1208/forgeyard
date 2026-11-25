@@ -40,12 +40,18 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              machine and Stable Diffusion 1.5 GGUF on stable-diffusion.cpp on the CPU machine: the SDK's
              images.generate, images that decode at the size asked, n, the caps, url refused, the queue,
              usage (images, kilopixels, busy time), the key guard and, with a chat model that reads images,
-             what the image shows (--img-vision)
+             what the image shows (--img-vision); and edits (1.5.5, scripts/accept_img.py --edit's checks) with
+             FLUX.2 [klein] 4B on vLLM-Omni on the GPU machine and on stable-diffusion.cpp on the CPU machine (512 px):
+             one and two input images, multipart and JSON (a data: URL, an http(s) URL the gateway fetches), the
+             refusals (no image, a mask, a file_id, too many inputs, an input too wide) and their usage
   video      video generation (1.3, scripts/accept_video.py's checks): Wan2.1-T2V-1.3B on vLLM-Omni on the GPU
              machine: the SDK's videos.create, polling to completed, the MP4 fetched through the gateway and read
              (size, frames, length), the caps, image-to-video refused, another key's 404, the per-key job cap,
              deleting a job at work, usage (media_ms, busy time), expiry (--video-no-expiry skips its wait),
-             the key guard, and a job failing when its deployment is stopped under it
+             the key guard, and a job failing when its deployment is stopped under it; start images (1.5.5,
+             scripts/accept_video.py --image's checks): refused by Wan2.1 (text only), and Wan2.2-TI2V-5B on the GPU
+             machine making a video from one uploaded with the SDK and one as a data: URL (an MP4 of the size and
+             length asked), the refusals and the usage
   vision     vision models (1.4, scripts/accept_vision.py's checks): RT-DETRv2 R18, SAM 2.1 tiny and Depth
              Anything V2 Small with the built-in vision recipe, on the GPU machine (the CUDA build) and the
              detector also on the CPU machine: two cats found in the COCO photo (multipart and JSON), the mask
@@ -459,6 +465,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                     "speech-to-text deployment, else skipped), a served model, local:<faster-whisper model>, or none")
     ap.add_argument("--img-vision", default="auto", help="the img group's check of what an image shows: auto (a "
                     "ready chat model that reads images, else skipped), a served model, or none")
+    ap.add_argument("--img-edit-url", default="http://images.cocodataset.org/val2017/000000039769.jpg",
+                    help="the img group's edit by an http(s) image address the server fetches (default: a COCO photo); "
+                    "none skips it")
     ap.add_argument("--video-steps", type=int, help="the video group's num_inference_steps (default: the model's "
                     "own); fewer is faster")
     ap.add_argument("--video-no-expiry", action="store_true", help="the video group skips its expiry check (a wait of "
@@ -1961,6 +1970,10 @@ def group_tts(run: Run) -> None:
 # run on each (the SDK's images.generate at the model's size and two at once, the caps, url refused, the
 # queue, usage, the key guard and, with a chat model that reads images, what the image shows).
 IMG_MODELS = (("gpu", "z-image-turbo"), ("cpu", "sd-1.5-gguf"))
+# 1.5.5 (#143): edits, with scripts/accept_img.py's edit checks only (generations are the models' above): FLUX.2 [klein]
+# 4B on vLLM-Omni, and on stable-diffusion.cpp on the CPU at 512 px (a functional check: minutes per image there).
+IMG_EDIT_MODELS = (("gpu", "flux.2-klein-4b", 1024), ("cpu", "flux.2-klein-4b-sdcpp", 512))
+EDIT_INPUTS = 2      # the edit deployments' max_input_images: two inputs are sent, then one more
 
 
 @group("img", "image generation: /v1/images/generations with the official SDK, caps, the queue, usage")
@@ -2024,6 +2037,62 @@ def group_img(run: Run) -> None:
         accept_img.exercise(c, d, d["name"], spec, side, args, check, httpx, openai, report, None,
                             key=run.new_key(f"img-{role}"))
         run.report.info.setdefault("img", {})[d["name"]] = report["deployments"][d["name"]]
+    for role, name, side in IMG_EDIT_MODELS:
+        img_edit(run, role, name, side, recipes, httpx, openai)
+
+
+def img_edit(run: Run, role: str, name: str, side: int, recipes: dict, httpx, openai) -> None:
+    """One edit model of IMG_EDIT_MODELS on the machine of `role`: deployed with EDIT_INPUTS input images at `side`,
+    then scripts/accept_img.py's edit checks (1.5.5)."""
+    import types
+
+    import accept_img
+
+    c = run.admin
+    if run.machine(role) is None:
+        run.skip(f"{name}: edits", f"no --{role}-machine given")
+        return
+    m = run.fresh_machine(role)
+    spec = dict(accept_img.MODELS[name])
+    recipe = spec["recipe"]
+    if recipe not in recipes or "max_input_images" not in recipes[recipe]["params"]:
+        run.skip(f"{name}: edits", f"the server's {recipe} recipe does not edit images (older than 1.5.5)")
+        return
+    if accept_img.ensure(c, name, spec):
+        run.cleanup.add(f"catalog entry {name}", _remove_model, c, name)
+    choices = recipes[recipe]["params"]["default_size"].get("choices") or []
+    params = dict(spec["params"]) | {"gpus": 1 if role == "gpu" else 0, "max_images": 2, "max_side": side,
+                                     "max_input_images": EDIT_INPUTS,
+                                     "default_size": f"{side}x{side}" if f"{side}x{side}" in choices else "auto"}
+    if role == "cpu" and "threads" in recipes[recipe]["params"]:
+        params["threads"] = 8
+    got = deploy(run, f"edit-{role}", {"model": name, "recipe": recipe, "params": params, "device": role}, m)
+    if not got:
+        return
+    d0 = got["deployment"]
+
+    def poll(dep_id=d0["id"]):
+        ready, text, d = deployment_state(run, dep_id)
+        return ready, text, unplaced(d["workload"])
+
+    try:
+        run.wait(d0["name"], poll, run.args.timeout, every=5)
+    except Fail as e:
+        run.not_ready(f"{d0['name']}: ready on {got['where']}", e)
+        return
+    run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
+    d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
+
+    def check(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
+        if skip or info:
+            run.skip(label, ("information: " if info else "") + str(detail))
+        else:
+            run.check(label, ok, detail)
+
+    report = {"deployments": {d["name"]: {}}}
+    args = types.SimpleNamespace(image_url=run.args.img_edit_url)
+    accept_img.exercise_edit(c, d, d["name"], side, args, check, httpx, openai, report, None, key=run.new_key(f"edit-{role}"))
+    run.report.info.setdefault("img", {})[d["name"]] = report["deployments"][d["name"]]
 
 
 # ------------------------------------------------------------------ group: video (1.3)
@@ -2031,6 +2100,9 @@ def group_img(run: Run) -> None:
 # followed and fetched as a real MP4, the refusals, the per-key cap, deleting, usage, expiry), and last a
 # job whose deployment is stopped under it.
 VIDEO_MODELS = (("gpu", "wan2.1-t2v-1.3b"),)
+# 1.5.5 (#143): start images. Wan2.1 above refuses them; Wan2.2-TI2V-5B takes one (scripts/accept_video.py's start-image
+# checks only: its text-to-video checks are Wan2.1's). About 33 GiB: skipped when the card has not that much free.
+VIDEO_START_MODELS = (("gpu", "wan2.2-ti2v-5b"),)
 
 
 @group("video", "video generation: /v1/videos jobs with the official SDK, the MP4, caps, expiry, a lost replica")
@@ -2088,8 +2160,61 @@ def group_video(run: Run) -> None:
                                      job_timeout=1800)
         accept_video.exercise(c, d, d["name"], spec, spec["size"], args, check, httpx, openai, report, None,
                               key=run.new_key(f"video-{role}"))
+        accept_video.exercise_image(c, d, d["name"], spec, spec["size"], args, check, httpx, openai, report, None,
+                                    key=run.new_key(f"video-image-{role}"))
         accept_video.restart_check(c, d, d["name"], spec["size"], args, check, httpx, openai)
         run.report.info.setdefault("video", {})[d["name"]] = report["deployments"][d["name"]]
+    for role, name in VIDEO_START_MODELS:
+        video_start(run, role, name, recipes, httpx, openai)
+
+
+def video_start(run: Run, role: str, name: str, recipes: dict, httpx, openai) -> None:
+    """A video model that takes a start image, on the machine of `role`: deployed at its own size for 5 s, then
+    scripts/accept_video.py's start-image checks (1.5.5)."""
+    import types
+
+    import accept_video
+
+    c = run.admin
+    if run.machine(role) is None:
+        run.skip(f"{name}: start images", f"no --{role}-machine given")
+        return
+    m = run.fresh_machine(role)
+    spec = dict(accept_video.MODELS[name])
+    if spec["recipe"] not in recipes or "max_input_side" not in recipes[spec["recipe"]]["params"]:
+        run.skip(f"{name}: start images", f"the server's {spec['recipe']} recipe takes no start image (older than 1.5.5)")
+        return
+    if accept_video.ensure(c, name, spec):
+        run.cleanup.add(f"catalog entry {name}", _remove_model, c, name)
+    params = dict(spec["params"]) | {"gpus": 1, "max_seconds": 5, "seconds": 5, "keep_minutes": 2}
+    got = deploy(run, f"video-start-{role}", {"model": name, "recipe": spec["recipe"], "params": params, "device": role}, m)
+    if not got:
+        return
+    d0 = got["deployment"]
+
+    def poll(dep_id=d0["id"]):
+        ready, text, d = deployment_state(run, dep_id)
+        return ready, text, unplaced(d["workload"])
+
+    try:
+        run.wait(d0["name"], poll, run.args.timeout, every=5)
+    except Fail as e:
+        run.not_ready(f"{d0['name']}: ready on {got['where']}", e)
+        return
+    run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
+    d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
+
+    def check(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
+        if skip or info:
+            run.skip(label, ("information: " if info else "") + str(detail))
+        else:
+            run.check(label, ok, detail)
+
+    report = {"deployments": {d["name"]: {}}}
+    args = types.SimpleNamespace(seconds=5, steps=run.args.video_steps, job_timeout=1800)
+    accept_video.exercise_image(c, d, d["name"], spec, spec["size"], args, check, httpx, openai, report, None,
+                                key=run.new_key(f"video-start-{role}"))
+    run.report.info.setdefault("video", {})[d["name"]] = report["deployments"][d["name"]]
 
 
 # ------------------------------------------------------------------ group: vision (1.4)

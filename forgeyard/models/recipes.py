@@ -430,6 +430,19 @@ class Speech(_M):
 IMAGE_FORMATS = ("png", "jpeg", "webp")
 
 
+class ImageEdit(_M):
+    """Image edits (1.5.5, #143): the engine also serves /v1/images/edits (multipart: prompt, the images as `image[]`
+    files, n, size, output_format). Without this block a deployment of the recipe edits nothing.
+
+        output_formats: [png, jpeg]     the output_format values it makes for an edit
+        input_mp: 1.0                   the engine resizes each input to about this many megapixels before it works on
+                                        it (vLLM-Omni's edit pipelines); none: it works on them at the size they come
+                                        (stable-diffusion.cpp), so the estimate counts them at their largest
+    """
+    output_formats: list[Literal[IMAGE_FORMATS]] = Field(default_factory=lambda: ["png"], min_length=1)  # type: ignore[valid-type]
+    input_mp: Optional[float] = Field(default=None, gt=0, le=64)
+
+
 class ImageGen(_M):
     """Image generation (1.3): how the gateway talks to the engine at /v1/images/generations.
 
@@ -443,6 +456,7 @@ class ImageGen(_M):
     request: Literal["fields", "sd-cpp"] = "fields"
     output_formats: list[Literal[IMAGE_FORMATS]] = Field(default_factory=lambda: ["png"], min_length=1)  # type: ignore[valid-type]
     max_n: int = Field(default=10, ge=1, le=64)
+    edit: Optional[ImageEdit] = None
 
 
 class VideoGen(_M):

@@ -19,6 +19,8 @@ export type RecommendedModel = {
   languages?: string[]; license_from?: string | null;
   // Image models for stable-diffusion.cpp (1.3): the files beside the model file.
   components?: Record<string, string>;
+  // 1.5.5 (#143): what it does with images given to it (edits; a video from a start image).
+  can?: ("edit" | "image-to-video")[];
 };
 
 export type RecommendedResponse = { groups: RecommendedGroup[]; models: RecommendedModel[] };

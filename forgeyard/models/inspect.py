@@ -11,7 +11,8 @@ import re
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import encoders, fetch, gguf, kvlayout, modalities, safetensors, sources, textcls, vision
+from forgeyard.models import (editing, encoders, fetch, gguf, kvlayout, modalities, safetensors, sources, textcls,
+                             videoinput, vision)
 from forgeyard.models.estimate import vllm_mm_item_tokens
 from forgeyard.models.sources import Source, SourceError
 
@@ -180,9 +181,10 @@ def _image_files(out: dict, files: list[dict], fmt: str, file: Optional[str], co
     out["image"] = {"size": side, "multiple": multiple, "components": comps, "single": not split}
 
 
-# Text-to-video pipelines (1.3, vLLM-Omni's /v1/videos): their model_index.json class. Image-to-video ones
-# (WanImageToVideoPipeline) need an image with every request, which the gateway does not send in 1.3.
-VIDEO_PIPELINES = ("WanPipeline",)
+# Text-to-video pipelines (1.3, vLLM-Omni's /v1/videos): their model_index.json class. Image-to-video ones (1.5.5,
+# #143): those vLLM-Omni 0.32.0 runs (forgeyard/models/videoinput.py); other image-to-video and every video-to-video
+# pipeline are not video models here.
+VIDEO_PIPELINES = ("WanPipeline",) + videoinput.REQUIRED_PIPELINES
 
 
 def is_video_pipeline(name: Optional[str]) -> bool:
@@ -208,7 +210,10 @@ def _video_native(index: dict, url, token: Optional[str], policy: fetch.Policy) 
         pass
     wan22 = bool(index.get("expand_timesteps")) or spatial == 16
     size, fps = ([1280, 704], 24) if wan22 else ([832, 480], 16)
-    return {"size": size, "multiple": spatial * patch, "fps": fps}
+    return {"size": size, "multiple": spatial * patch, "fps": fps,
+            # 1.5.5 (#143): whether a request may (or must) carry a start image
+            "image_input": videoinput.from_pipeline(index.get("_class_name"),
+                                                    expand_timesteps=bool(index.get("expand_timesteps")))}
 
 
 def _diffusers(out: dict, files: list[dict], url, ranged, token: Optional[str], policy: fetch.Policy) -> None:
@@ -407,6 +412,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         selected = sources.select_files(files, fmt, out.get("file"), (out.get("mmproj") or {}).get("path"))
     out["files"] = selected
     out["size_bytes"] = sum(f["size"] for f in selected)
+    if "image" in out:
+        editing.describe(out)   # 1.5.5 (#143): what it does with images: makes them from text, edits them, or both
     if "image" in out and fmt != "diffusers":
         # What each part weighs, for the estimate: the model file (all parts of a split GGUF) and each component.
         by_path = {f["path"]: f["size"] for f in selected}

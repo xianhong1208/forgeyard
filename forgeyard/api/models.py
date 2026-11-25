@@ -30,8 +30,8 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, EngineTrial, Node, get_db, new_session, utcnow
-from forgeyard.models import (catalog, encoders, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
-                              recommended as rec, scheduler, sources, textcls, vision)
+from forgeyard.models import (catalog, editing, encoders, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
+                              recommended as rec, scheduler, sources, textcls, videoinput, vision)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
@@ -147,18 +147,22 @@ def image_out(meta: dict) -> Optional[dict]:
     if img is None:
         return None
     d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
+    edit, generate = editing.of(meta)
     return {"size": img.get("size"), "multiple": img.get("multiple"), "single": img.get("single"),
+            "edit": edit, "generate": generate,
             "components": dict(img.get("components") or {}), "pipeline": d.get("pipeline"),
             "parts": {k: {"class": v.get("class"), "params": v.get("params")} for k, v in (d.get("components") or {}).items()}}
 
 
 def video_out(meta: dict) -> Optional[dict]:
-    """A video model's own size, frame rate and the multiple its sizes take (1.3), and its pipeline's parts."""
+    """A video model's own size, frame rate and the multiple its sizes take (1.3), its pipeline's parts, and whether
+    a request may or must carry a start image (1.5.5: none, optional, required)."""
     v = meta.get("video") if isinstance(meta.get("video"), dict) else None
     if v is None:
         return None
     d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
     return {"size": v.get("size"), "multiple": v.get("multiple"), "fps": v.get("fps"), "pipeline": d.get("pipeline"),
+            "image_input": videoinput.of(meta),
             "parts": {k: {"class": c.get("class"), "params": c.get("params")} for k, c in (d.get("components") or {}).items()}}
 
 
@@ -239,6 +243,10 @@ class InspectIn(BaseModel):
     # What the model does (chat, embed, rerank, asr, tts, image); for an inspection, what the suggestion
     # is for (default: what Hugging Face says). "image" reads a GGUF repository as an image model.
     task: Optional[str] = Field(default=None, max_length=16)
+    # Image models for stable-diffusion.cpp (1.5.5, #143): how many input images it edits (0: none) and whether it makes
+    # images from text. Not given: read from its names. A diffusers pipeline says it itself (these are not read).
+    image_edit: Optional[int] = Field(default=None, ge=0, le=editing.MAX_INPUTS)
+    image_generate: Optional[bool] = None
 
 
 class ModelIn(InspectIn):
@@ -267,7 +275,7 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
         body.components = _recommended_components(body.source, body.file)
     s = catalog.get_sources(db)
     try:
-        return inspector.inspect_source(src, ref=body.revision, file=body.file, endpoint=s["hf_endpoint"],
+        meta = inspector.inspect_source(src, ref=body.revision, file=body.file, endpoint=s["hf_endpoint"],
                                         policy=catalog.hf_policy(), url_policy=catalog.url_policy(db),
                                         local_dirs=s["local_dirs"],
                                         token=hf_token.choose(body.token, hf_token.get(db) if src.kind == "hf" else None),
@@ -276,6 +284,9 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
                                         components=body.components)
     except (inspector.InspectError, sources.SourceError) as e:
         raise fail(422, "cannot_inspect", str(e)) from None
+    if body.image_edit is not None or body.image_generate is not None:
+        editing.describe(meta, edit=body.image_edit, generate=body.image_generate)
+    return meta
 
 
 class InspectPreviewIn(InspectIn):
@@ -437,6 +448,10 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
                                              "text-to-video pipeline (model_index.json naming WanPipeline).")
     if task == "image" and "video" in meta:
         raise fail(422, "not_an_image_model", "This repository is a video pipeline: add it as a video model.")
+    if task == "image" and "image" in meta and editing.of(meta) == (0, False):
+        # 1.5.5 (#143): neither makes images from text nor edits from a prompt (an inpainting pipeline needs a mask).
+        raise fail(422, "not_an_image_model", "This model neither makes images from text nor edits them from a prompt "
+                                              "(an inpainting model needs a mask, which Forgeyard does not take).")
     if task == textcls.TASK and "classify" not in meta and meta.get("kind") != "local":
         # 1.4.4 (#144): a text classifier's labels are read from its config.json (safetensors repositories).
         raise fail(422, "not_a_text_classifier", textcls.refusal(None))

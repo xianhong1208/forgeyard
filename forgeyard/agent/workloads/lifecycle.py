@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from pydantic import ValidationError
@@ -22,6 +23,16 @@ TAIL_LINES = 100
 TAIL_CHARS = 8000
 TASK_BACKOFF_CAP = 300
 SERVICE_BACKOFF_CAP = 60
+# What the dynamic loader prints, before it exits with code 127, when a program links a shared library this machine
+# does not have (1.5.5: the agent image had no libgomp.so.1, which llama.cpp's and stable-diffusion.cpp's release
+# archives link, and the console said only "exited with code 127").
+MISSING_LIBRARY_RE = re.compile(r"error while loading shared libraries: (\S+?): cannot open shared object file")
+
+
+def missing_library(log_tail: str) -> Optional[str]:
+    """The shared library the loader could not find, from the end of a process's log, or None."""
+    found = MISSING_LIBRARY_RE.findall(log_tail)
+    return found[-1] if found else None
 
 
 class Lifecycle:
@@ -199,6 +210,12 @@ class Lifecycle:
             what = reason
         elif code is not None:
             what = f"exited with code {code}"
+            if code == 127 and rec.runtime == "process":
+                lib = missing_library((await asyncio.to_thread(rt.tail, rec, 20))[0])
+                if lib:
+                    what += (f": the engine needs {lib}, which this machine does not have. Update the agent (the "
+                             "agent image brings what the built-in engines need); an agent run on the host itself "
+                             "needs the library installed there")
         else:
             what = "ended while the agent was not watching (exit code unknown)" if unknown else "ended"
         failed = bool(reason) or code != 0

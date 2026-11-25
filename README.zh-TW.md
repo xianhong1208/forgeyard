@@ -25,7 +25,7 @@
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **只在需要時使用 GPU（1.5.0）。** 沒人呼叫的部署可以休眠，把記憶體還回來；下一個請求會喚醒它並等待回應（金鑰允許時，等待期間改由雲端服務），無法喚醒的模型會立刻說明原因。
-- **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、`/v1/classify` 的文字分類（1.4.4）、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
+- **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、`/v1/classify` 的文字分類（1.4.4）、語音轉文字、文字轉語音、圖片生成、`/v1/images/edits` 的圖片編輯（1.5.5：FLUX.2 [klein]、Qwen-Image-Edit；輸入圖片由閘道檢查與下載），以及以非同步工作產生的影片（1.5.5：也能以 Wan2.2-TI2V-5B 從一張起始圖片 `input_reference` 產生）。
 - **視覺模型（1.4）。** 物件偵測（1.4.4 起也有找你說的東西的偵測模型）、影像分割、深度估計與（1.4.4）圖片分類在 `/v1/vision/…`，像其他模型一樣部署。
 - **用文字搜尋圖片、不用訓練就能分類（1.5.4）。** Forgeyard 自己的 transformers 推論引擎在任何 CPU 上都能執行：在 `/v1/embeddings` 用 CLIP、SigLIP 2 或 DINOv2 產生圖片嵌入（圖片和文字一起送，文字能找到圖片；圖片絕不送往雲端供應商），文字分類則有固定標籤的模型，也有從每個請求指定的標籤中挑選的零樣本模型，中文也行。試用區會顯示相似度表格，標籤以標籤塊呈現；每個模型的頁面都會列出它能讀的語言。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。1.4.5 起，閘道也以 TLS 連每個副本，憑證由這個 CA 替那台機器簽發（金鑰絕不離開那台機器）。
@@ -45,6 +45,8 @@
 1.5.3 **移除應用程式**（1.4 起已淘汰），這是修補版本裡的不相容變更：`POST /api/workloads`、範本和閘道的 `/x/` 都回 410，升級時會移除剩下的應用程式，並把每一個都寫進稽核紀錄。升級前請先執行 `python -m forgeyard check-apps` 看看會移除什麼，把還需要的東西改成模型部署，並做好備份（[版本說明](CHANGELOG.md#153--2026-11-24)（英文）、[怎麼檢查](docs/guide/zh-TW/reference.md#apps-removed)）。模型部署不受影響；agent 不必更新。
 
 1.5.4 加入**圖片嵌入**，以及能在 **CPU 或 GPU** 上執行的**文字分類**。Forgeyard 自己的 transformers 推論引擎在視覺映像檔上執行，在 `/v1/embeddings` 用 CLIP、SigLIP 2 或 DINOv2 為圖片和文字產生嵌入，用文字就能找到圖片；含圖片的請求絕不會送往雲端供應商。`/v1/classify` 讓零樣本模型從每個請求指定的標籤中挑選，中文也行（[作法](docs/guide/zh-TW/how-to.md#classify-text-without-training-zero-shot)）。agent 現在會清點主機上的 GPU，GPU 增加、移除或 agent 看不到時，設定健康檢查都會提醒（[作法](docs/guide/zh-TW/how-to.md#add-or-remove-a-gpu-on-a-machine)）。部署頁面上的「雲端備援」改名為**分流與備援**，因為後面的層級也可以放另一個本機部署。沒有資料庫遷移。想收到 GPU 的提醒，請用機器頁面上的指令更新 agent；1.5.3 的 agent 照常運作。
+
+1.5.5 加入**圖片編輯**和**圖片生成影片**。會編輯圖片的模型（例如推薦清單裡給 vLLM-Omni 和 stable-diffusion.cpp 用的 FLUX.2 [klein] 4B，Apache-2.0）可以在 `/v1/images/edits` 修改你給它的圖片；Wan2.2-TI2V-5B 可以讓影片從你的圖片開始（`/v1/videos` 的 `input_reference`）。閘道會檢查每一張圖片，位址也由閘道自己下載，推論引擎拿不到任何網址。試用區多了 **編輯圖片** 和 **起始圖片**，模型頁面也會說明模型能拿圖片做什麼（[編輯圖片](docs/guide/zh-TW/how-to.md#edit-an-image)、[從圖片產生影片](docs/guide/zh-TW/how-to.md#make-a-video-from-a-picture)）。沒有任何過濾機制會檢查這些圖片：把這樣的部署開放給其他人之前，請先讀模型卡。沒有資料庫遷移。從 agent 映像檔執行的 agent 請用機器頁面上的指令更新：用 1.5.4 的映像檔時，內建 `llama-cpp` 與 `sd-cpp` 配方的 CPU 行程推論引擎一啟動就會結束，結束代碼是 127（[版本說明](CHANGELOG.md#155--2026-11-25)（英文））。
 
 ## 1.4 的新功能
 
@@ -71,7 +73,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.4
+  docker.io/tonyhuang1101/forgeyard:1.5.5
 sudo docker logs forgeyard
 ```
 
@@ -114,7 +116,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
@@ -198,7 +200,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | 沒有 GPU 的 x86-64 | Linux | llama.cpp 1.0.0 以行程執行（Qwen3-1.7B GGUF），同時跑在兩個 agent 上：負載分配，一台的推論引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp 1.0.0（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以行程方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
-還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，在有 systemd 的主機上用單行指令安裝，以及 Wan2.2-TI2V-5B 的影片生成。影片生成已用 vLLM-Omni 檢查過（A100 上的 Wan2.1-T2V-1.3B，832x480、5 秒）。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
+還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。影片生成已用 vLLM-Omni 檢查過（A100 上的 Wan2.1-T2V-1.3B，832x480、5 秒，以及從起始圖片產生影片的 Wan2.2-TI2V-5B）。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
 
 ### 實測過的模型
 
@@ -230,6 +232,10 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | RT-DETRv2 R18 與 R50、SAM 2.1 Hiera tiny、Depth Anything V2 Small | Forgeyard 的視覺伺服器（`vision`） | CPU（以行程執行，1.4 映像檔發布之前） |
 | **圖片嵌入與文字分類（1.5.4）** | | |
 | CLIP ViT-B/32 LAION-2B 與 DINOv2 small 嵌入；DistilBERT 多語言情緒；bge-m3-zeroshot-v2.0-c 與 roberta-base-zeroshot-v2.0-c（零樣本） | Forgeyard 的 transformers 伺服器（`transformers`） | CPU；NVIDIA A100（CUDA）；AMD Strix Halo（CPU） |
+| **圖片編輯與圖片生成影片（1.5.5）** | | |
+| FLUX.2 [klein] 4B：圖片編輯 | vLLM-Omni（`vllm-omni-image`） | NVIDIA A100 |
+| FLUX.2 [klein] 4B：圖片編輯 | stable-diffusion.cpp（`sd-cpp`） | CPU（行程）；AMD Strix Halo（Vulkan） |
+| Wan2.2-TI2V-5B：從起始圖片產生影片 | vLLM-Omni（`vllm-omni-video`） | NVIDIA A100 |
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
 

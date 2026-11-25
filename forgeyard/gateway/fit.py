@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import Optional
 
 from forgeyard.config import get_settings
-from forgeyard.gateway import classify, embeddings, imagegen, media as gmedia, speech
+from forgeyard.gateway import classify, embeddings, imageedit, imagegen, media as gmedia, speech
 from forgeyard.gateway.body import Parsed
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.route import LocalGroup, Route, Tier
@@ -156,6 +156,29 @@ def fit_images(route: Route, parsed: "Parsed") -> Route:
         return replace(route, tiers=tiers) if groups else route
     code = min((c for c in why.values() if c), key=imagegen.ORDER.index)
     raise imagegen.refusal(route.served_name, code, ask, [g.draws for g in groups if g.draws is not None])
+
+
+def fit_edits(route: Route, parsed: "Parsed") -> Route:
+    """Image edits (1.5.5): check the fields as a generation's and keep the deployments that edit, take this many input
+    images of these sizes and whose caps the request fits (forgeyard/gateway/imageedit.py). The inputs are checked
+    already (imageedit.check). Raises the most telling error when none can."""
+    ask = imagegen.check(parsed.obj or {})
+    parsed.image = ask
+    parsed.max_tokens = None
+    inputs = parsed.edit
+    groups = [g for tier in route.tiers for g in tier.locals]
+    why = {g.deployment_id: imageedit.takes(g.draws, ask, inputs) for g in groups}
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if why[g.deployment_id] is None]
+        if locals_:
+            tiers.append(Tier(tier.index, locals_, []))
+    if tiers:
+        return replace(route, tiers=tiers)
+    if not groups:
+        return route
+    code = min((c for c in why.values() if c), key=imageedit.ORDER.index)
+    raise imageedit.refusal(route.served_name, code, ask, inputs, [g.draws for g in groups if g.draws is not None])
 
 
 def prompt_estimate(parsed: "Parsed") -> int:

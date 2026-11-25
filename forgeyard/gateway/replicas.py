@@ -15,7 +15,7 @@ from typing import Optional, Union
 import httpx
 from starlette.responses import Response
 
-from forgeyard.gateway import imagegen, speech, waiting, waking
+from forgeyard.gateway import imageedit, imagegen, speech, waiting, waking
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.body import streams, upstream_body
 from forgeyard.gateway.errors import GatewayError
@@ -231,14 +231,22 @@ class ReplicaSending:
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
             self.busy_usage = g.busy_usage     # 1.5.4: the transformers server's busy time counts
             self.dropped = []
+            ctype = None
             if parsed.image is not None:
-                # Each image deployment gets its own body: its default size and steps, its request style.
+                # Each image deployment gets its own body: its default size and steps, its request style; an edit
+                # (1.5.5) a multipart body with the checked input images.
                 if g.deployment_id not in body_for:
-                    obj = imagegen.body_for(parsed.image, g.draws, g.upstream_model)
-                    body_for[g.deployment_id] = (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-                                                 .encode("utf-8"), False)
-                body, strip = body_for[g.deployment_id]
+                    if parsed.edit is not None:
+                        data, edit_ctype = imageedit.body_for(parsed.image, parsed.edit, g.draws, g.upstream_model)
+                        body_for[g.deployment_id] = (data, False, edit_ctype)
+                    else:
+                        obj = imagegen.body_for(parsed.image, g.draws, g.upstream_model)
+                        body_for[g.deployment_id] = (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+                                                     .encode("utf-8"), False, None)
+                body, strip, ctype = body_for[g.deployment_id]
                 self.image_draws = g.draws
+                self.image_size = imageedit.size_for(parsed.image, g.draws, parsed.edit.items[0]) \
+                    if parsed.edit is not None else None
             elif parsed.tts is not None:
                 # Each speech deployment gets its own body: its format, voice, language and frame cap.
                 if g.deployment_id not in body_for:
@@ -249,8 +257,8 @@ class ReplicaSending:
                 if g.upstream_model not in body_for:
                     body_for[g.upstream_model] = upstream_body(parsed, self.endpoint, g.upstream_model)
                 body, strip = body_for[g.upstream_model]
-            ctype = self.request.headers.get("content-type", "application/json") if parsed.parts is not None \
-                else "application/json"
+            ctype = ctype or (self.request.headers.get("content-type", "application/json") if parsed.parts is not None
+                              else "application/json")
             headers = {"Content-Type": ctype, "Accept": self.request.headers.get("accept") or "*/*",
                        "Accept-Encoding": "identity", "User-Agent": "forgeyard-gateway"}
             if pick.secret:

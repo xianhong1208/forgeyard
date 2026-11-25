@@ -36,7 +36,7 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
                           utcnow)
-from forgeyard.gateway import imagegen, proxy, waking
+from forgeyard.gateway import imageedit, imagegen, proxy, waking
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
 from forgeyard.models import catalog, encoders, modalities, routes, scheduler, textcls, trials, vision
@@ -858,7 +858,7 @@ def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None
                                                timeout=TRY_IMAGE_TIMEOUT if content_type == IMAGE_CTYPE else TRY_TIMEOUT)
     except httpx.HTTPError as e:
         raise fail(502, "replica_unreachable", f"The replica did not answer: {e or type(e).__name__}") from None
-    if content_type == IMAGE_CTYPE and 200 <= status < 300:
+    if (content_type == IMAGE_CTYPE or url.endswith("/" + imageedit.ENDPOINT)) and 200 <= status < 300:
         # Image generation (1.3): what came back, not the image itself.
         try:
             obj = json.loads(raw)
@@ -908,6 +908,13 @@ def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[st
     if api == "openai-images":
         # One small image, in the request shape this engine takes.
         side = TRY_IMAGE_SIZE if draws is None else max(draws.multiple, TRY_IMAGE_SIZE // draws.multiple * draws.multiple)
+        if draws is not None and not draws.generate and draws.edit:
+            # 1.5.5: a model that only edits gets the test image (two squares) to edit, as the gateway sends edits.
+            ask = imagegen.Ask(prompt=text or "Make the red square green.", n=1, size=(side, side))
+            w, h = vision.TEST_SIZE
+            test = imageedit.Inputs([imageedit.Input(data=vision.test_png(), width=w, height=h, fmt="png")])
+            payload, ctype = imageedit.body_for(ask, test, draws, upstream)
+            return "/v1/" + imageedit.ENDPOINT, payload, ctype
         ask = imagegen.Ask(prompt=text or "A lighthouse on a rocky coast at sunset, oil painting.", n=1, size=(side, side))
         return "/v1/images/generations", json.dumps(imagegen.body_for(ask, draws, upstream)).encode(), IMAGE_CTYPE
     if api == "openai-chat":
@@ -1053,8 +1060,12 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None,
                            target.get("tls_name"))
     ms = int((time.monotonic() - started) * 1000)
-    request = json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE) \
-        else {"model": upstream, "file": CLIP.name}
+    if path.endswith("/" + imageedit.ENDPOINT):
+        request = {"model": upstream, "prompt": body.input or "Make the red square green.",
+                   "image[]": "<the test image: 256x192 PNG>"}
+    else:
+        request = json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE) \
+            else {"model": upstream, "file": CLIP.name}
     if route.api == "openai-embeddings" and isinstance(request.get("input"), list):
         request["input"] = [{"image": "<the test image: 256x192 PNG, base64>"} if isinstance(x, dict) else x
                             for x in request["input"]]

@@ -392,11 +392,17 @@ export type ClassifyAnswer = {
 export type VideoModel = {
   size: [number, number] | null; multiple: number | null; fps: number | null; pipeline: string | null;
   parts: Record<string, { class: string | null; params: number | null }>;
+  // 1.5.5 (#143): whether a request may (optional) or must (required) carry a start image, or takes none.
+  image_input?: StartImage;
 };
+
+export type StartImage = "none" | "optional" | "required";
 
 export type ImageModel = {
   size: number | null; multiple: number | null; single: boolean | null; components: Record<string, string>;
   pipeline: string | null; parts: Record<string, { class: string | null; params: number | null }>;
+  // 1.5.5 (#143): how many input images an edit may give (0: it edits nothing), and whether it makes images from text.
+  edit?: number; generate?: boolean;
 };
 
 // 1.3.1: the server's Hugging Face token, as the UI may see it (never the token itself).
