@@ -48,7 +48,10 @@ def signed_in(request: Request, db: DbSession = Depends(get_db)) -> Caller:
     return Caller(user=row.user, session=row, ip=client_ip(request))
 
 
-def current(caller: Caller = Depends(signed_in), db: DbSession = Depends(get_db)) -> Caller:
+def current(request: Request, db: DbSession = Depends(get_db)) -> Caller:
+    """The signed-in person (also called directly, with the request and a DB session, by routes that work in a
+    thread)."""
+    caller = signed_in(request, db)
     # 1.6.0 (#39): two-factor sign-in is required of this account and its grace period is over.
     if mfa_policy.due(db, caller.user):
         raise fail(403, mfa_policy.DUE_CODE, "Add an authenticator app in My account first: two-factor sign-in "

@@ -111,6 +111,7 @@ def test_fy_mfa_026_grace_period_boundary_then_only_the_setup(owner, now, clock)
                                ("put", "/api/users/mfa-policy", {"mfa_required": "off"}),
                                ("get", "/api/auth/sessions", None), ("post", "/api/auth/password",
                                                                       {"current_password": OWNER[1], "new_password": "x" * 20}),
+                               ("get", "/api/engine-updates", None),  # a route that calls current() itself
                                ("get", "/api/playground/vision/options", None),
                                ("post", "/api/playground/chat/completions", {"model": "m", "messages": []})):
         r = getattr(owner, method)(path, **({"json": body} if body is not None else {}))
