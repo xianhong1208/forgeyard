@@ -49,6 +49,29 @@ export default {
   "admin.users.resetMfaConfirm":
     "Reset two-factor sign-in for {name}? Their authenticator apps and recovery codes are removed and their sessions end. They sign in with their password alone, and can add an authenticator again in My account.",
   "admin.users.mfaReset": "Reset two-factor sign-in for {name}; their sessions ended.",
+  "admin.users.mfaDue": "two-factor by {date}",
+  "admin.users.mfaDueTitle": "Must add an authenticator app by {date}",
+  "admin.users.mfaOverdue": "two-factor overdue",
+  "admin.users.mfaOverdueTitle": "Can only add an authenticator app until they do",
+  // Required two-factor sign-in (1.6.0, #39, PR 2)
+  "admin.mfaPolicy.title": "Two-factor sign-in",
+  "admin.mfaPolicy.lead":
+    "Require an authenticator app of admins or of everyone. People without one get a grace period; after it, they can only add one. API keys are not affected.",
+  "admin.mfaPolicy.level": "Who must use it",
+  "admin.mfaPolicy.off": "Not required (each person's choice)",
+  "admin.mfaPolicy.admins": "Required of admins",
+  "admin.mfaPolicy.everyone": "Required of everyone",
+  "admin.mfaPolicy.grace": "Grace period (days)",
+  "admin.mfaPolicy.graceHint": "Counted from when it starts to cover someone, or from when their account is made if that is later. 0 to {max}.",
+  "admin.mfaPolicy.save": "Save",
+  "admin.mfaPolicy.saving": "Saving…",
+  "admin.mfaPolicy.saved": "Saved the two-factor sign-in setting.",
+  "admin.mfaPolicy.waiting.one": "{count} person still in the grace period.",
+  "admin.mfaPolicy.waiting.other": "{count} people still in the grace period.",
+  "admin.mfaPolicy.overdue.one": "{count} person past it, who can only add an authenticator.",
+  "admin.mfaPolicy.overdue.other": "{count} people past it, who can only add an authenticator.",
+  "admin.mfaPolicy.allSet": "Everyone it covers has an authenticator.",
+  "admin.mfaPolicy.selfNote": "You have no authenticator yet: add one in My account.",
 
   // Audit log
   "admin.audit.index": "09 · Audit log",
@@ -107,6 +130,7 @@ export default {
   "admin.action.machine.gpu_allowlist_changed": "GPUs Forgeyard may use changed",
   "admin.action.machine.gpu_keys_changed": "GPU keys changed",
   "admin.action.node.gpus_changed": "GPUs added or removed",
+  "admin.action.mfa_policy.changed": "Two-factor requirement changed",
   "admin.action.machine.join_refused": "Join refused",
   "admin.action.machine.join_token_cancelled": "Join token cancelled",
   "admin.action.machine.join_token_created": "Join token created",

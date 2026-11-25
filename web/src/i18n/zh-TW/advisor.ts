@@ -98,6 +98,7 @@ export default {
   "advisor.finding.public-url-unset": "沒有設定 PUBLIC_URL",
   "advisor.finding.registrations-pending": "有人在等候核准",
   "advisor.finding.admins-without-mfa": "有管理員沒有開啟雙重驗證",
+  "advisor.finding.mfa-setup-pending": "有人還沒依規定開啟雙重驗證",
   "advisor.finding.replica-certificate": "有機器沒有給副本用的憑證",
   "advisor.finding.replica-margin-low": "有 GPU 快滿了",
   "advisor.finding.replica-traffic-plain": "連到某台機器的流量沒有加密：請更新 agent",

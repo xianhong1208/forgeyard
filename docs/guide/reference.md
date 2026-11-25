@@ -77,6 +77,13 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 | `LOGIN_FREE_FAILURES` | `5` | Failed sign-ins per account before each further try waits (2 s, doubling, at most 5 min) |
 | `LOGIN_IP_FAILURES` | `30` | Failed sign-ins per address within 15 minutes before that address waits |
 
+Required two-factor sign-in (1.6.0) is not an environment setting: admins set it on **Users** (`GET` / `PUT
+/api/users/mfa-policy` with `mfa_required` = `off`, `admins` or `everyone`, and `mfa_grace_days`, 0 to 90, default
+7). While a person's setup is overdue, the console's API answers `403 mfa_enrolment_required` to everything but
+`GET /api/auth/state`, `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/mfa/factors`, `POST
+/api/auth/mfa/totp/start` and `POST /api/auth/mfa/totp`. Each user carries `mfa_enrolment`: `null`, or `{"by": …,
+"due": …}` while it is required of them and they have no authenticator. API keys (`/v1`) are not affected.
+
 ### Machines
 
 | Variable | Default | What it does |
@@ -1653,7 +1660,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `certificate-name-missing` | error | Your own certificate does not name `PUBLIC_URL`'s host |
 | `certificate-expiring` | warning | Your own certificate expires within 30 days, or Forgeyard's CA within 90. An error within 14 days |
 | `registrations-pending` | note | People are waiting for approval |
-| `admins-without-mfa` | note | Admins sign in with a password alone (no two-factor sign-in) |
+| `admins-without-mfa` | note | Admins sign in with a password alone (no two-factor sign-in). A warning while two-factor sign-in is required of admins |
+| `mfa-setup-pending` | note | Two-factor sign-in is required, and some people it covers have not added it: how many are still in the grace period (and when the first one ends) and how many are past it ([Require two-factor for everyone](how-to.md#require-two-factor-for-everyone)) |
 | `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
 | `replica-traffic-plain` | warning | Traffic to a machine is not encrypted: its agent is older than 1.4.5 and is reached over plain HTTP; the fix opens its update command ([more](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)) |
 | `replica-certificate` | error | A machine whose agent serves its replicas over TLS has no certificate from this server, or it expired or is not being renewed (fewer than 3 days left): its replicas cannot be reached ([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)) |
@@ -1702,6 +1710,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `uv run python main.py` | Start the server (same as `python -m forgeyard serve`, or `python -m forgeyard` alone). Database changes run on start |
 | `python -m forgeyard secrets reset --yes` | The secret key is lost: make a new one and drop what it encrypted (stop the server first). Without `--yes` it only says what it would drop |
 | `python -m forgeyard secrets restore FILE` | Put back the secret key and the CA from a key backup downloaded from the console (stop the server first). Asks for the passphrase. `--data-dir DIR`: another data folder; `--force`: replace a different key or CA already there (the old files are kept as `<name>.replaced-<time>`); `--passphrase-file PATH`: the passphrase from a file's first line. Exit 2, nothing written, on a wrong passphrase, a damaged file or a different key already there |
+| `python -m forgeyard users reset-mfa NAME` | Remove an account's two-factor sign-in (authenticators, recovery codes) and end its sessions, for someone, the owner included, who lost both the phone and the codes ([how](how-to.md#if-you-lose-your-authenticator-and-recovery-codes)). Audited as `user.mfa_reset` with the actor `cli`. Works with the server running; needs no secret key. Exit 2: no such account or no database there; 0: done, or nothing to remove |
 | `python -m forgeyard check-apps` | Lists what upgrading to 1.5.3 removes (apps, API keys' `/x/` access), or removed, without changing anything ([Before you upgrade](#before-you-upgrade)). Exit 1: something will be removed; 0: nothing will, or the database is already upgraded. `--json`: machine-readable |
 | `python -m forgeyard --version` | The version |
 

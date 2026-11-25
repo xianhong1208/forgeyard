@@ -108,7 +108,7 @@ export function AccountPage() {
             <div><button className="btn btn-primary" disabled={busy || mismatch}>{busy ? t("admin.account.saving") : t("admin.account.changePassword")}</button></div>
           </form>
         </section>
-        <TwoFactorPanel say={setMessage} />
+        <TwoFactorPanel say={setMessage} onChange={load} />
         </div>
         <section className="panel">
           <div className="panel-head">

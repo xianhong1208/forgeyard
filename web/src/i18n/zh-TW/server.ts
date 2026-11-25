@@ -33,6 +33,7 @@ export default {
   "server.code.mfa_factor_limit": "一個帳號最多只能有 5 個驗證器。",
   "server.code.mfa_not_enabled": "這個帳號沒有開啟雙重驗證。",
   "server.code.reauth_required": "請輸入你的密碼，或驗證器 App 目前顯示的驗證碼。",
+  "server.code.mfa_enrolment_required": "請先到「我的帳號」加入驗證器 App：你的帳號必須開啟雙重驗證。",
   "server.code.passphrase_is_password": "通關密語不能和你的密碼一樣。",
   "server.code.name_taken": "這個名稱已經有人用了：{message}",
   "server.code.served_name_taken": "已經有別的部署或路由使用這個模型名稱：{message}",

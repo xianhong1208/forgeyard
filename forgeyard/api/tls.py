@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 from forgeyard.api.deps import fail, optional_user, public_base, request_is_https
 from forgeyard.config import get_settings
 from forgeyard.db import get_db
-from forgeyard.security import tls
+from forgeyard.security import mfa_policy, tls
 
 router = APIRouter(prefix="/api/tls", tags=["tls"])
 
@@ -63,7 +63,7 @@ def tls_info(request: Request, db: DbSession = Depends(get_db)):
         out["ca"] = {"name": info.subject, "expires_at": info.not_after, "fingerprint": fp,
                      "fingerprint_colons": tls.colon_hex(fp), "own": mode == "forgeyard-ca"}
     user, _ = optional_user(request, db)
-    if user is not None and user.role == "admin":
+    if user is not None and user.role == "admin" and not mfa_policy.due(db, user):  # not while a required 2FA setup is overdue
         out["admin"] = {**agent_commands(public_base(request)), "server_certificate": None}
         material = tls.live.material
         cert_file = material.cert_file if material is not None else None

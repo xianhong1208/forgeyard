@@ -20,6 +20,7 @@ from forgeyard.api.deps import (
     fail,
     normalise_username,
     optional_user,
+    signed_in,
     user_out,
 )
 from forgeyard.config import get_settings
@@ -226,7 +227,7 @@ def logout(request: Request, response: Response, db: DbSession = Depends(get_db)
 
 
 @router.get("/me")
-def me(caller: Caller = Depends(current)):
+def me(caller: Caller = Depends(signed_in)):  # also while a required two-factor setup is overdue
     return {"user": user_out(caller.user), "session": {
         "id": caller.session.public_id,
         "expires_at": caller.session.expires_at,

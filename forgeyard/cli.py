@@ -12,6 +12,8 @@
     python -m forgeyard secrets restore FILE [--data-dir DIR] [--force]
                                                    # put back a key backup downloaded from the console
     python -m forgeyard check-apps [--json]        # what the 1.5.3 upgrade removes (apps, /x/ key access), read only
+    python -m forgeyard users reset-mfa NAME       # lost authenticator and recovery codes: remove the account's
+                                                   # two-factor sign-in and end its sessions (audited, actor cli)
     python -m forgeyard agent inventory [--json] [--raw]                           # what it detects
     python -m forgeyard agent runtimes [--workload-user nobody]                     # what it can run
 """
@@ -566,6 +568,53 @@ def _secrets_cmd(args) -> int:
     return 0
 
 
+def _users_cmd(args) -> int:
+    """`users reset-mfa NAME`: the break-glass for someone (the owner too) who lost both the authenticator and the
+    recovery codes, when no other admin can reset it in the console. Removes the account's authenticators, recovery
+    codes and half-done sign-ins, ends its sessions and records `user.mfa_reset` with the actor `cli`. Shell access to
+    the server host is what it trusts. It works with the server running (the same DATA_DIR / DATABASE_URL), needs no
+    secret key, and touches nothing else: the person signs in with their password and adds an authenticator again."""
+    import sqlalchemy as sa
+
+    from forgeyard import audit
+    from forgeyard.config import get_settings
+    from forgeyard.db import User, get_engine, new_session
+    from forgeyard.security import mfa, sessions
+
+    log = logging.getLogger("forgeyard")
+    if args.users_command != "reset-mfa":
+        log.error("Usage: python -m forgeyard users reset-mfa USERNAME")
+        return 2
+    url = sa.engine.make_url(get_settings().db_url)
+    if url.get_backend_name() == "sqlite" and not Path(url.database or "").is_file():
+        log.error("There is no Forgeyard database at %s. Run this on the server host, with its DATA_DIR (or "
+                  "DATABASE_URL).", url.database)
+        return 2
+    if not sa.inspect(get_engine()).has_table("mfa_factors"):
+        log.error("This database has no two-factor sign-in yet (it was last used by a server older than 1.6.0).")
+        return 2
+    name = args.username.strip().lower()
+    db = new_session()
+    try:
+        user = db.scalar(sa.select(User).where(User.username == name))
+        if user is None:
+            log.error("No account named %r.", name)
+            return 2
+        removed = mfa.remove_all(db, user.id)
+        if not removed:
+            log.info("%s has no two-factor sign-in. Nothing was changed.", user.username)
+            return 0
+        ended = sessions.revoke_all(db, user.id, "mfa_reset")
+        audit.record(db, "user.mfa_reset", actor_name="cli", target=user.username, factors=removed,
+                     sessions_ended=ended)
+        db.commit()
+    finally:
+        db.close()
+    log.info("Removed %d authenticator(s) and the recovery codes of %s, and ended %d session(s). They sign in with "
+             "their password and can add an authenticator again in My account.", removed, name, ended)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="forgeyard", description="Forgeyard server and agent.")
     parser.add_argument("--version", action="version", version=f"forgeyard {__version__}")
@@ -608,6 +657,12 @@ def build_parser() -> argparse.ArgumentParser:
     chk = sub.add_parser("check-apps", help="list what upgrading to 1.5.3 removes (apps, API keys' /x/ access), or "
                                             "removed, without changing anything (exit 1: something will be removed)")
     chk.add_argument("--json", action="store_true", help="machine-readable output")
+
+    usr = sub.add_parser("users", help="accounts, from the server host")
+    usr_sub = usr.add_subparsers(dest="users_command")
+    rmfa = usr_sub.add_parser("reset-mfa", help="remove an account's two-factor sign-in (authenticators and recovery "
+                                                "codes) and end its sessions, for someone who lost both; audited")
+    rmfa.add_argument("username")
 
     sec = sub.add_parser("secrets", help="manage the key that encrypts stored secrets")
     sec_sub = sec.add_subparsers(dest="secrets_command")
@@ -693,6 +748,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return commands.get(args.agent_command, _agent_cmd)(args)
     if args.command == "secrets":
         return _secrets_cmd(args)
+    if args.command == "users":
+        return _users_cmd(args)
     if args.command == "check-apps":
         from forgeyard import apps_check
 

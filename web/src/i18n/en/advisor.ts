@@ -99,6 +99,7 @@ export default {
   "advisor.finding.public-url-unset": "PUBLIC_URL is not set",
   "advisor.finding.registrations-pending": "People are waiting for approval",
   "advisor.finding.admins-without-mfa": "Admins sign in without two-factor",
+  "advisor.finding.mfa-setup-pending": "People still have to add two-factor sign-in",
   "advisor.finding.replica-certificate": "A machine has no certificate for its replicas",
   "advisor.finding.replica-margin-low": "A GPU is almost full",
   "advisor.finding.replica-traffic-plain": "Traffic to a machine is not encrypted: update the agent",

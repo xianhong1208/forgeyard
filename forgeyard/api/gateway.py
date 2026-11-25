@@ -32,7 +32,7 @@ from forgeyard.gateway import (classify, embeddings as gembeddings, imageedit, i
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
-from forgeyard.security import sessions
+from forgeyard.security import mfa_policy, sessions
 
 router = APIRouter(prefix="/v1", tags=["gateway"])
 console = APIRouter(prefix="/api/playground", tags=["playground"])
@@ -54,6 +54,8 @@ def _console_caller(token: Optional[str]) -> tuple[Optional[KeyCaller], Optional
         row, reason = sessions.resolve(db, token)
         if row is None:
             return None, reason
+        if mfa_policy.due(db, row.user):  # 1.6.0 (#39): the setup of a required authenticator is overdue
+            return None, mfa_policy.DUE_CODE
         return KeyCaller(source="console", user_id=row.user.id, username=row.user.username,
                          cloud=keys.console_cloud(db, row.user), user_budget_micros=row.user.budget_micros), None
     finally:
@@ -431,8 +433,7 @@ def image_options(model: Optional[str], caller: KeyCaller) -> dict:
 async def playground_image_options(request: Request, model: Optional[str] = None):
     caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
     if caller is None:
-        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
-                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+        return _not_signed_in(reason)
     try:
         return await run_in_threadpool(image_options, model, caller)
     except GatewayError as e:
@@ -534,8 +535,7 @@ async def playground_voices(request: Request, model: Optional[str] = None):
     """The playground's voice list for a speech model, as the signed-in user."""
     caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
     if caller is None:
-        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
-                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+        return _not_signed_in(reason)
     try:
         return await voices(model, caller)
     except GatewayError as e:
@@ -543,6 +543,9 @@ async def playground_voices(request: Request, model: Optional[str] = None):
 
 
 def _not_signed_in(reason: Optional[str]) -> JSONResponse:
+    if reason == mfa_policy.DUE_CODE:
+        return JSONResponse({"detail": {"code": reason, "message": "Add an authenticator app in My account first: "
+                                        "two-factor sign-in is required for your account."}}, status_code=403)
     return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
                                     "message": "Sign in to continue.", "reason": reason}}, status_code=401)
 
@@ -578,6 +581,5 @@ async def playground(endpoint: str, request: Request):
         return JSONResponse({"detail": {"code": "not_found", "message": "No such playground endpoint."}}, status_code=404)
     caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
     if caller is None:
-        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
-                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+        return _not_signed_in(reason)
     return await handle(request, endpoint, caller)

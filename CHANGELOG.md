@@ -36,6 +36,21 @@ version until 1.0.
 - `python -m forgeyard secrets reset` (a lost secret key) also removes the authenticators it can no longer read, so
   those people sign in with their password alone and add theirs again.
 - New web dependency: `uqr` 0.1.3 (MIT, no dependencies of its own) draws the QR code in the page; nothing is fetched.
+- **Required two-factor sign-in** (#39, 1.6.0 PR 2). On **Users**, admins choose **Not required** (the default),
+  **Required of admins** (the owner included) or **Required of everyone**, and a **grace period** (7 days by default,
+  0 to 90). The period counts from when the setting started to cover a person, or from when their account was made if
+  that is later; widening from admins to everyone keeps the admins' deadline. During it, people without an
+  authenticator sign in as before and see a banner with the days left. After it, they still sign in with their
+  password but only see **Add two-factor sign-in to continue**: the console's API, the Playground included, answers
+  `403 mfa_enrolment_required` to everything but the setup (`/api/auth/mfa/factors`, `…/totp/start`, `…/totp`),
+  `/api/auth/me`, `/api/auth/state` and sign-out. API keys are not affected. Users shows
+  each person's deadline. Audit: `mfa_policy.changed`. API: `GET` / `PUT /api/users/mfa-policy`; users carry
+  `mfa_enrolment` (`null` or `{"by", "due"}`). Stored as one `server_settings` row (`mfa_required`): no migration.
+- **`python -m forgeyard users reset-mfa NAME`** on the server host: removes an account's authenticators and recovery
+  codes and ends its sessions, audited as `user.mfa_reset` with the actor `cli`. The way back in for an owner (or the
+  only admin) who lost both the phone and the codes. Works with the server running and needs no secret key.
+- **Setup health**: `admins-without-mfa` becomes a warning while two-factor sign-in is required of admins, and a new
+  note `mfa-setup-pending` counts the people still in the grace period and past it.
 
 ### Changed
 

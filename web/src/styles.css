@@ -1995,7 +1995,16 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .mfa-confirm .strong { margin: 0; }
 .mfa-confirm p { margin: 0; }
 .auth-switch { margin-top: 4px; }
+/* Required two-factor sign-in (PR 2): the grace-period banner, the only page after it, the admins' setting. */
+.mfa-banner { margin-bottom: 20px; }
+.mfa-banner a { font-weight: 600; white-space: nowrap; }
+.mfa-required-page { max-width: 760px; }
+.mfa-policy { margin-top: 24px; max-width: 760px; }
+.mfa-policy-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 14rem); gap: 12px 16px; align-items: start; margin-top: 12px; }
+.mfa-policy-form > .notice, .mfa-policy-form > div:last-child { grid-column: 1 / -1; }
+.mfa-policy-status { margin: 12px 0 0; }
 @media (max-width: 600px) {
+  .mfa-policy-form { grid-template-columns: minmax(0, 1fr); }
   .mfa-enrol-grid { grid-template-columns: minmax(0, 1fr); }
   .recovery-list { columns: 1; }
 }
