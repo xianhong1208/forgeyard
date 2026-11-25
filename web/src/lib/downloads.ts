@@ -60,8 +60,9 @@ export function downloadLine(d: ModelDownload): string {
   if (d.state === "done") {
     const via = d.via === "machine" ? tr("machine.dl.viaMachine", { name: d.source?.name ?? tr("machine.dl.anotherMachine") })
       : d.via === "server" ? tr("machine.dl.viaServer") : "";
-    // An engine alone (1.5.2): its name is the row's title already.
-    return tr("machine.dl.done", { when: when(d.finished_at), via, engine: d.recipe && !d.engine_only ? tr("machine.dl.withEngine", { recipe: d.recipe }) : "" });
+    // Only when and how the model came (1.5.6, #282): whether an engine image is on the machine is current state, shown
+    // on the engine's page and the deploy form, not history. An engine alone (1.5.2): its name is the row's title.
+    return tr("machine.dl.done", { when: when(d.finished_at), via });
   }
   // The server's reason as it sent it, else "Cancelled" in the reader's language.
   if (d.state === "cancelled") return (d.reason ? `${capital(d.reason)} ${when(d.finished_at)}` : tr("machine.dl.cancelled", { when: when(d.finished_at) })).trim();

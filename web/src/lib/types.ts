@@ -433,7 +433,9 @@ export type MachineVerdict = {
 
 export type PlacedReplica = { replica: number; machine: string; machine_id: number; variant: string; runtime: string; image: string | null; gpus: number[]; cached: boolean; leftover: number; online: boolean; gpu_memory_utilization?: string;
   // 1.3.1 (a change): it goes back to the machine it runs on now.
-  previous?: boolean };
+  previous?: boolean;
+  // 1.5.6 (#282, the deploy form's estimate): whether that machine has the engine's image or program now.
+  engine?: EngineOn };
 
 // 1.3.1: an exclusive GPU deployment that needs half its card or less could share it.
 export type ShareHint = { need: number; card_total: number; card_model: string | null; machine: string | null; gpu: number | null; text: string };
@@ -825,7 +827,12 @@ export type AgentUpdate = {
 export type EngineOn = {
   variant: string | null; runtime: "container" | "process" | null; kind: "image" | "program" | "command" | null;
   engine_name: string | null; present: boolean | null; listed_at: string | null; note: string | null;
+  // 1.5.6 (#282): how it comes when it is not there (pulled or downloaded by the machine, through the server, or
+  // directly and through the server when that fails), and the image's size when a machine's listing shows it.
+  via?: EngineVia | null; size?: number | null;
 };
+
+export type EngineVia = "direct" | "server" | "auto";
 
 export type ModelFile = { path: string; size: number | null; role: string; downloaded: boolean };
 

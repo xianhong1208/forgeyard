@@ -93,6 +93,16 @@ export default {
   "machines.docker.whyNvidia":
     "需要 NVIDIA Container Toolkit。$(for d in …) 那一行也會用 --device 傳入主機的每個 NVIDIA 裝置（/dev/nvidia*），所以主機執行 systemctl daemon-reload 時，agent 仍保有它的 GPU。",
   "machines.docker.whyAmd": "使用主機的 ROCm 工具，以唯讀方式掛載。video 和 render 群組以它們在主機上的編號指定：映像檔裡沒有 render 群組。",
+  "machines.where.add": "在你要加入的機器上，用 Linux shell（bash）執行。如果不是這台電腦，先用 SSH 連進去。",
+  "machines.where.wsl": "在那台 Windows 機器上，於它的 WSL2 Linux 發行版 shell 裡執行（在 PowerShell 輸入 wsl 開啟），不要直接在 PowerShell 執行。",
+  "machines.docker.wsl": "Windows 機器（WSL2）",
+  "machines.docker.whyWsl":
+    "只用 --gpus all：WSL2 透過 /dev/dxg 提供 GPU，沒有 /dev/nvidia* 裝置可以列出。",
+  "machines.wsl.needs":
+    "<strong>還沒有在實機上驗證過。</strong>需要 Windows 版的 NVIDIA 驅動程式（已包含 WSL 支援，發行版裡不要再裝 Linux 驅動程式），並在 WSL2 發行版裡裝好 Docker Engine 和 NVIDIA Container Toolkit，讓 docker run --gpus all 能在那裡執行。不支援 GPU 的 Docker Desktop 替代品無法執行 GPU 模型。模型目錄請放在發行版自己的磁碟上，不要放在 /mnt/c 底下。",
+  "machines.wsl.help": "加入 Windows 機器（WSL2）",
+  "machines.wsl.slowDir":
+    "{dir} 在 Windows 磁碟機上：每個檔案都要經過 WSL 的檔案共用，比發行版自己的磁碟慢好幾倍。請改用發行版磁碟上的目錄，例如 /srv/forgeyard-models。",
   "machines.docker.help": "用 Docker 執行 agent",
   "machines.manual.get": "在那台機器上取得 Forgeyard {version} 並執行 {sync}，NVIDIA 機器要加上 {extra}。",
   "machines.manual.save": "把這個存成 {file}，或讓 {init} 寫出一份完整的、每個設定都有說明的檔案：",

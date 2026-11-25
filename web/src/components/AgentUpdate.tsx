@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 
 import { behindDetail, behindText, methodLine } from "../lib/agentUpdate";
+import { onWsl } from "../lib/dockerAgent";
 import { tlsChip } from "../lib/replicaTls";
 import type { AgentUpdate, Machine, UpdateStep } from "../lib/types";
 import { useT } from "../i18n/react";
@@ -110,6 +111,9 @@ export function AgentUpdateSection({ m, canManage }: { m: Machine; canManage: bo
       {data && data.known && (
         <>
           <p className="small">{methodLine(data)}</p>
+          {data.steps.length > 0 && (
+            <p className="where-line">{onWsl(m.platform?.kernel) ? t("machine.update.whereWsl", { name: m.name }) : t("machine.update.where", { name: m.name })}</p>
+          )}
           {data.steps.length > 0 && <Steps steps={data.steps} />}
           {data.steps.length > 0 && data.nvidia_devices === "host" && (
             <p className="muted small update-nvidia">{t("machine.update.nvidiaHost")}</p>

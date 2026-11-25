@@ -135,10 +135,12 @@ describe("model and engine pages (1.4.3, #140)", () => {
     expect(pinned({ runtime: "process", image: null })).toBeNull();
     expect(digestOf(LLAMA.variants[0].image)).toBe("sha256:a8cf841e");
     const fit = modelPage().fits["llama-cpp"];
-    // A GPU that fits wins; else the CPU when it fits; else the GPU's reason; else the CPU's.
+    // A GPU that fits wins; else the CPU when it fits; else the GPU's reason when it has a card the engine can use
+    // (1.5.6: else the CPU's); else the CPU's.
     expect(machineFit(fit, 1)?.device).toBe("gpu");
     expect(machineFit(fit, 2)).toMatchObject({ device: "cpu", verdict: { fits: true } });
-    expect(machineFit({ gpu: fit.gpu, cpu: { machines: [verdict(2, "strix", false)] } }, 2)?.device).toBe("gpu");
+    const short = verdict(2, "strix", false, { cards: [{ index: 0, available: 1, total: 8, shared_with: [] }] });
+    expect(machineFit({ gpu: { machines: [short] }, cpu: { machines: [verdict(2, "strix", false)] } }, 2)?.device).toBe("gpu");
     expect(machineFit({ cpu: fit.cpu }, 1)?.device).toBe("cpu");
     expect(machineFit(undefined, 1)).toBeNull();
     expect(filesLine(modelPage().files, MODEL.file)).toMatchObject({ count: 1, others: 1, used: { path: "Qwen3-1.7B-Q4_K_M.gguf" } });

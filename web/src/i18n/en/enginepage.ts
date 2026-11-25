@@ -85,10 +85,15 @@ export default {
   "enginepage.copyOrUpload": "Copy or upload",
   "enginepage.where.command": "installed command",
   "enginepage.where.programHere": "in its model cache",
-  "enginepage.where.programNot": "downloaded when a deployment starts there",
+  "enginepage.where.programNot": "downloaded when a deployment starts there{size}",
+  "enginepage.where.programNotServer": "comes through the server when a deployment starts there{size}",
+  "enginepage.where.programNotAuto": "downloaded when a deployment starts there, through the server if that fails{size}",
   "enginepage.where.programUnknown": "no cache report yet",
   "enginepage.where.imageHere": "in its container engine",
-  "enginepage.where.imageNot": "pulled when a deployment starts there",
+  "enginepage.where.imageNot": "pulled when a deployment starts there{size}",
+  "enginepage.where.imageNotServer": "comes through the server when a deployment starts there{size}",
+  "enginepage.where.imageNotAuto": "pulled when a deployment starts there, through the server if that fails{size}",
+  "enginepage.where.size": " ({size})",
   "enginepage.where.imageUnknown": "not listed yet",
 
   // Parameters

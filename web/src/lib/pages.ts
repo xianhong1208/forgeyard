@@ -4,7 +4,8 @@
 import { t } from "../i18n/core";
 import type { ModelKind } from "./fleet";
 import { isVisionTask } from "./models";
-import type { CatalogModel, DeviceFit, EnginePage, EngineOn, MachineVerdict, ModelFile, ModelPage, RecipeVariant } from "./types";
+import { bytes } from "./machines";
+import type { Accelerator, CatalogModel, DeviceFit, EnginePage, EngineOn, EngineVia, MachineVerdict, ModelFile, ModelPage, RecipeVariant } from "./types";
 
 export const modelHref = (name: string) => `/models/${encodeURIComponent(name)}`;
 export const engineHref = (name: string) => `/models/engines/${encodeURIComponent(name)}`;
@@ -43,9 +44,25 @@ export function machineFit(fit: Partial<Record<"gpu" | "cpu", DeviceFit>> | unde
   const cpu = of("cpu");
   if (gpu?.fits) return { verdict: gpu, device: "gpu" };
   if (cpu?.fits) return { verdict: cpu, device: "cpu" };
+  // 1.5.6 (#282): a machine with no GPU the engine can use (no card in the GPU verdict, nothing to share) is judged on
+  // its CPU: "no allowed GPU that faster-whisper supports" next to a CPU variant that is there reads as a contradiction.
+  if (gpu && cpu && !usableGpu(gpu)) return { verdict: cpu, device: "cpu" };
   if (gpu) return { verdict: gpu, device: "gpu" };
   if (cpu) return { verdict: cpu, device: "cpu" };
   return null;
+}
+
+function usableGpu(v: MachineVerdict): boolean {
+  return (v.cards ?? []).length > 0 || Boolean(v.share_fits);
+}
+
+// 1.5.6 (#282): what a CPU replica uses is the machine's system memory (the CPU row: on an APU, not the part set aside
+// for the GPU). {need, free, total} of it, and the GPU's own memory on an APU (null elsewhere), so the page can name both.
+export function cpuMemory(v: MachineVerdict, need: number | undefined, accelerators: Accelerator[] | undefined):
+  { need: number | null; free: number | null; total: number | null; apuGpu: number | null } {
+  const row = (v.cards ?? [])[0] ?? null;   // a CPU verdict's one entry: the CPU row
+  const apu = (accelerators ?? []).find((a) => a.vendor !== "cpu" && a.unified_memory);
+  return { need: need ?? null, free: row ? row.available : null, total: row?.total ?? null, apuGpu: apu?.vram_total ?? null };
 }
 
 // The estimate the facts strip shows for an engine: the GPU one when it has one, else the CPU one.
@@ -63,19 +80,39 @@ export function filesLine(files: ModelPage["files"], used: string | null): { cou
   };
 }
 
-// What a machine has of an engine, in words: its image or program is there, is not (it is fetched when a deployment
-// starts there), or is not known yet (never listed, no cache report).
-export function presenceText(kind: EngineOn["kind"], present: boolean | null): string {
+// What a machine has of an engine, in words: its image or program is there, is not (it comes when a deployment starts
+// there: pulled or downloaded by the machine, or through the server; 1.5.6, #282), or is not known yet (never listed, no
+// cache report).
+export function presenceText(kind: EngineOn["kind"], present: boolean | null, via?: EngineVia | null, size?: number | null): string {
   if (kind === "command") return t("modelpage.presence.command");
   const what = kind === "program" ? "program" : "image";
-  return t(`modelpage.presence.${what}${present === true ? "Here" : present === false ? "Not" : "Unknown"}`);
+  if (present === false) return t(`modelpage.presence.${what}Not${viaSuffix(via)}`, { size: sizeText("modelpage.presence.size", size) });
+  return t(`modelpage.presence.${what}${present === true ? "Here" : "Unknown"}`);
 }
 
 // The same on an engine's page, under its chip (here / not here): where it is, or when it comes.
-export function whereText(kind: EngineOn["kind"], present: boolean | null): string {
+export function whereText(kind: EngineOn["kind"], present: boolean | null, via?: EngineVia | null, size?: number | null): string {
   if (kind === "command") return t("enginepage.where.command");
   const what = kind === "program" ? "program" : "image";
-  return t(`enginepage.where.${what}${present === true ? "Here" : present === false ? "Not" : "Unknown"}`);
+  if (present === false) return t(`enginepage.where.${what}Not${viaSuffix(via)}`, { size: sizeText("enginepage.where.size", size) });
+  return t(`enginepage.where.${what}${present === true ? "Here" : "Unknown"}`);
+}
+
+// 1.5.6 (#282): the deploy form, once a machine is chosen (or the estimate placed a replica there): whether that machine
+// has the engine's image or program now, and how it comes when not. Nothing for an installed command.
+export function engineLine(machine: string, e: Pick<EngineOn, "kind" | "present" | "via" | "size">): string | null {
+  if (e.kind !== "image" && e.kind !== "program") return null;
+  const what = e.kind === "program" ? "program" : "image";
+  const state = e.present === true ? "Here" : e.present === false ? (`Not${viaSuffix(e.via)}` as const) : "Unknown";
+  return t(`deploy.engine.${what}${state}`, { machine, size: sizeText("deploy.engine.size", e.size) });
+}
+
+function viaSuffix(via: EngineVia | null | undefined): "" | "Server" | "Auto" {
+  return via === "server" ? "Server" : via === "auto" ? "Auto" : "";
+}
+
+function sizeText(key: "modelpage.presence.size" | "enginepage.where.size" | "deploy.engine.size", size: number | null | undefined): string {
+  return typeof size === "number" && size > 0 ? t(key, { size: bytes(size) }) : "";
 }
 
 // A machine's image listing older than this is listed again when an engine's page opens (connected machines only).

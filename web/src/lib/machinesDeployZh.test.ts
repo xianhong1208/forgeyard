@@ -79,7 +79,7 @@ describe("a machine's page in zh-TW", () => {
     const done = { state: "done", via: "machine", source: { name: "gpu-02" }, recipe: "llama-cpp", finished_at: null } as unknown as ModelDownload;
     const cancelled = { state: "cancelled", reason: null, finished_at: null } as unknown as ModelDownload;
     expect(targetDetail(target)).toBe("1 GiB to download · 48 GiB free · engine: llama.cpp-1.0.0 archive (already here) · cpu-process · via the server, from gpu-02");
-    expect(downloadLine(done)).toBe("Downloaded — via the server, from gpu-02, with the llama-cpp engine");
+    expect(downloadLine(done)).toBe("Downloaded — via the server, from gpu-02");
     expect(downloadLine(cancelled)).toBe("Cancelled —");
     expect(downloadLine({ ...cancelled, reason: "stopped by owner" })).toBe("Stopped by owner —");
     setLang("zh-TW");
@@ -87,7 +87,7 @@ describe("a machine's page in zh-TW", () => {
     expect(FETCH_VIA_LABEL.server).toBe("一律經由伺服器");
     expect(FETCH_VIA_HINT.direct).toBe("一律直接下載，從不經由伺服器。");
     expect(targetDetail(target)).toBe("要下載 1 GiB · 可用 48 GiB · 推論引擎：llama.cpp-1.0.0 封存檔（已經在這裡） · cpu-process · 經由伺服器，來自 gpu-02");
-    expect(downloadLine(done)).toBe("—下載完成，經由伺服器，來自 gpu-02，搭配推論引擎 llama-cpp");
+    expect(downloadLine(done)).toBe("—下載完成，經由伺服器，來自 gpu-02");
     expect(downloadLine(cancelled)).toBe("—已取消");
     expect(downloadLine({ ...cancelled, reason: "stopped by owner" })).toBe("Stopped by owner —");
     expect(downloadLine({ state: "failed", reason: null } as unknown as ModelDownload)).toBe("失敗：原因不明");

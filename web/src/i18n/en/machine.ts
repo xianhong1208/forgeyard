@@ -72,8 +72,7 @@ export default {
   "machine.dl.viaMachine": " via the server, from {name}",
   "machine.dl.anotherMachine": "another machine",
   "machine.dl.viaServer": " via the server",
-  "machine.dl.done": "Downloaded {when}{via}{engine}",
-  "machine.dl.withEngine": ", with the {recipe} engine",
+  "machine.dl.done": "Downloaded {when}{via}",
   "machine.dl.cancelled": "Cancelled {when}",
   "machine.dl.failed": "Failed: {reason}",
   "machine.dl.unknownReason": "unknown reason",
@@ -125,6 +124,9 @@ export default {
   "machine.update.title": "Update the agent",
   "machine.update.plain":
     "Traffic to this machine is not encrypted: update the agent. Until then the gateway reaches its replicas over plain HTTP; they keep serving.",
+  // 1.5.6 (#282): where the commands run.
+  "machine.update.where": "Run each command in a Linux shell (bash) on the machine its step names. For {name}, SSH in first if it is not this computer.",
+  "machine.update.whereWsl": "Run each command on the machine its step names. On {name}, a Windows machine, use the shell of its WSL2 distribution (type wsl in PowerShell), not PowerShell itself.",
   "machine.update.matches": "Agent {version} matches the server{server}.",
   "machine.update.again": " The command below starts it again on the server's version, should you need to.",
   "machine.update.adminSees": "An admin sees the command that updates it here.",
