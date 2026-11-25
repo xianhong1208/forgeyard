@@ -112,6 +112,67 @@ and places CPU models on it:
 When you deploy, choose **Runs on** → **CPU only**. Set **CPU threads** to the cores you want it to
 use: more threads than free cores make llama.cpp slower, not faster.
 
+## Add a Windows machine (WSL2)
+
+> **Not verified on real hardware yet.** These steps follow NVIDIA's and Docker's instructions for CUDA
+> on WSL2. Report what differs on your machine.
+
+A Windows computer with an NVIDIA GPU runs the agent in Docker inside a WSL2 Linux distribution. Every
+command here runs in that distribution's shell (type `wsl` in PowerShell to open it), not in PowerShell.
+
+1. On Windows, install the NVIDIA driver for Windows. It includes the support for WSL2: install no
+   Linux NVIDIA driver inside the distribution.
+2. In PowerShell, `wsl --install -d Ubuntu` (or use a distribution you already have), then open it with
+   `wsl`. Turn on systemd in its `/etc/wsl.conf`, so that Docker starts with the distribution, and run
+   `wsl --shutdown` in PowerShell once to apply it:
+
+   ```ini
+   [boot]
+   systemd=true
+   ```
+
+3. In the distribution, install Docker Engine and the NVIDIA Container Toolkit, and check that a
+   container sees the GPU:
+
+   ```bash
+   sudo docker run --rm --gpus all ubuntu nvidia-smi
+   ```
+
+   Docker Desktop with its WSL2 backend works too. A Docker alternative without GPU support starts the
+   agent, but cannot run models on the GPU.
+4. **Machines** → **Add a machine** → **Docker** → **Windows (WSL2)**, fill in the form, and run the
+   command in the distribution:
+
+   ```bash
+   sudo docker run -d --name forgeyard-agent --restart always --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_JOIN_TOKEN=fyj_… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.5
+   ```
+
+   It is the NVIDIA command without the `$(for d in /dev/nvidia…)` line: WSL2 passes the GPU through
+   `/dev/dxg` and has no `/dev/nvidia*` devices. Keep the model directory on the distribution's own disk
+   (the default `/srv/forgeyard-models`). A directory under `/mnt/c` works, but every file then goes
+   through WSL's file sharing, many times slower; the page warns when you type one.
+5. The server must reach the machine's replica ports (**Advanced** → **Port range**). With WSL's default
+   networking (NAT) only this Windows computer reaches the distribution. Use mirrored networking
+   (Windows 11 22H2 or newer) in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, and allow the port
+   range in Windows Firewall:
+
+   ```ini
+   [wsl2]
+   networkingMode=mirrored
+   ```
+
+The machine's page knows a WSL2 machine by its kernel (`…-microsoft-standard-WSL2`), and its
+**Update the agent** section says to run the command in the distribution's shell.
+
 ## Run the agent in Docker
 
 One `docker run` per machine, instead of the install script. Each release publishes the agent image
@@ -120,7 +181,9 @@ need amd64: ROCm is x86_64 only), tagged with the release's version. The command
 matches your server.
 
 **Machines** → **Add a machine** → **Docker** writes the command for you: pick the machine's GPUs
-(NVIDIA, AMD or CPU only) and fill in the form above the command. The command follows the form as
+(NVIDIA, AMD, CPU only, or [Windows (WSL2)](#add-a-windows-machine-wsl2)) and fill in the form above the command.
+Like every command on that page, it runs on the machine you add, in a Linux shell (bash): SSH in first
+when it is another computer. The command follows the form as
 you type, **Copy** copies exactly what is shown, and the values are remembered in this browser for
 the next machine:
 
@@ -1780,7 +1843,10 @@ that machine's agent to the server's version, made from what the agent reported 
 - **From a checkout**: `git checkout` of the server's version and `uv sync`; then restart the agent the way you
   started it.
 
-Copy the command and run it on that machine. Its models keep running while the agent is replaced, and
+Copy the command and run it on that machine, in a Linux shell (bash); the section says so above the command (SSH in
+first when it is another computer). On a [Windows machine](#add-a-windows-machine-wsl2) (its kernel says
+`microsoft-standard-WSL2`) it says to use the shell of its WSL2 distribution instead of PowerShell. Its models keep
+running while the agent is replaced, and
 the volume (or install.sh's state directory) keeps the machine: it comes back online as itself within seconds.
 
 The agent never reports a secret: not the join token (a joined machine does not need it again), not its
@@ -2112,8 +2178,17 @@ the first engine's defaults, how many deployments) and links to its sections:
 - **Machines**: each machine, whether its model cache has the model (as its agent last reported, with
   the size there and what uses it), whether a copy **fits** there now (on a GPU, else on the CPU; the
   deploy page's estimate, with the engine's defaults), and the engine variant it would run with whether
-  that image or program is there. Pick another engine above the table to see its verdicts.
+  that image or program is there now. Pick another engine above the table to see its verdicts.
   **Deploy here** and **Download here** start from that machine.
+  - A machine without a GPU the engine can use (an AMD APU for faster-whisper, whose CTranslate2 runs on
+    CUDA only) is judged on its CPU: *fits on the CPU*, with the memory a copy uses out of the machine's
+    system memory. On an APU that is the system memory, not the part set aside for the GPU (for example
+    31 GiB, not the GPU's 96 GiB). **Deploy here (CPU)** opens the deploy page with **Runs on** → **CPU
+    only** (`gpus: 0`).
+  - An image or program that is not there says how it comes when a deployment starts: pulled (or
+    downloaded) by the machine, through the server for a machine that gets its files through the
+    server, or directly and through the server when that fails; with the image's size when a machine's
+    image listing shows it.
 - **Deployments** of the model, and the **Engines** that run it (each opens its page).
 - **Files**, folded to one line (how many files a machine downloads, their size, the model file);
   **Show files** lists them with their sizes, and the repository's other files (other quantisations
@@ -2127,7 +2202,8 @@ An **engine's page** (`/models/engines/<name>`) has **Overview** (what it serves
 formats it reads, how it shares a GPU), **Variants** (per kind of hardware: the image or program, whether
 the image is pinned by digest, what the machine needs, and the commands to carry an image to a machine
 without registry access), **Machines** (the variant each machine would run, and whether its image is in
-the machine's engine, as the machine last listed its images, or its program in the model cache),
+the machine's engine, as the machine last listed its images, or its program in the model cache; when it
+is not, how it comes and its size, as on a model's page),
 **Parameters** (folded: their defaults and ranges), and the **deployments** and **catalog models** that use
 it. A connected machine lists its images again when the page opens and its last listing is older than ten
 minutes; **List again** asks now. An offline machine shows its last listing. An admin **edits** or
@@ -2335,7 +2411,9 @@ Admins and operators can do it.
 4. Click **Download to N machines**.
 
 The progress shows under the model's row in the catalog and on each machine's page, with the same
-words and bar as a deployment's download. **Cancel** stops it at once on that machine; what is on
+words and bar as a deployment's download. A finished one says when and how the model came
+(*Downloaded 9 d ago via the server*). Whether the engine image is on a machine is not part of that
+line: it can be removed or replaced later, so the engine's page and the deploy page show it as it is now. **Cancel** stops it at once on that machine; what is on
 disk is kept, and **Download to…** again goes on from there. A download on a machine that goes
 offline waits and goes on when its agent is back. When it is done, the machine's **Models in cache**
 lists the model, and placement prefers that machine for a deployment of it.

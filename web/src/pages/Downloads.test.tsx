@@ -230,7 +230,7 @@ describe("Download to…", () => {
       .toBe("waiting for another download on this machine to finish");
     expect(downloadLine(dl({ machine: { id: 1, name: "a100-box", connected: false }, waiting: "waiting for a100-box to come online; the download goes on from where it was" })))
       .toBe("Downloading the model: 512 MiB of 1.3 GiB (40%) · waiting for a100-box to come online; the download goes on from where it was");
-    expect(downloadLine(dl({ state: "done", download: null, finished_at: new Date().toISOString() }))).toBe("Downloaded just now, with the llama-cpp engine");
+    expect(downloadLine(dl({ state: "done", download: null, finished_at: new Date().toISOString() }))).toBe("Downloaded just now");
     expect(targetDetail(target({ engine: { kind: "image", name: "ghcr.io/ggml-org/llama.cpp:server-v1.0.0@sha256:" + "a".repeat(64), cached: true }, variant: "cpu" })))
       .toBe("1.2 GiB to download · 48 GiB free · engine: image llama.cpp:server-v1.0.0 (already here) · cpu");
     expect(targetDetail(target({ engine: null, engine_note: "no variant of vllm for this machine's hardware", model_cached: true })))

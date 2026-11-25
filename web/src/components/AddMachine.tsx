@@ -18,6 +18,7 @@ import {
   type DockerErrors,
   type DockerForm,
   type DockerKind,
+  windowsDriveDir,
 } from "../lib/dockerAgent";
 import { useT } from "../i18n/react";
 import type { NewJoinToken, TlsInfo } from "../lib/types";
@@ -33,6 +34,7 @@ const KINDS: { id: DockerKind; label: string }[] = [
   { id: "nvidia", label: "NVIDIA" },
   { id: "amd", label: "AMD" },
   { id: "cpu", label: "" },   // "CPU only", in the reader's language
+  { id: "wsl", label: "" },   // "Windows (WSL2)"
 ];
 
 export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: TlsInfo | null }) {
@@ -79,6 +81,7 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
 
       {way === "install" && (
         <div role="tabpanel" id="way-panel-install" aria-labelledby="way-install">
+          <p className="where-line">{t("machines.where.add")}</p>
           {canInstall ? (
             <ol className="steps">
               <li>
@@ -108,11 +111,19 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
           <div className="choice-row" role="group" aria-label={t("machines.docker.gpus")}>
             {KINDS.map((k) => (
               <button key={k.id} type="button" aria-pressed={kind === k.id} onClick={() => setKind(k.id)}>
-                {k.label || t("machines.docker.cpuOnly")}
+                {k.label || (k.id === "wsl" ? t("machines.docker.wsl") : t("machines.docker.cpuOnly"))}
               </button>
             ))}
           </div>
+          <p className="where-line">{kind === "wsl" ? t("machines.where.wsl") : t("machines.where.add")}</p>
+          {kind === "wsl" && (
+            <Notice>{t.rich("machines.wsl.needs", { strong: (text) => <strong>{text}</strong> })}{" "}
+              <HelpLink page="how-to" anchor="add-a-windows-machine-wsl2">{t("machines.wsl.help")}</HelpLink></Notice>
+          )}
           <DockerFields form={docker} errors={dockerErrors} serverUrl={issued.server_url} tls={tls} onChange={changeDocker} />
+          {kind === "wsl" && windowsDriveDir(docker.modelDir) && !dockerErrors.modelDir && (
+            <Notice tone="warn">{t.rich("machines.wsl.slowDir", { dir: <code>{docker.modelDir.trim()}</code> })}</Notice>
+          )}
           <p className="muted small">{t.rich("machines.docker.sudo", { sudo: <code>sudo</code>, group: <code>docker</code> })}</p>
           <ol className="steps">
             {!image.published && (
@@ -138,7 +149,7 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
           {image.published && <OfflineImage image={image} version={version} />}
           <p className="muted small">
             {t.rich("machines.docker.why", { strong: (text) => <strong>{text}</strong> })}
-            {kind === "nvidia" ? t("machines.docker.whyNvidia") : kind === "amd" ? t("machines.docker.whyAmd") : ""}
+            {kind === "nvidia" ? t("machines.docker.whyNvidia") : kind === "amd" ? t("machines.docker.whyAmd") : kind === "wsl" ? t("machines.docker.whyWsl") : ""}
           </p>
           <HelpLink page="how-to" anchor="run-the-agent-in-docker">{t("machines.docker.help")}</HelpLink>
         </div>
@@ -146,6 +157,7 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
 
       {way === "manual" && (
         <div role="tabpanel" id="way-panel-manual" aria-labelledby="way-manual">
+          <p className="where-line">{t("machines.where.add")}</p>
           <ol className="steps">
             <li>
               {t.rich("machines.manual.get", { version: issued.version ?? "", sync: <code>uv sync</code>, extra: <code>--extra nvidia</code> })}

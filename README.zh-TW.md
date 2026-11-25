@@ -119,9 +119,10 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   docker.io/tonyhuang1101/forgeyard-agent:1.5.5
 ```
 
-加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
+加入權杖只能用一次，而且 15 分鐘內有效。AMD、純 CPU 與 Windows 機器：
 [加入 AMD 機器](docs/guide/zh-TW/how-to.md#加入-amd-機器)、
 [加入純 CPU 機器](docs/guide/zh-TW/how-to.md#加入純-cpu-機器)、
+[加入 Windows 機器（WSL2）](docs/guide/zh-TW/how-to.md#加入-windows-機器wsl2)（還沒有在實機上驗證過）、
 [用 Docker 執行 agent](docs/guide/zh-TW/how-to.md#用-docker-執行-agent)。
 
 ## 快速開始

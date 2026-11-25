@@ -8,6 +8,25 @@ version until 1.0.
 
 ### Changed
 
+- **Engine images as current state (#282).** A finished download on a model's page and a machine's page says only
+  when and how the model came (*Downloaded 9 d ago via the server*); it no longer adds *with the … engine*, which read
+  as history once the image was removed or replaced. Whether an engine's image or program is on a machine is shown
+  as it is now:
+  - the deploy page, once a machine is chosen, says whether that machine has the engine image and, when not, how it
+    comes (pulled, through the server, or directly and through the server when that fails), with its size when a
+    machine's image listing shows it; the placement's lines say the same for each replica;
+  - a model's page and an engine's page say how a missing image or program comes, and its size.
+  - API (added keys only): each machine's engine entry on `GET /api/models/{name}` and `GET /api/recipes/{name}`
+    gains `via` (`direct`, `server` or `auto`) and `size` (bytes or null); each placed replica of
+    `POST /api/deployments/estimate` gains `engine` with the same fields. The downloads API keeps `recipe` and
+    `engine_only`.
+- **A model's page judges a machine without a usable GPU on its CPU (#282).** A machine with no GPU the engine can use
+  (an AMD APU for faster-whisper) showed *does not fit: no allowed GPU that faster-whisper supports* next to a CPU
+  variant whose image was there. It is now judged on its CPU: *fits on the CPU*, with the memory a copy uses out of
+  the machine's system memory (on an APU the system memory, not the GPU's part), and **Deploy here (CPU)** opens the
+  deploy page with **Runs on** → **CPU only**.
+- **Every machine command says where it runs (#282).** **Add a machine** (each way) and **Update the agent** say to run
+  the command on that machine in a Linux shell (bash), and to SSH in first when it is another computer.
 - **ROADMAP: 1.6.0 single sign-on (OIDC) and two-factor sign-in move to the community edition** (#39). The enterprise
   edition keeps SAML, SCIM, group sync, SSO-only sign-in and several identity providers.
 - **A CI test run that hangs leaves its stacks in the log.** The pytest steps run under `timeout --signal=ABRT` 40
@@ -15,6 +34,15 @@ version until 1.0.
   outside a single test (collection, session hooks, a thread left behind at interpreter exit) prints every thread's
   stack and fails the step, which keeps its log. Before, the job was cancelled at its limit with no log (#286).
   pytest-timeout still fails a single test after 5 minutes.
+
+### Added
+
+- **Windows (WSL2) on Add a machine → Docker (#282).** The NVIDIA command for an agent in Docker inside a WSL2
+  distribution: `--gpus all` without the `/dev/nvidia*` loop (WSL2 has no such devices), with what the machine needs
+  (the NVIDIA driver for Windows, Docker Engine and the NVIDIA Container Toolkit in the distribution) and a warning for
+  a model directory under `/mnt/c`. A machine whose agent reports a WSL2 kernel gets **Update the agent** with "use the
+  shell of its WSL2 distribution". Guide: [Add a Windows machine (WSL2)](docs/guide/how-to.md#add-a-windows-machine-wsl2).
+  Not verified on real hardware yet.
 
 ## [1.5.5] — 2026-11-25
 

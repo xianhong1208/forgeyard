@@ -68,11 +68,57 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
 
 部署時，選擇 **執行於** → **僅 CPU**。把 **CPU threads** 設成你想讓它使用的核心數：執行緒數超過空閒的核心數，只會讓 llama.cpp 變慢，不會變快。
 
+## 加入 Windows 機器（WSL2）
+
+> **還沒有在實機上驗證過。** 這些步驟依照 NVIDIA 和 Docker 對 WSL2 上 CUDA 的說明。如果你的機器上有不一樣的地方，請回報。
+
+有 NVIDIA GPU 的 Windows 電腦，是在 WSL2 Linux 發行版裡用 Docker 執行 agent。這裡的每個指令都在那個發行版的 shell 裡執行（在 PowerShell 輸入 `wsl` 開啟），不是在 PowerShell 裡。
+
+1. 在 Windows 上安裝 Windows 版的 NVIDIA 驅動程式。它已經包含 WSL2 的支援：發行版裡不要再裝 Linux 的 NVIDIA 驅動程式。
+2. 在 PowerShell 執行 `wsl --install -d Ubuntu`（或用你已經有的發行版），再用 `wsl` 開啟它。在它的 `/etc/wsl.conf` 開啟 systemd，讓 Docker 隨發行版一起啟動，然後在 PowerShell 執行一次 `wsl --shutdown` 讓設定生效：
+
+   ```ini
+   [boot]
+   systemd=true
+   ```
+
+3. 在發行版裡安裝 Docker Engine 和 NVIDIA Container Toolkit，並確認容器看得到 GPU：
+
+   ```bash
+   sudo docker run --rm --gpus all ubuntu nvidia-smi
+   ```
+
+   使用 WSL2 後端的 Docker Desktop 也可以。不支援 GPU 的 Docker 替代品能啟動 agent，但無法在 GPU 上執行模型。
+4. **機器** → **加入機器** → **Docker** → **Windows 機器（WSL2）**，填好表單，在發行版裡執行指令：
+
+   ```bash
+   sudo docker run -d --name forgeyard-agent --restart always --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_JOIN_TOKEN=fyj_… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.5
+   ```
+
+   它就是 NVIDIA 的指令少了 `$(for d in /dev/nvidia…)` 那一行：WSL2 透過 `/dev/dxg` 提供 GPU，沒有 `/dev/nvidia*` 裝置。模型目錄請放在發行版自己的磁碟上（預設的 `/srv/forgeyard-models`）。放在 `/mnt/c` 底下也能用，但每個檔案都要經過 WSL 的檔案共用，慢上好幾倍；輸入這種目錄時，頁面會提醒你。
+5. 伺服器必須連得到這台機器的副本連接埠（**進階** → **連接埠範圍**）。WSL 預設的網路模式（NAT）只有這台 Windows 電腦連得到發行版。請在 `%UserProfile%\.wslconfig` 改用鏡像網路模式（Windows 11 22H2 以上），執行 `wsl --shutdown`，並在 Windows 防火牆開放這個連接埠範圍：
+
+   ```ini
+   [wsl2]
+   networkingMode=mirrored
+   ```
+
+機器頁面會從核心版本（`…-microsoft-standard-WSL2`）認出 WSL2 機器，它的 **更新 agent** 區塊會提醒你在發行版的 shell 裡執行指令。
+
 ## 用 Docker 執行 agent
 
 每台機器執行一個 `docker run`，取代安裝腳本。每個版本發布時，都會把 agent 映像檔發布到 Docker Hub 的 `docker.io/tonyhuang1101/forgeyard-agent`，支援 linux/amd64 和 linux/arm64（AMD 顯示卡只能用 amd64：ROCm 只支援 x86_64），tag 就是該版本的版本號。指令會拉取和你的伺服器相符的那一版。
 
-**機器** → **加入機器** → **Docker** 會幫你產生這個指令：選好機器的顯示卡（NVIDIA、AMD 或 僅 CPU），再填好指令上方的表單。指令會隨著你輸入即時更新，**複製** 複製的就是畫面上顯示的內容，填過的值也會記在這個瀏覽器裡，下一台機器直接沿用：
+**機器** → **加入機器** → **Docker** 會幫你產生這個指令：選好機器的顯示卡（NVIDIA、AMD、僅 CPU，或 [Windows 機器（WSL2）](#add-a-windows-machine-wsl2)），再填好指令上方的表單。和那個頁面上的每個指令一樣，它要在你加入的機器上用 Linux shell（bash）執行；如果是另一台電腦，先用 SSH 連進去。指令會隨著你輸入即時更新，**複製** 複製的就是畫面上顯示的內容，填過的值也會記在這個瀏覽器裡，下一台機器直接沿用：
 
 - **那台機器上的模型目錄**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **機器名稱**（選填）：這台機器在 **機器** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
@@ -1163,7 +1209,7 @@ sudo systemctl enable --now forgeyard
 - **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。
 - **從原始碼執行的**：`git checkout` 伺服器的版本並執行 `uv sync`，然後用你原本的方式重新啟動 agent。
 
-複製指令，在那台機器上執行。替換 agent 時，它的模型會繼續執行；volume（或 install.sh 的狀態目錄）會保留這台機器，幾秒內它就會以原本的身分重新上線。
+複製指令，在那台機器上用 Linux shell（bash）執行；區塊會在指令上方寫明（如果是另一台電腦，先用 SSH 連進去）。在 [Windows 機器](#add-a-windows-machine-wsl2) 上（核心版本含有 `microsoft-standard-WSL2`），它會提醒你改用 WSL2 發行版的 shell，而不是 PowerShell。替換 agent 時，它的模型會繼續執行；volume（或 install.sh 的狀態目錄）會保留這台機器，幾秒內它就會以原本的身分重新上線。
 
 agent 從不回報任何秘密：不回報 join token（已加入的機器不再需要它）、不回報它的憑據，也不回報名稱或值看起來像秘密的變數（`…TOKEN`、`…KEY`、`…PASSWORD`、Hugging Face 或 GitHub 的 token、含密碼的 URL）。這類變數會顯示為 `-e NAME="$NAME"`：請先在 shell 裡設定它（`export HF_TOKEN=…`），頁面上也會提醒。無法安全重現的值會被略過，並列出名稱。
 
@@ -1362,13 +1408,15 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 **模型頁面**（`/models/<name>`）最上面一行是重點（任務、大小、授權、用第一個推論引擎的預設值一份副本需要多少、有幾個部署），下面是跳到各區段的連結：
 
 - **概覽**：來源與版本（附 Hugging Face 連結）、授權、任務和它在 `/v1` 底下回應的路徑、架構。
-- **機器**：每台機器的模型快取裡有沒有這個模型（以它的 agent 最後一次回報為準，附在那裡的大小和誰在用）、一份副本現在**放不放得下**（先看 GPU，再看 CPU；和部署頁面同一個估算，用推論引擎的預設值），以及它會用的推論引擎變體和那個映像檔或程式是否已經在那裡。在表格上方選另一個推論引擎，就會看到那個推論引擎的結果。**部署到這裡** 和 **下載到這裡** 會從那台機器開始。
+- **機器**：每台機器的模型快取裡有沒有這個模型（以它的 agent 最後一次回報為準，附在那裡的大小和誰在用）、一份副本現在**放不放得下**（先看 GPU，再看 CPU；和部署頁面同一個估算，用推論引擎的預設值），以及它會用的推論引擎變體和那個映像檔或程式現在是否在那裡。在表格上方選另一個推論引擎，就會看到那個推論引擎的結果。**部署到這裡** 和 **下載到這裡** 會從那台機器開始。
+  - 沒有推論引擎能用的 GPU 的機器（例如 faster-whisper 遇到 AMD APU：它的 CTranslate2 只能在 CUDA 上執行），會改看它的 CPU：*放得下（用 CPU）*，並寫出一份副本會用掉機器系統記憶體中的多少。在 APU 上，這是系統記憶體，不是分給 GPU 的那一塊（例如 31 GiB，而不是 GPU 的 96 GiB）。**部署到這裡（用 CPU）** 會開啟部署頁面，**執行於** 已選 **僅 CPU**（`gpus: 0`）。
+  - 映像檔或程式不在那裡時，會寫出部署啟動時它怎麼來：由機器自己拉取（或下載）、經由伺服器（設成經由伺服器取得檔案的機器），或先直接取得、失敗時改經由伺服器；有機器的映像檔清單列出它時，也會寫出映像檔大小。
 - 這個模型的 **部署**，和 **可以執行它的推論引擎**（各自連到推論引擎頁面）。
 - **檔案**，收成一行（機器會下載幾個檔案、總大小、模型檔）；**顯示檔案** 會列出每個檔案和大小，以及儲存庫裡不會下載的其他檔案（其他量化版本和投影器檔）。
 
 **部署**、**下載到…** 和 **移除** 在最上面，和目錄裡一樣。管理員可以在這裡設定**顯示名稱**，例如把 `accept-qwen3-4b` 顯示成 *Qwen3 4B*；留空就顯示名稱。名稱本身不會改變。
 
-**推論引擎頁面**（`/models/engines/<name>`）有 **概覽**（它服務什麼、在哪個路徑、讀哪些格式、怎麼共用 GPU）、**變體**（每種硬體的映像檔或程式、映像檔是否以 digest 釘選、機器需要什麼，以及把映像檔帶到連不到 registry 的機器的指令）、**機器**（每台機器會用的變體，以及映像檔是否已在那台機器的容器引擎裡（以它最後一次列出的映像檔為準），或程式是否在模型快取裡）、**參數**（收成一行：預設值和範圍），以及使用它的**部署**和**目錄模型**。打開頁面時，連線中的機器如果上次列出映像檔已超過十分鐘，會重新列一次；**重新列出** 會立刻再問一次。離線的機器顯示它最後一次的清單。管理員可以在這裡**編輯**或**刪除**自訂推論引擎，或把內建推論引擎**複製**成自訂推論引擎（例如試用較新的映像檔）。
+**推論引擎頁面**（`/models/engines/<name>`）有 **概覽**（它服務什麼、在哪個路徑、讀哪些格式、怎麼共用 GPU）、**變體**（每種硬體的映像檔或程式、映像檔是否以 digest 釘選、機器需要什麼，以及把映像檔帶到連不到 registry 的機器的指令）、**機器**（每台機器會用的變體，以及映像檔是否已在那台機器的容器引擎裡（以它最後一次列出的映像檔為準），或程式是否在模型快取裡；不在時，寫出它怎麼來和大小，和模型頁面一樣）、**參數**（收成一行：預設值和範圍），以及使用它的**部署**和**目錄模型**。打開頁面時，連線中的機器如果上次列出映像檔已超過十分鐘，會重新列一次；**重新列出** 會立刻再問一次。離線的機器顯示它最後一次的清單。管理員可以在這裡**編輯**或**刪除**自訂推論引擎，或把內建推論引擎**複製**成自訂推論引擎（例如試用較新的映像檔）。
 
 ## 查看推論引擎有沒有新版本
 
@@ -1471,7 +1519,7 @@ Forgeyard 把每個內建推論引擎釘選在一個版本（vLLM 0.32.0、llama
 3. **連同推論引擎** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的推論引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
 4. 按 **下載到 N 台機器**。
 
-進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**取消** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **下載到…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **快取中的模型** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
+進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。下載完成的那一行只寫模型什麼時候、怎麼來的（*9 天前下載完成，經由伺服器*）。推論引擎的映像檔在不在機器上，不寫在這一行：它之後可能被移除或換掉，所以推論引擎頁面和部署頁面會顯示它現在的狀態。**取消** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **下載到…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **快取中的模型** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
 
 每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
 
