@@ -4,6 +4,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "../auth";
 import { useT } from "../i18n/react";
 import { AuthFrame } from "../components/AuthFrame";
+import { SignInWith } from "../components/Sso";
 import { Splash } from "../components/Splash";
 import { Field, Notice } from "../components/ui";
 import { api, ApiError, errorText } from "../lib/api";
@@ -121,6 +122,7 @@ export function LoginPage() {
           value={password} onChange={(e) => setPassword(e.target.value)} />
         <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? t("auth.login.busy") : t("auth.login.submit")}</button>
       </form>
+      {state.sso && <SignInWith name={state.sso.name} next={next} />}
       <p className="auth-foot">
         {t.rich("auth.login.guide", { link: (text) => <Link to="/guide">{text}</Link> })}
       </p>

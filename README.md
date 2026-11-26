@@ -75,6 +75,11 @@ them where they fit, and every program calls them at `/v1` with an API key.
   after which people can only add it; API keys keep working. Admins see who has it, Setup health names admins
   without it, an admin can reset it for someone who lost both, and `forgeyard users reset-mfa` on the server host is
   the owner's way back in.
+- **Single sign-on (1.6.0).** People sign in through your OpenID Connect identity provider (Keycloak, Authentik,
+  Microsoft Entra ID, Google) next to their password. Accounts are found by the provider's issuer and subject, never
+  by e-mail; someone new waits for an admin's approval, or gets an account at once from allowed e-mail domains; an
+  existing account is linked by its owner; one claim can set the role. The provider does its own two-factor sign-in.
+  API keys keep working until an admin disables the account.
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging

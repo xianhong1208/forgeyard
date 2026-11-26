@@ -6,22 +6,25 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useT } from "../i18n/react";
 import { ApiError, errorText, notifyUnauthorized, type ErrorDetail } from "../lib/api";
 import { BACKUP_PASSPHRASE_MIN, backupFilename, passphraseProblem } from "../lib/keyBackup";
+import { isFresh } from "../lib/sso";
 import type { SecretKeyInfo } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { ConfirmWithSso } from "./Sso";
 import { CopyBox, Notice } from "./ui";
 
 export type KeyBackupDone = { kid: string; file: string };
 
 // POST the form, then hand the answer to the browser as a file. Not api(): the answer is a file,
 // and a 401 here is a wrong password (code wrong_password) unless the session really ended.
-export async function downloadKeyBackup(password: string, passphrase: string, confirm: string, code?: string): Promise<KeyBackupDone> {
+export async function downloadKeyBackup(password: string | null, passphrase: string, confirm: string, code?: string): Promise<KeyBackupDone> {
   let res: Response;
   try {
     res = await fetch("/api/secret-key/backup", {
       method: "POST",
       credentials: "same-origin",
       headers: { "X-Forgeyard": "1", "Content-Type": "application/json", Accept: "application/octet-stream" },
-      body: JSON.stringify({ password, passphrase, passphrase_confirm: confirm, ...(code ? { code: code.replace(/\s+/g, "") } : {}) }),
+      body: JSON.stringify({ ...(password !== null ? { password } : {}), passphrase, passphrase_confirm: confirm,
+        ...(code ? { code: code.replace(/\s+/g, "") } : {}) }),
     });
   } catch {
     throw new ApiError(0, { code: "network", message: "Cannot reach the Forgeyard server." });
@@ -80,7 +83,11 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
 
   const problem = passphraseProblem(passphrase, confirm, password);
   const needsCode = Boolean(info.data?.has_mfa);
-  const ready = password.length > 0 && problem === null && !busy;
+  // 1.6.0 (PR 3): an admin without a password (single sign-on only) confirms with a fresh sign-in at the identity
+  // provider, or with a code from their authenticator app.
+  const sso = !!info.data && !info.data.has_password && !!info.data.sso_linked;
+  const fresh = sso && isFresh(info.data?.fresh_until);
+  const ready = (sso ? fresh || code.trim().length > 0 : password.length > 0) && problem === null && !busy;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -89,7 +96,7 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
     setBusy(true);
     setError(null);
     try {
-      const d = await downloadKeyBackup(password, passphrase, confirm, needsCode ? code : undefined);
+      const d = await downloadKeyBackup(sso ? null : password, passphrase, confirm, needsCode ? code : undefined);
       setPassword("");
       setCode("");
       setPassphrase("");
@@ -143,16 +150,20 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
                 )}
               </dl>
             )}
-            {i && !i.has_password ? (
+            {i && !i.has_password && !sso ? (
               <Notice tone="error">{t("advisor.backup.noPassword")}</Notice>
             ) : (
               <>
-                <div className="field">
-                  <label htmlFor="keybak-password">{t("advisor.backup.password")}</label>
-                  <input id="keybak-password" type="password" autoComplete="current-password" value={password}
-                    onChange={(e) => setPassword(e.target.value)} />
-                </div>
-                {needsCode && (
+                {sso ? (
+                  <ConfirmWithSso leadKey="sso.fresh.leadBackup" />
+                ) : (
+                  <div className="field">
+                    <label htmlFor="keybak-password">{t("advisor.backup.password")}</label>
+                    <input id="keybak-password" type="password" autoComplete="current-password" value={password}
+                      onChange={(e) => setPassword(e.target.value)} />
+                  </div>
+                )}
+                {needsCode && !fresh && (
                   <div className="field">
                     <label htmlFor="keybak-code">{t("advisor.backup.code")}</label>
                     <input id="keybak-code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code}
@@ -178,7 +189,7 @@ export function KeyBackupDialog({ onClose }: { onClose: (done: KeyBackupDone | n
             )}
             <div className="dlg-foot">
               <button type="button" className="btn btn-quiet" onClick={close}>{t("common.cancel")}</button>
-              <button type="submit" className="btn btn-primary" disabled={busy || !i || !i.has_password}>
+              <button type="submit" className="btn btn-primary" disabled={busy || !i || (!i.has_password && !sso)}>
                 <IconDownload size={16} aria-hidden="true" /> {busy ? t("advisor.backup.busy") : t("advisor.backup.submit")}
               </button>
             </div>

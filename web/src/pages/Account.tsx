@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { useLocation } from "react-router";
 
 import { useAuth } from "../auth";
+import { SsoLinkPanel } from "../components/Sso";
 import { TwoFactorPanel } from "../components/TwoFactor";
 import { Field, Notice, PageHeader, RoleChip } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -31,7 +33,11 @@ export function AccountPage() {
   const { user, signOut } = useAuth();
   const { data, error: listError, reload: load } = useApi<{ sessions: SessionRow[]; idle_minutes?: number; max_days?: number }>("/auth/sessions");
   const sessions = data?.sessions ?? null;
-  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const location = useLocation();
+  // Back from linking at the identity provider (SsoCallback passes how it went).
+  const linked = (location.state as { sso?: string } | null)?.sso === "link";
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(
+    linked ? { tone: "ok", text: t("sso.panel.linked") } : null);
   const [pw, setPw] = useState({ current_password: "", new_password: "", confirm: "" });
   const [busy, setBusy] = useState(false);
 
@@ -95,6 +101,7 @@ export function AccountPage() {
             {user?.email && <><dt>{t("admin.account.email")}</dt><dd>{user.email}</dd></>}
             <dt>{t("admin.account.lastSignIn")}</dt><dd title={exact(user?.last_login_at)}>{when(user?.last_login_at)}</dd>
           </dl>
+          {user?.has_password ? (<>
           <h2 className="panel-gap">{t("admin.account.changePassword")}</h2>
           <form className="stack" onSubmit={changePassword}>
             <input type="text" name="username" autoComplete="username" value={user?.username ?? ""} readOnly hidden />
@@ -107,7 +114,9 @@ export function AccountPage() {
               value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} error={mismatch ? t("admin.account.mismatch") : null} />
             <div><button className="btn btn-primary" disabled={busy || mismatch}>{busy ? t("admin.account.saving") : t("admin.account.changePassword")}</button></div>
           </form>
+          </>) : <p className="muted small panel-gap">{t("sso.account.noPassword")}</p>}
         </section>
+        <SsoLinkPanel say={setMessage} />
         <TwoFactorPanel say={setMessage} onChange={load} />
         </div>
         <section className="panel">

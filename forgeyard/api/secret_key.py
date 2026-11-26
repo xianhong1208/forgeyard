@@ -4,7 +4,8 @@
   confirmed backup. Admins only.
 - `POST /api/secret-key/backup`: the admin's password again (checked like a sign-in: the same
   back-off, and a wrong one is audited), a current code from their authenticator app when they have one
-  (1.6.0, #39), and a passphrase they choose (12+ characters, typed twice,
+  (1.6.0, #39), and a passphrase they choose. An admin without a password (single sign-on only, 1.6.0 PR 3) confirms
+  with a fresh sign-in through the identity provider (in the last 5 minutes) or a current authenticator code instead (12+ characters, typed twice,
   not their password). Answers the file (forgeyard/security/keybackup.py has the format) with
   Cache-Control: no-store, as an attachment named after the key id and the date. Neither the
   passphrase nor the file is kept or logged. A download counts as the backup the setup advisor asks
@@ -22,9 +23,10 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import advisor, audit
 from forgeyard.api.deps import Caller, fail, require_admin
+from forgeyard.api.mfa import fresh_sso
 from forgeyard.config import get_settings
 from forgeyard.db import ServerSetting, get_db, utcnow
-from forgeyard.security import crypto, keybackup, mfa, passwords, tls
+from forgeyard.security import crypto, keybackup, mfa, passwords, sso, tls
 from forgeyard.security.ratelimit import limiter, retry_after
 
 router = APIRouter(prefix="/api/secret-key", tags=["secret key"])
@@ -49,17 +51,36 @@ def secret_key_info(caller: Caller = Depends(require_admin), db: DbSession = Dep
         "tls_mode": tls.mode(),
         "has_password": caller.user.password_hash is not None,
         "has_mfa": mfa.has_factor(db, caller.user.id),
+        # 1.6.0 (PR 3): an admin without a password signs in again through the identity provider (or types a code).
+        "sso_linked": bool(sso.identities_of(db, caller.user.id)),
+        "fresh_until": caller.session.fresh_until,
         "passphrase_min": keybackup.PASSPHRASE_MIN,
         "backed_up": last if last and last.get("kid") == c.kid else None,
     }
 
 
 class BackupIn(BaseModel):
-    password: str = Field(max_length=1024)
+    # Not needed by an admin without a password (they confirm with a fresh SSO sign-in or a code).
+    password: Optional[str] = Field(default=None, max_length=1024)
     passphrase: str = Field(max_length=keybackup.PASSPHRASE_MAX)
     passphrase_confirm: str = Field(max_length=keybackup.PASSPHRASE_MAX)
     # A current code from the admin's authenticator app; needed when they have one.
     code: Optional[str] = Field(default=None, max_length=64)
+
+
+def _confirm_without_password(db: DbSession, caller: Caller, body: BackupIn, two_factor: bool) -> None:
+    user = caller.user
+    if (body.code or "").strip():
+        if two_factor and mfa.check_totp(db, user.id, body.code) is not None:
+            return
+        limiter.login_failed(user.username, caller.ip)
+        audit.record(db, "secret_key.backup_failed", actor=user, ip=caller.ip, reason="wrong_code")
+        db.commit()
+        raise fail(400, "mfa_code_invalid", "That code is not right.")
+    if fresh_sso(caller):
+        return
+    raise fail(400, "fresh_sign_in_required", "Sign in again through your identity provider (or type a code from your "
+                                              "authenticator app) to download the backup.")
 
 
 @router.post("/backup")
@@ -72,7 +93,8 @@ def download_backup(body: BackupIn, caller: Caller = Depends(require_admin), db:
     if wait:
         raise fail(429, "rate_limited", "Too many wrong passwords. Wait before trying again.",
                    retry_after=retry_after(wait))
-    if user.password_hash is None:
+    two_factor = mfa.has_factor(db, user.id)
+    if user.password_hash is None and not (two_factor or sso.identities_of(db, user.id)):
         raise fail(409, "no_password", "Your account has no password to confirm this with. Set one first (an admin can "
                                        "send you a link), then download the backup.")
     problem = keybackup.passphrase_problem(body.passphrase)
@@ -80,19 +102,22 @@ def download_backup(body: BackupIn, caller: Caller = Depends(require_admin), db:
         raise fail(422, "weak_passphrase", problem)
     if body.passphrase != body.passphrase_confirm:
         raise fail(422, "passphrase_mismatch", "The two passphrases are not the same.")
-    if body.passphrase == body.password:
+    if body.password and body.passphrase == body.password:
         raise fail(422, "passphrase_is_password", "Choose a passphrase that is not your password: the backup must stay "
                                                   "safe if your password is ever known.")
-    two_factor = mfa.has_factor(db, user.id)
-    if two_factor and not (body.code or "").strip():
+    if user.password_hash is None:
+        # Single sign-on only (1.6.0 PR 3): a current authenticator code, or a sign-in through the identity provider
+        # that asked for the password again in the last 5 minutes.
+        _confirm_without_password(db, caller, body, two_factor)
+    elif two_factor and not (body.code or "").strip():
         raise fail(400, "mfa_code_required", "Type the code your authenticator app shows now.")
-    if not passwords.verify_password(user.password_hash, body.password):
+    if user.password_hash is not None and not passwords.verify_password(user.password_hash, body.password or ""):
         limiter.login_failed(user.username, caller.ip)
         audit.record(db, "secret_key.backup_failed", actor=user, ip=caller.ip, reason="wrong_password")
         db.commit()
         # 401 with its own code: the console tells it apart from an ended session.
         raise fail(401, "wrong_password", "That is not your password.")
-    if two_factor and mfa.check_totp(db, user.id, body.code) is None:
+    if user.password_hash is not None and two_factor and mfa.check_totp(db, user.id, body.code) is None:
         limiter.login_failed(user.username, caller.ip)
         audit.record(db, "secret_key.backup_failed", actor=user, ip=caller.ip, reason="wrong_code")
         db.commit()

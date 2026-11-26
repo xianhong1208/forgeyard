@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { MfaPolicyPanel } from "../components/MfaRequired";
+import { SsoProviderPanel } from "../components/Sso";
 import { formatDate } from "../i18n/format";
 import { useAuth } from "../auth";
 import { CopyBox, Field, Notice, PageHeader, StatusChip } from "../components/ui";
@@ -156,7 +157,8 @@ export function UsersPage() {
                           </span>)}
                     </div>
                     {u.email && <div className="muted small">{u.email}</div>}
-                    {!u.has_password && u.status !== "pending" && <div className="muted small">{t("admin.users.noPassword")}</div>}
+                    {u.sso_linked && <div className="muted small">{t("sso.users.linked")}</div>}
+                    {!u.has_password && !u.sso_linked && u.status !== "pending" && <div className="muted small">{t("admin.users.noPassword")}</div>}
                     </div>
                   </td>
                   <td data-label={t("admin.users.col.role")}>
@@ -215,6 +217,7 @@ export function UsersPage() {
         </table>
       </div>
       <MfaPolicyPanel say={(m) => { setMessage(m); load(); }} />
+      <SsoProviderPanel say={(m) => { setMessage(m); load(); }} />
     </>
   );
 }

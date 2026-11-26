@@ -625,5 +625,10 @@ password; self-registration is off unless `REGISTRATION=approval`.
   host. It applies to signing in to the console only: API keys work as before. See
   [Turn on two-factor sign-in](how-to.md#turn-on-two-factor-sign-in) and
   [Require two-factor for everyone](how-to.md#require-two-factor-for-everyone).
+- **Single sign-on** (1.6.0): an admin can set one OpenID Connect identity provider (Keycloak, Authentik, Entra ID,
+  Google) on **Users**, and people then also sign in through it. Its accounts are matched by the provider's issuer and
+  subject, never by e-mail; someone new waits for approval (or gets an account at once from allowed e-mail domains),
+  and an existing account is linked by its owner in **My account**. The provider does its own two-factor sign-in. See
+  [Sign in with single sign-on (OIDC)](how-to.md#sign-in-with-single-sign-on-oidc).
 - The **Audit log** (admins) records sign-ins, failed sign-ins, changes to accounts, machines, models,
   keys and providers, and budget alerts.

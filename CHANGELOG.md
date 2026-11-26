@@ -52,6 +52,42 @@ version until 1.0.
 - **Setup health**: `admins-without-mfa` becomes a warning while two-factor sign-in is required of admins, and a new
   note `mfa-setup-pending` counts the people still in the grace period and past it. Both send `facts` (the names,
   counts and first deadline) with the finding, so the console writes their detail in Traditional Chinese too.
+- **Single sign-on through an OpenID Connect provider** (#39, 1.6.0 PR 3): Keycloak, Authentik, Microsoft Entra ID,
+  Google or any provider with a discovery document; one per server, set by admins on **Users** (name, issuer with a
+  **Check** of its discovery document, client id, client secret, scopes, what happens to someone new, allowed e-mail
+  domains, an optional role claim and mapping). The sign-in page offers **Sign in with <name>** under the password
+  form. Authorization code flow with PKCE (S256), `state` and `nonce`; the ID token must be signed with RS256 or
+  ES256 by a key from the provider's JWKS, from the configured issuer, for this client id, unexpired, with this
+  sign-in's nonce. The provider sends the browser to the web UI's `/sso/callback`, which finishes the sign-in with a
+  same-origin `POST /api/auth/sso/finish`, so the `SameSite=Strict` session cookie stays as it is. A half-done
+  sign-in lives 10 minutes in the server's memory, once only, and only in the browser that started it.
+- **Accounts from the provider are found by issuer and subject, never by e-mail.** Someone new gets a pending account
+  (an admin approves it on **Users**) or, with **automatic accounts**, an active one, which needs allowed e-mail
+  domains; the domains limit both. An existing account is linked by its owner in **My account** (password or code
+  first, then a fresh sign-in at the provider) and unlinked while a password remains. A disabled account cannot sign
+  in. With a role claim and mapping, each sign-in sets the role (the highest match; *user* when none; unchanged when
+  the claim is missing); never the owner's.
+- **Sessions through the provider are exempt from required two-factor sign-in** (the provider does its own), and
+  accounts without a password are not counted as missing it. Where a password is asked again (the secret-key backup,
+  adding an authenticator), an account without one signs in again at the provider (`max_age=0`, plus `prompt=login`
+  except at Google) and has 5 minutes, or types an authenticator code.
+- Audit log: `auth.sso_login`, `auth.sso_login_failed` (with the reason), `user.registered` (`via: sso`),
+  `user.identity_linked`, `user.identity_unlinked`, `idp.created`, `idp.changed` (never with the secret),
+  `idp.deleted`. API: `GET` / `PUT` / `DELETE /api/identity-provider`, `POST /api/identity-provider/check`,
+  `POST /api/auth/sso/start`, `POST /api/auth/sso/finish`, `GET /api/auth/sso/identities`, `POST /api/auth/sso/unlink`;
+  `GET /api/auth/state` carries `sso` and `session` (`auth_method`, `fresh_until`), `GET /api/auth/me` the same in
+  its `session`, `GET /api/secret-key` `sso_linked` and `fresh_until`; `POST /api/secret-key/backup` takes no
+  password from an account without one.
+- New setting `SSO_CA_FILE`: a CA to trust for an identity provider inside your network.
+- **Migration `0021_single_sign_on`**: new tables `identity_providers` (the client secret encrypted with the server's
+  secret key) and `user_identities` (unique issuer and subject; deleted with the account or the provider), and
+  `sessions.auth_method` (`password` for every existing session) and `sessions.fresh_until`. With no provider set
+  up nothing changes. Going down drops them; accounts made through the provider stay and need a set-password link.
+- `python -m forgeyard secrets reset` also drops an identity provider's client secret it can no longer read, and turns
+  the provider off.
+- New server dependency (the `server` extra): **Authlib 1.9.10** (BSD-3) for the token request and its client
+  authentication, with **joserfc 1.8.0** (BSD-3, installed with it) for the ID token's signature. Without them the
+  console says single sign-on is unavailable; the agent does not carry them.
 
 ### Changed
 

@@ -1020,6 +1020,50 @@ docker exec <server container> python -m forgeyard users reset-mfa <username>   
 
 如果伺服器的加密金鑰永久遺失，[`secrets reset`](#back-up-and-restore) 會移除所有驗證器，因為它已經讀不到它們了。
 
+## 用單一登入（OIDC）登入
+
+大家可以透過貴單位的身分提供者，用 OpenID Connect 登入（1.6.0）：Keycloak、Authentik、Microsoft Entra ID、Google，或任何有公布探索文件（discovery document）的身分提供者。一台伺服器設定一個身分提供者。有密碼的人仍然可以用密碼登入。
+
+登入使用授權碼流程，並搭配 PKCE、`state` 和 `nonce`。Forgeyard 只接受這樣的 ID 權杖：用 RS256 或 ES256 簽署、簽署的金鑰是身分提供者公布的、發給它自己的用戶端 ID、來自你設定的簽發者，而且還沒過期。
+
+### 在身分提供者註冊 Forgeyard
+
+每個身分提供者都會要你填 **重新導向 URI**。請從 **使用者 → 單一登入（OIDC）** 複製：它是 `PUBLIC_URL` 後面加上 `/sso/callback`，例如 `https://forgeyard.example.com:7860/sso/callback`。請設定 `PUBLIC_URL`（[網路與位址](reference.md#network-and-addresses)），這個網址才不會跟著別人輸入的位址變動。
+
+- **Keycloak**：在 realm 裡選 **Clients → Create client**，類型選 *OpenID Connect*，開啟 **Client authentication**，只勾 **Standard flow**，**Valid redirect URIs** 填重新導向 URI。用戶端密鑰在它的 **Credentials** 分頁。簽發者是 `https://<主機>/realms/<realm>`。如果要依群組決定角色，請在這個用戶端專用的 scope 加一個 *Group Membership* mapper，權杖宣告名稱填 `groups`，並關閉 **Full group path**。
+- **Authentik**：選 **Applications → Providers → Create**，類型 *OAuth2/OpenID Provider*，用戶端類型 *Confidential*，重新導向 URI 設為完全相符（strict），再建立一個使用它的 application。簽發者是 `https://<主機>/application/o/<application slug>/`（結尾有斜線，和 Authentik 公布的寫法一樣）。
+- **Microsoft Entra ID**：選 **App registrations → New registration**，選 *Accounts in this organizational directory only*，平台選 *Web* 並填入重新導向 URI；再到 **Certificates & secrets** 建立用戶端密鑰。簽發者是 `https://login.microsoftonline.com/<租用戶 ID>/v2.0`。要依角色對應時，請定義並指派 app roles（會出現在 `roles` 宣告）。`groups` 宣告也可以用，但一個人屬於超過 200 個群組時，Entra 不會把它放進權杖。Entra 不會驗證使用者自己在個人資料填的電子郵件地址：新帳號請維持等待核准，或只在單一租用戶的 app 上使用允許的網域。
+- **Google**：在 Google Cloud 主控台選 **APIs & Services → Credentials → Create credentials → OAuth client ID**，類型選 *Web application*，在 **Authorized redirect URIs** 填入重新導向 URI。簽發者是 `https://accounts.google.com`。Google 不接受直接用 IP 位址的重新導向 URI（`https://192.168.1.20:7860/…`），除了 `localhost` 之外也不接受純 `http://`，所以伺服器必須用 DNS 名稱、透過 HTTPS 連線（用你自己的憑證，或在前面放一台 proxy）。任何有 Google 帳號的人都能在 Google 登入，所以請設定 **允許的電子郵件網域**。Google 不會送群組資訊，角色請在 **使用者** 頁面設定。
+
+### 在 Forgeyard 設定
+
+在 **使用者** 頁面的 **單一登入（OIDC）** 底下（限管理員）：
+
+1. **名稱**：登入頁會顯示「使用 <名稱> 登入」。
+2. **簽發者 URL**，然後按 **檢查**：Forgeyard 會讀取身分提供者的探索文件，並告訴你找到了什麼。
+3. **用戶端 ID** 和 **用戶端密鑰**。密鑰會用伺服器的密鑰加密，之後不會再顯示；欄位留空就會保留原本的密鑰。如果是公開用戶端（只靠 PKCE），請勾選 **不使用用戶端密鑰**。
+4. **範圍（scopes）**：預設是 `openid email profile`。如果你的身分提供者需要額外的範圍，才會把群組或角色放進 ID 權杖，請加上去。
+5. **有新的人登入時**：*等管理員核准*（預設），或 *直接建立可用的帳號*，後者至少要設定一個 **允許的電子郵件網域**。
+6. 視需要設定 **由身分提供者決定角色**（見下方），然後勾選 **開啟單一登入** 並按 **儲存**。在開啟狀態下儲存時，會再讀一次探索文件，無法使用的身分提供者會被拒絕。
+
+之後登入頁的密碼表單下方會出現 **使用 <名稱> 登入**。如果身分提供者在你的內部網路，憑證是自家 CA 簽發的，請設定 `SSO_CA_FILE`（[帳號與登入](reference.md#accounts-and-sign-in)）。按 **移除** 會刪除身分提供者和所有連結到它的帳號連結；帳號本身會保留，沒有密碼的帳號之後需要管理員在 **使用者** 頁面給設定密碼的連結。
+
+### 誰能登入、拿到什麼角色
+
+- **帳號是依身分提供者的簽發者和主體（subject）找到的，絕不依電子郵件。** 就算某人在身分提供者的電子郵件和現有的人一樣，也進不了那個人的帳號，而是會拿到一個新帳號。
+- **伺服器還不認識的人** 會拿到一個新帳號，名稱取自他的 `preferred_username`（或電子郵件 @ 前面的部分）。設定為 *等管理員核准* 時，帳號會在 **使用者** 頁面等待 **核准** 或 **拒絕**，登入頁也會這樣告訴他；設定為 *直接建立可用的帳號* 時，他會直接登入。設定了 **允許的電子郵件網域** 時，兩種情況下網域以外的人都拿不到帳號，身分提供者標示為未驗證的地址也會被拒絕。
+- **現有的帳號由本人連結**：在 **我的帳號** 的 **單一登入** 底下，輸入你的密碼（或驗證器 App 上的驗證碼），再選 **連結 <名稱>**；身分提供者會再要你輸入一次密碼。只要你還有密碼可以登入，就能 **取消連結**。
+- **停用的帳號不能登入**，透過身分提供者也一樣。
+- **由身分提供者決定角色**：填寫 **角色宣告**（例如 `groups` 或 `roles`），以及對應到每個角色的值。每次登入時，這個人會拿到他的值所對應的最高角色；都沒有對應到就是 *使用者*；權杖裡沒有這個宣告時，角色維持不變。擁有者的角色永遠不會改變。沒有設定對應時，角色只在 **使用者** 頁面設定。
+
+### 雙重驗證與密碼
+
+- 透過身分提供者登入的工作階段，不會被要求 Forgeyard 的雙重驗證，即使已經要求所有人開啟（[要求所有人開啟雙重驗證](#require-two-factor-for-everyone)）：請在身分提供者那裡開啟雙重驗證。同一個人改用密碼登入時，仍然會被要求。
+- 透過身分提供者建立的帳號 **沒有密碼**。在 Forgeyard 要求再輸入一次密碼的地方（下載密鑰備份、加入驗證器 App），這種帳號請選 **用 <名稱> 重新登入**：身分提供者會再要求輸入一次密碼（`max_age=0`，Google 以外還會加上 `prompt=login`），之後 5 分鐘內就等同輸入過密碼。也可以改用驗證器 App 上的驗證碼。
+- **API 金鑰** 和身分提供者沒有綁在一起：有人離職、在身分提供者那裡被移除後，他的金鑰仍然能用，直到管理員在 **使用者** 頁面停用他的帳號（停用後金鑰會立刻失效）。
+
+每一次透過身分提供者登入都會記錄在 **稽核紀錄**，動作是 `auth.sso_login`；被拒絕的則是 `auth.sso_login_failed`，並附上原因（例如 `state_invalid`、`token_invalid:nonce`、`pending_approval`、`account_disabled`、`domain_not_allowed`）。新帳號記為 `user.registered`（via `sso`），連結記為 `user.identity_linked` 和 `user.identity_unlinked`，管理員的變更記為 `idp.created`、`idp.changed`（絕不包含密鑰）和 `idp.deleted`。
+
 ## 使用繁體中文的主控台
 
 主控台提供英文和繁體中文（1.5.1）。瀏覽器第一次開啟它時，會跟著瀏覽器的語言：任何中文設定都會顯示繁體中文，其他語言則顯示英文。要切換時，打開帳號選單（右上角你的名稱），在**語言**底下選 **English** 或 **繁體中文**；在手機上，同樣的切換在選單的最後面。頁面會立刻切換，不需要重新載入。
