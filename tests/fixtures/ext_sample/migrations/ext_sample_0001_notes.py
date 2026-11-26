@@ -9,7 +9,7 @@ from alembic import op
 revision = "ext_sample_0001"
 down_revision = None
 branch_labels = ("ext_sample",)
-depends_on = "0023_gpu_usage"
+depends_on = "0024_stable_ids"
 
 
 def upgrade() -> None:
