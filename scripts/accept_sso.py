@@ -93,7 +93,7 @@ from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -404,17 +404,33 @@ class Sso:
         page.on("request", on_request)
         try:
             if intercept:
-                page.route(lambda u: is_callback(u, self.server), lambda route: (seen.append(route.request.url),
-                                                                               route.abort()))
+                # page.route() sees only the first address of a redirect chain, never the callback the provider
+                # redirects to: so the provider's own answers are fetched here without following redirects, and the
+                # one that sends the browser to the callback is kept and not passed on.
+                stopped: list[str] = []
+
+                def stop(route) -> None:
+                    if not route.request.is_navigation_request():
+                        route.continue_()
+                        return
+                    resp = route.fetch(max_redirects=0)
+                    to = urljoin(route.request.url, resp.headers.get("location") or "")
+                    if 300 <= resp.status < 400 and is_callback(to, self.server):
+                        stopped.append(to)
+                        route.fulfill(status=200, content_type="text/html", body="<p>stopped before the callback</p>")
+                    else:
+                        route.fulfill(response=resp)
+
+                page.route(lambda u: not u.startswith(self.server), stop)
                 go()
                 self.idp(page, acct)
                 deadline = time.monotonic() + IDP_TIMEOUT / 1000
-                while not seen and time.monotonic() < deadline:
+                while not stopped and time.monotonic() < deadline:
                     page.wait_for_timeout(200)
-                page.unroute_all(behavior="ignoreErrors")
-                if not seen:
+                page.unroute_all(behavior="wait")
+                if not stopped:
                     raise A.Fail(f"{acct.part}: the provider did not send the browser back ({self.where(page)})")
-                return Outcome(0, None, page, seen[-1])
+                return Outcome(0, None, page, stopped[-1])
             try:
                 with page.expect_response(lambda r: r.url == self.server + "/api/auth/sso/finish",
                                           timeout=IDP_TIMEOUT) as info:
