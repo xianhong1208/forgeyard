@@ -6,72 +6,116 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-11-27
+
+Teams and GPU hours (#190), both in the community edition. A team shares API keys, deployments and a monthly cloud
+budget: a team key belongs to the team and keeps working when the person who made it leaves, and the team's managers
+run its deployments without being operators. GPU hours record how much GPU time each deployment held, per day, team,
+machine and GPU model, and show it on **Usage**, on a deployment's page and in `/metrics`; nothing is enforced. 1.6.1
+also adds an internal extension interface for a separately distributed package (#308). Team quotas (GPU hours,
+tokens), machine pools per team, priced cost reports, organisations above teams and SCIM are planned for the
+enterprise edition. Without a team, keys, deployments and usage work as in 1.6.0.
+
+### Upgrade notes
+
+- **Two migrations run on start**, `0022_teams` and `0023_gpu_usage`:
+  - `0022_teams` adds the tables `teams` and `team_members`, the columns `api_keys.team_id`, `api_keys.created_by`,
+    `deployments.team_id` and `usage_daily.team_id` (0 on every existing row, with an index on team and day), and
+    makes `api_keys.user_id` nullable. On SQLite the `api_keys` table is rebuilt; nothing references it.
+  - `0023_gpu_usage` adds the table `gpu_usage_daily` (day, deployment, team, machine, vendor, GPU model, `gpu_ms`,
+    `ram_mib_ms`, `busy_ms`; unique on day, deployment, team, machine and GPU model; no foreign keys).
+
+  No existing row changes meaning. Back up before upgrading as always
+  ([how](docs/guide/how-to.md#back-up-and-restore)). **To go back to 1.6.0**, restore that backup. The migrations
+  also go down: that deletes the teams, the team keys and the GPU hours recorded so far.
+- **Nothing changes for an install that makes no team.** The upgrade creates no team, every existing key stays a
+  personal key and keeps working, every deployment stays without a team, and existing usage counts to no team. Only
+  admins make teams.
+- **GPU hours count from the first start of 1.6.1.** There are no GPU hours for the time before it, and time while
+  the server is down is not counted. The **GPU hours** tab says from when this server counts.
+- **The extension interface is internal.** It is versioned to the exact Forgeyard release and is not a stable plugin
+  API: an extension built for another version stops the server at start with a message that names it. An install
+  without an extension (every community install) is not affected.
+- **No new dependency**: `pyproject.toml` and `uv.lock` change only in the version.
+- **The agents need no update.** Nothing the agent runs changed since 1.6.0:
+  `git diff v1.6.0 v1.6.1 -- forgeyard/agent Dockerfile.agent images/` is empty. Of the modules the agent's code can
+  import, none changed; `forgeyard/cli.py` gains only a check in the server's start (`serve`), whose import runs
+  inside it. A 1.6.0 agent works unchanged. The machine page still offers **Update the agent**, because the agent's
+  version differs from the server's. The vision image pin stays at `forgeyard-vision` 1.5.4rc1: the vision image's
+  source did not change.
+
+### API changes
+
+Old clients see no change: every change below is a new endpoint, a new field or a new value, and without a team or
+an extension the answers they already read stay the same.
+
+- `GET /api/info` (signed in): `version`, `edition` (`community` without an extension), `features` and
+  `audit_actions` (both empty without an extension).
+- `GET /api/advisor` gains `extensions`: the loaded extensions' names and versions (empty without one).
+- Teams: `GET` / `POST /api/teams`, `GET` / `PATCH` / `DELETE /api/teams/{name}`, `PUT` / `DELETE
+  /api/teams/{name}/members/{username}`.
+- `POST /api/keys`, `POST /api/deployments` and `PATCH /api/deployments/{id}` take `team`. Keys answer `team` and
+  `created_by` (a team key's `user.id` is `null`); deployments answer `team` and `can_manage`.
+- `POST /api/deployments/{id}/stop`, `/start` and `PATCH /api/deployments/{id}` are open to the deployment's team
+  managers, who get `403 operators_only` for the engine, `extra_args` and the team.
+- `GET /api/usage` and `/api/usage/series` take `team=` and `group=team` / `split=team`; `GET /api/budgets` lists
+  `teams`; `X-Forgeyard-Budget-Exhausted` may say `team`.
+- GPU hours: `GET /api/usage/gpu` (`days`, `group` = `deployment` | `team` | `machine` | `gpu_model`, `team`);
+  `GET /api/deployments/{id}` gains `usage.gpu` (this month); `/metrics` gains `forgeyard_gpu_seconds_total` (labels
+  `deployment`, `gpu_model`). See [Teams through the API](docs/guide/reference.md#teams-through-the-api).
+- A preview that an extension refuses (`POST /api/deployments/estimate`, and the plans in deploy, edit and engine
+  trial answers) has `fits: false` and `refused: {code, message}`; deploy, edit and trials then answer 409 with the
+  extension's code instead of `does_not_fit`. Without an extension nothing changes.
+- New error codes: `bad_team_name`, `team_name_taken`, `team_not_found`, `not_team_manager`, `admins_only`,
+  `no_such_user`, `not_a_member`, `team_has_keys`, `team_has_deployments`, `operators_only`.
+
 ### Added
 
-- **An extension interface** (#190), internal and versioned to the exact release, for a separately distributed
-  package (the enterprise edition's): `forgeyard/extensions.py` loads the entry points of the group
-  `forgeyard.extensions` at startup and refuses to start when one was built for another Forgeyard version. Its hooks
-  add API routes, an Alembic branch (startup now runs `upgrade heads`), a machine filter and a check before
-  placement (deploy, edit, engine trials, start, wake, scale-up), a check of each gateway request before the rate
-  limits (chat and the other endpoints, and video jobs), a usage observer, Setup health findings, features, audit
-  prefixes and the engine-switch policy (it replaces `trials.switch_policy`). The console gets empty slots for an
-  extension's pages, menu links, Usage tabs and Setup health cards (`web/src/ext/index.ts`), each shown only while
-  the server lists its feature. A sample extension in the tests uses every hook. See
-  [docs/development.md](docs/development.md#extensions).
-- **Teams** (#190, community edition). Admins make teams on the new **Teams** page and choose their members and
-  managers; a team's managers add and remove members. A **team key** (made by the team's managers or an admin)
-  belongs to the team: its requests count to the team and its monthly cloud budget, and it keeps working when the
-  person who made it is disabled or deleted; it stops when it is revoked. A deployment may belong to a team, whose
-  managers then stop, start and change it (not its engine, its extra arguments or its team); admins and operators
-  keep their rights on every deployment. **Usage** gains a *Team* split and a team view for its managers; the budget
-  ledger a `team` scope (alerts at 80 % and 100 %); the audit log `team.*` actions. A team with working keys or with
-  deployments cannot be deleted. Without a team nothing changes. Guide:
-  [Share models with a team](docs/guide/how-to.md#share-models-with-a-team).
-- **GPU hours** (#190, community edition): how much GPU time each deployment held, per UTC day, team, machine and GPU
-  model. Counted by the server every 5 seconds (no agent change) from the moment a replica's engine starts until its
-  cards are free again: not while it downloads its model, engine or image, and not once it is stopped or asleep. A card
-  held alone counts whole, a shared card the reservation's share of its memory, a CPU replica its reserved RAM ×
-  time. The busy share beside it is the part with a request in flight. Shown, not enforced: **Usage** → **GPU hours**
-  (by deployment, team, machine or GPU model; admins and operators see every deployment's, a team's managers their
-  team's), a deployment's page (this month), and `/metrics`. Time while the server is down is not counted. An
-  extension that enforces GPU-hour quotas reads `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)`. Guide:
-  [GPU hours](docs/guide/concepts.md#gpu-hours), [See who holds the GPUs](docs/guide/how-to.md#see-who-holds-the-gpus).
+- **Teams** (#190, #309). Admins make teams on the new **Teams** page and choose their members and managers; a team's
+  managers add and remove members. Guide: [Share models with a team](docs/guide/how-to.md#share-models-with-a-team).
+  - A **team key**, made by the team's managers or an admin, belongs to the team: its requests count to the team and
+    to its monthly cloud budget, and it keeps working when the person who made it is disabled or deleted. It stops
+    when it is revoked.
+  - A deployment may belong to a team. The team's managers then stop, start and change it, apart from its engine, its
+    extra arguments and its team. Admins and operators keep their rights on every deployment.
+  - **Usage** gains a *Team* split and a team view for its managers; the budget ledger a `team` scope, with alerts at
+    80 % and 100 %; the audit log `team.*` actions.
+  - A team with working keys or with deployments cannot be deleted.
+- **GPU hours** (#190, #310): how much GPU time each deployment held, per UTC day, team, machine and GPU model. Shown,
+  not enforced. Guide: [GPU hours](docs/guide/concepts.md#gpu-hours),
+  [See who holds the GPUs](docs/guide/how-to.md#see-who-holds-the-gpus).
+  - The server counts every 5 seconds, with no agent change, from the moment a replica's engine starts until its cards
+    are free again: not while it downloads its model, engine or image, and not once it is stopped or asleep.
+  - A card held alone counts whole, a shared card the reservation's share of its memory, and a CPU replica its
+    reserved RAM × time. The busy share beside it is the part with a request in flight.
+  - Shown on **Usage** → **GPU hours** (by deployment, team, machine or GPU model; admins and operators see every
+    deployment's, a team's managers their team's), on a deployment's page (this month) and in `/metrics`.
+  - An extension that enforces GPU-hour quotas reads `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)`.
+- **An extension interface** (#190, #308), internal and versioned to the exact release, for a separately distributed
+  package (the enterprise edition's). See [docs/development.md](docs/development.md#extensions).
+  - `forgeyard/extensions.py` loads the entry points of the group `forgeyard.extensions` at start and refuses to start
+    when one was built for another Forgeyard version.
+  - Its hooks add API routes, an Alembic branch, a machine filter and a check before placement (deploy, edit, engine
+    trials, start, wake, scale-up), a check of each gateway request before the rate limits (chat and the other
+    endpoints, and video jobs), a usage observer, Setup health findings, features, audit prefixes and the
+    engine-switch policy.
+  - The console gets empty slots for an extension's pages, menu links, Usage tabs and Setup health cards
+    (`web/src/ext/index.ts`), each shown only while the server lists its feature.
+  - A sample extension in the tests uses every hook.
+
+### Changed
+
+- **Startup migrates every Alembic head** (`upgrade heads`), so an extension's own migrations run with Forgeyard's.
+- **The engine-switch policy comes from the extension interface**, which replaces `trials.switch_policy`; without an
+  extension it is the same as before.
 
 ### Fixed
 
 - A team's manager no longer sees "engine arguments" in the **Advanced** summary of a deployment's **Change** page,
   whose field is hidden for them.
-
-### Migrations
-
-- `0022_teams`: tables `teams` and `team_members`; `api_keys.team_id` and `api_keys.created_by`, and
-  `api_keys.user_id` becomes nullable (on SQLite `api_keys` is rebuilt; nothing references it);
-  `deployments.team_id`; `usage_daily.team_id` (0 on every existing row) with an index on (team_id, day). No team
-  exists after the upgrade and no existing row changes meaning. Going down deletes the team keys.
-- `0023_gpu_usage`: table `gpu_usage_daily` (day, deployment, team, machine, vendor, GPU model, `gpu_ms`, `ram_mib_ms`,
-  `busy_ms`; unique on day, deployment, team, machine and GPU model; no foreign keys). No existing row changes;
-  counting starts when the upgraded server runs. Going down drops the table and the hours in it.
-
-### API changes
-
-- `GET /api/info` (signed in): `version`, `edition` (`community` without an extension), `features` and
-  `audit_actions` (both empty without an extension).
-- `GET /api/advisor` gains `extensions`: the loaded extensions' names and versions (empty without one).
-- Teams: `GET`/`POST /api/teams`, `GET`/`PATCH`/`DELETE /api/teams/{name}`, `PUT`/`DELETE
-  /api/teams/{name}/members/{username}`. `POST /api/keys`, `POST /api/deployments` and `PATCH /api/deployments/{id}`
-  take `team`; keys answer `team` and `created_by` (a team key's `user.id` is `null`), deployments `team` and
-  `can_manage`. `POST /api/deployments/{id}/stop`, `/start` and `PATCH /api/deployments/{id}` are open to the
-  deployment's team managers (`403 operators_only` for the engine, `extra_args` and the team). `GET /api/usage` and
-  `/api/usage/series` take `team=` and `group=team` / `split=team`; `GET /api/budgets` lists `teams`;
-  `X-Forgeyard-Budget-Exhausted` may say `team`. New error codes: `bad_team_name`, `team_name_taken`, `team_not_found`,
-  `not_team_manager`, `admins_only`, `no_such_user`, `not_a_member`, `team_has_keys`, `team_has_deployments`,
-  `operators_only`. See [Teams through the API](docs/guide/reference.md#teams-through-the-api).
-- GPU hours: `GET /api/usage/gpu` (`days`, `group` = `deployment` | `team` | `machine` | `gpu_model`, `team`);
-  `GET /api/deployments/{id}` gains `usage.gpu` (this month). `/metrics` gains `forgeyard_gpu_seconds_total`
-  (labels `deployment`, `gpu_model`). See [Teams through the API](docs/guide/reference.md#teams-through-the-api).
-- A preview that an extension refuses (`POST /api/deployments/estimate`, and the plans in deploy, edit and engine
-  trial answers) has `fits: false` and `refused: {code, message}`; deploy, edit and trials then answer 409 with the
-  extension's code instead of `does_not_fit`. Without an extension nothing changes.
+- The totals on **Usage** → **GPU hours** share the row between their two or three cards (one per row on a phone), so
+  each card's note stays on one line. In Traditional Chinese the notes broke mid-word in a narrow card
+  (「保留的記／憶體」, 「處理請／求」).
 
 ## [1.6.0] — 2026-11-26
 

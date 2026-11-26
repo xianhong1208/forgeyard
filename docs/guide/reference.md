@@ -1001,7 +1001,7 @@ detection, segmentation, depth and image classification models deployed from **M
 
 ### What answers 410
 
-These addresses answer **410 Gone** in 1.5.3 and later, 1.6.0 included, so a script or program that still calls them
+These addresses answer **410 Gone** in 1.5.3 and later, 1.6.1 included, so a script or program that still calls them
 learns why. A later 1.6.x release makes them ordinary 404s; its release notes will say so.
 
 | Address | Was |
@@ -2209,7 +2209,7 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.6.0` (exactly that release), `1.6` (its newest patch release), `latest` (the newest
+- **Tags**: `1.6.1` (exactly that release), `1.6` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

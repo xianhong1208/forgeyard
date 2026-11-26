@@ -2048,3 +2048,13 @@ a.chip-update:hover { border-color: var(--heat-ink); }
   .team-add-button { padding-bottom: 0; }
   .team-members .cell-actions:empty, .team-keys .cell-actions:empty { display: none !important; }
 }
+
+/* GPU hours totals (1.6.1): two or three cards share the row, so each note fits on one line instead of breaking
+   mid-word in a fifth-wide card (zh-TW 「保留的記／憶體」); one card per row on a phone. */
+.usage-totals-gpu { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.usage-totals-gpu dd .small { word-break: keep-all; }
+@media (max-width: 760px) {
+  .usage-totals-gpu { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); }
+  .usage-totals-gpu > div:nth-child(n) { border-left: 0; border-top: 1px solid var(--line); }
+  .usage-totals-gpu > div:first-child { border-top: 0; }
+}

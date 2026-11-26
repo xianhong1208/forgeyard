@@ -43,6 +43,10 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
+| 1.6.1 | full regression (`accept_all.py`, all groups). The Ryzen AI MAX+ 395 was offline, so models through the server ran with the x86-64 CPU machine and copying an image to another machine was skipped. Nothing in 1.6.1 changes an engine, so no engine was accepted separately | A100 host, x86-64 CPU machine, Gemini | <<ALL_COUNTS>> |
+| 1.6.1 | sleep when idle, waking and automatic replicas (`accept_scale.py`) | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | <<SCALE_COUNTS>> |
+| 1.6.1 | single sign-on (`accept_sso.py`) against a real Keycloak, set up as for 1.6.0 | Keycloak on the A100 host, the server, Chrome | <<SSO_COUNTS>> |
+| 1.6.1 | GPU hours on real replicas: the hours recorded for a deployment on the A100 host's GPU and for one on the x86-64 CPU machine, compared with how long their engines ran and what they reserved | A100 host, x86-64 CPU machine | <<GPUH_RESULT>> |
 | 1.6.0 | full regression (`accept_all.py`, all groups). The Ryzen AI MAX+ 395 was offline, so models through the server ran with the x86-64 CPU machine and copying an image to another machine was skipped. 21 checks skipped: 5 deploys of the vision and transformers images on the x86-64 CPU machine, which has no container engine (those engines did not change since the 1.5.4 runs below); FLUX.2 [klein] 4B editing and Wan2.2-TI2V-5B, which did not fit on the shared card at that moment (accepted in the 1.5.5 rows below; nothing in those engines changed); 4 that need a second CPU machine in this script, covered by `accept_scale.py`; an expired key, since the API's shortest expiry is a day, covered by a unit test; a provider budget, since the admin has a budget of their own; Gemini, which has no embeddings model; 2 picture checks that need a chat model that reads images; copying an image to another machine; taking a machine offline, which this script does only when told; and 3 information lines. Nothing in 1.6.0 changes an engine, so no engine was accepted separately | A100 host, x86-64 CPU machine, Gemini | 441 | 0 |
 | 1.6.0 | sleep when idle, waking and automatic replicas (`accept_scale.py`) | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
 | 1.6.0 | single sign-on (`accept_sso.py`) against a real Keycloak: a realm with a confidential client that uses PKCE, a groups mapper and six test accounts. Pending then approved accounts, the role mapping, automatic accounts and a refused outside domain, a disabled account, linking the owner's account, the two-factor exemption, the key backup's fresh sign-in, an API key before and after disabling, refused replayed and foreign callbacks | Keycloak on the A100 host, the server, Chrome | 36 | 0 |
@@ -88,6 +92,6 @@ name machines and networks. Only the hardware models and the counts are.
 | 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
 
 The Ryzen AI MAX+ 395 machine was not part of the 1.4.5, 1.5.0, 1.5.1, 1.5.2 and 1.5.3 runs; it took part in 1.5.4.
-In 1.5.5 it took part in the image-edit acceptance, not in the full regression. It was offline during the 1.5.6 and 1.6.0 runs.
+In 1.5.5 it took part in the image-edit acceptance, not in the full regression. It was offline during the 1.5.6, 1.6.0 and 1.6.1 runs.
 
 Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
