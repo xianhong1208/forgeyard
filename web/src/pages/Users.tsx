@@ -2,6 +2,9 @@ import { IconPlus } from "@tabler/icons-react";
 import { useState, type FormEvent } from "react";
 
 import { AdvisorBanner } from "../components/Advisor";
+import { MfaPolicyPanel } from "../components/MfaRequired";
+import { SsoProviderPanel } from "../components/Sso";
+import { formatDate } from "../i18n/format";
 import { useAuth } from "../auth";
 import { CopyBox, Field, Notice, PageHeader, StatusChip } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -67,6 +70,11 @@ export function UsersPage() {
   const remove = (u: User) => {
     if (!window.confirm(t("admin.users.deleteConfirm", { name: u.username }))) return;
     void run(() => api(`/users/${u.id}`, { method: "DELETE" }), t("admin.users.deleted", { name: u.username }));
+  };
+
+  const resetMfa = (u: User) => {
+    if (!window.confirm(t("admin.users.resetMfaConfirm", { name: u.username }))) return;
+    void run(() => api(`/users/${u.id}/mfa-reset`, { method: "POST" }), t("admin.users.mfaReset", { name: u.username }));
   };
 
   const pending = users?.filter((u) => u.status === "pending") ?? [];
@@ -141,9 +149,16 @@ export function UsersPage() {
                       <span className="mono strong">{u.username}</span>
                       {u.is_owner && <span className="chip chip-owner">{t("admin.users.owner")}</span>}
                       {self && <span className="chip chip-here">{t("admin.users.you")}</span>}
+                      {u.has_mfa && <span className="chip chip-status-active" title={t("admin.users.twoFactorTitle")}>{t("admin.users.twoFactor")}</span>}
+                      {u.mfa_enrolment && !u.has_mfa && (u.mfa_enrolment.due
+                        ? <span className="chip chip-sev-warning" title={t("admin.users.mfaOverdueTitle")}>{t("admin.users.mfaOverdue")}</span>
+                        : <span className="chip chip-sev-info" title={t("admin.users.mfaDueTitle", { date: formatDate(u.mfa_enrolment.by) })}>
+                            {t("admin.users.mfaDue", { date: formatDate(u.mfa_enrolment.by) })}
+                          </span>)}
                     </div>
                     {u.email && <div className="muted small">{u.email}</div>}
-                    {!u.has_password && u.status !== "pending" && <div className="muted small">{t("admin.users.noPassword")}</div>}
+                    {u.sso_linked && <div className="muted small">{t("sso.users.linked")}</div>}
+                    {!u.has_password && !u.sso_linked && u.status !== "pending" && <div className="muted small">{t("admin.users.noPassword")}</div>}
                     </div>
                   </td>
                   <td data-label={t("admin.users.col.role")}>
@@ -180,6 +195,10 @@ export function UsersPage() {
                         </button>
                         {!u.is_owner && !self && (
                           <>
+                            {u.has_mfa && (
+                              // The owner's two-factor sign-in is the owner's own (My account); nobody resets their own here.
+                              <button type="button" className="btn btn-quiet btn-small" onClick={() => resetMfa(u)}>{t("admin.users.resetMfa")}</button>
+                            )}
                             <button type="button" className="btn btn-quiet btn-small"
                               onClick={() => void run(() => api(`/users/${u.id}`, { method: "PATCH", body: { status: u.status === "disabled" ? "active" : "disabled" } }),
                                 u.status === "disabled" ? t("admin.users.enabled", { name: u.username }) : t("admin.users.disabled", { name: u.username }))}>
@@ -197,6 +216,8 @@ export function UsersPage() {
           </tbody>
         </table>
       </div>
+      <MfaPolicyPanel say={(m) => { setMessage(m); load(); }} />
+      <SsoProviderPanel say={(m) => { setMessage(m); load(); }} />
     </>
   );
 }

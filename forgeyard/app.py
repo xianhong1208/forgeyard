@@ -27,6 +27,7 @@ from forgeyard.api import (
     keys,
     machines,
     metrics as metrics_api,
+    mfa as mfa_api,
     models,
     onboarding,
     passthrough,
@@ -34,6 +35,7 @@ from forgeyard.api import (
     providers,
     routing,
     secret_key as secret_key_api,
+    sso as sso_api,
     tls as tls_api,
     trials as trials_api,
     users,
@@ -142,6 +144,9 @@ def create_app() -> FastAPI:
         return {"ok": True, "version": __version__}
 
     app.include_router(auth.router)
+    app.include_router(mfa_api.router)
+    app.include_router(sso_api.router)
+    app.include_router(sso_api.admin)
     app.include_router(users.router)
     app.include_router(audit_log.router)
     app.include_router(machines.router)

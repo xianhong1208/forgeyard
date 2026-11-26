@@ -219,7 +219,7 @@ Forgeyard 自己的模型伺服器（1.5.4），也就是 `transformers` 配方�
 | CLIP 類模型（CLIP、SigLIP、SigLIP 2）和 DINOv2 當嵌入模型 | `transformers` |
 | vLLM 支援的文字分類模型（BERT、RoBERTa、XLM-R、ModernBERT） | `vllm-pooling` 優先，`transformers` 也可以（CPU） |
 | DeBERTa、DistilBERT、BART 分類模型；零樣本（NLI）模型 | `transformers` |
-| 多模態嵌入模型（Qwen3-VL-Embedding、GME） | 還沒有：加入時會被拒絕（之後的 1.5 修補版） |
+| 多模態嵌入模型（Qwen3-VL-Embedding、GME） | 還沒有：加入時會被拒絕 |
 
 - **圖片嵌入：**CLIP 類模型把文字和圖片放在同一個空間（文字能找到圖片）；DINOv2 只收圖片（找重複圖、相似圖）。兩者都在 `/v1/embeddings` 回應，它在一般字串之外也接受有型別的項目 `{"image": …}`；只有文字的請求仍是 OpenAI 的請求。帶圖片的請求絕不溢出到雲端供應商：另一個模型的向量對不上。見[操作指南](how-to.md#search-images-by-text-image-embeddings)。
 - **一個目錄項目做一件事：**CLIP 類的儲存庫既是圖片分類模型（`/v1/vision/classify`，配方 `vision`），也是嵌入模型（`transformers`）：用兩個名稱各加入一次，各自部署。
@@ -274,4 +274,6 @@ Forgeyard 自己的模型伺服器（1.5.4），也就是 `transformers` 配方�
 - 密碼至少 12 個字元，常見的密碼會被拒絕。連續登入失敗時，之後每次嘗試都要等待（`LOGIN_FREE_FAILURES`、`LOGIN_IP_FAILURES`）。
 - 工作階段在 2 小時沒有任何請求後結束，最長 7 天（`SESSION_IDLE_MINUTES`、`SESSION_MAX_DAYS`）。
 - 在 **我的帳號**，你可以變更密碼（你的其他工作階段會被登出），並看到每個以你的身分登入的瀏覽器，每一個都可以登出。管理員可以在 **使用者** 讓某人在所有地方登出、停用他，或給他一個新的設定密碼連結。
+- **雙重驗證**（1.6.0）由每個人自己決定，除非管理員要求管理員或所有人都必須開啟：在 **我的帳號** 加入驗證器 App 後，登入時還要輸入它顯示的 6 位數驗證碼（或 10 組只能用一次的備用碼之一）。驗證碼錯誤和密碼錯誤一樣會被計算。要求開啟時，還沒有驗證器的人有一段寬限期（預設 7 天），過了之後就只能加入驗證器。管理員可以在 **使用者** 重設某人的雙重驗證；擁有者的只有擁有者本人能變更，或在伺服器主機上用 `forgeyard users reset-mfa` 重設。它只用在登入主控台：API 金鑰照常運作。請見[開啟雙重驗證](how-to.md#turn-on-two-factor-sign-in)和[要求所有人開啟雙重驗證](how-to.md#require-two-factor-for-everyone)。
+- **單一登入**（1.6.0）：管理員可以在 **使用者** 頁面設定一個 OpenID Connect 身分提供者（Keycloak、Authentik、Entra ID、Google），之後大家也能透過它登入。它的帳號是依身分提供者的簽發者和主體對應的，絕不依電子郵件；新的人要等核准（或來自允許網域時直接拿到帳號），現有的帳號由本人在 **我的帳號** 連結。雙重驗證由身分提供者負責。請見[用單一登入（OIDC）登入](how-to.md#sign-in-with-single-sign-on-oidc)。
 - **稽核紀錄**（管理員）記錄登入、登入失敗，以及帳號、機器、模型、金鑰和供應商的變更，還有預算警示。

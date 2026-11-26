@@ -70,7 +70,7 @@ def join(body: JoinIn, request: Request, db: DbSession = Depends(get_db)):
     """Trade a one-time join token for this machine's own credential (shown once, stored hashed)."""
     settings = get_settings()
     ip = client_ip(request)
-    wait = limiter.login_wait("__join__", ip, settings.login_free_failures, settings.login_ip_failures)
+    wait = limiter.attempt_wait("join", ip, settings.login_free_failures, settings.login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     if body.protocol != PROTOCOL_VERSION:
@@ -80,7 +80,7 @@ def join(body: JoinIn, request: Request, db: DbSession = Depends(get_db)):
                    "Use the agent from the same Forgeyard version.", server_protocol=PROTOCOL_VERSION)
     token = store.redeem_join_token(db, body.join_token)
     if token is None:
-        limiter.login_failed("__join__", ip)
+        limiter.attempt_failed("join", ip)
         audit.record(db, "machine.join_refused", ip=ip, hostname=(body.hostname or "")[:64] or None)
         db.commit()
         raise fail(403, "join_token_invalid",

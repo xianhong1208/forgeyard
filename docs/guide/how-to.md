@@ -153,7 +153,7 @@ command here runs in that distribution's shell (type `wsl` in PowerShell to open
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_JOIN_TOKEN=fyj_… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+     docker.io/tonyhuang1101/forgeyard-agent:1.6.0
    ```
 
    It is the NVIDIA command without the `$(for d in /dev/nvidia…)` line: WSL2 passes the GPU through
@@ -228,7 +228,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -270,7 +270,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -285,7 +285,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0 inventory
 ```
 
 ### CPU only
@@ -299,7 +299,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 ### Why these options
@@ -332,8 +332,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.6 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.6.0 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -352,18 +352,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.6 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.6.0 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.5.6`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.6.0`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models in containers keep running.
@@ -377,7 +377,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+     docker.io/tonyhuang1101/forgeyard-agent:1.6.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -504,8 +504,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.6 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.6.0 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -1525,6 +1525,181 @@ To let people ask for an account themselves, start the server with `REGISTRATION
 sign-in page then offers to request an account, and requests wait on **Users** until an admin chooses
 **Approve** or **Reject**.
 
+## Turn on two-factor sign-in
+
+With two-factor sign-in (1.6.0), signing in asks for your password and a 6-digit code from an authenticator app on
+your phone, so a password someone else learned is not enough. Any TOTP app works: Google Authenticator, Microsoft
+Authenticator, 1Password, Bitwarden, Aegis and others.
+
+1. Open **My account** (your name, top right) and choose **Add an authenticator app** under **Two-factor sign-in**.
+2. Scan the QR code with the app. If you cannot scan it, type the **Setup key** in the app instead (time-based,
+   6 digits, every 30 seconds).
+3. Type the **Code from the app**, give it a **Name** if you like (for example *Work phone*), type your password, and
+   choose **Turn on two-factor sign-in**. Nothing is saved until the code is right, so a mistyped key changes
+   nothing.
+4. Save the **10 recovery codes** it shows now, apart from your password (**Download as a text file** or copy them).
+   They are shown only once. Each one signs you in once in place of a code, if the phone is lost or not at hand.
+
+From then on, **Sign in** asks for the code after the password. Choose **No phone at hand? Use a recovery code** to
+type a recovery code instead. A sign-in waits 5 minutes for the code and takes 5 wrong codes; then sign in again.
+Wrong codes count like wrong passwords, so many of them make the next try wait. Each code works once: a code that
+already signed you in is refused, so wait for the next one.
+
+In **My account** you can also:
+
+- **Add another authenticator** (up to 5), for example a second phone. It is confirmed with your password or a code
+  from one you already use.
+- **New recovery codes**: a new set of 10; the old ones stop working. Do this when few are left.
+- **Remove** an authenticator. Removing the last one turns two-factor sign-in off and the recovery codes with it.
+
+Both ask for your password or a current code from the app again. Downloading the secret key backup asks for a code
+too.
+
+Admins see who uses two-factor sign-in on **Users**, and **Setup health** names the admins who do not.
+
+### Require two-factor for everyone
+
+By default two-factor sign-in is each person's choice. An admin can require it (1.6.0): on **Users**, under
+**Two-factor sign-in**, choose who must use it and the **Grace period**, then **Save**.
+
+- **Not required** (the default): nothing changes for anyone.
+- **Required of admins**: every admin, the owner included.
+- **Required of everyone**: every account.
+
+The grace period (7 days unless you change it, 0 to 90) counts from when you switched the setting on, or from when
+the account was made, if that is later. Moving from admins to everyone gives the others a full grace period and
+keeps the admins' deadline.
+
+- **During the grace period**, people without an authenticator sign in as before and see a banner with the days
+  left and a link to **My account**.
+- **After it**, they still sign in with their password, but they see only **Add two-factor sign-in to continue**:
+  they can add an authenticator app (the steps above) or sign out, and nothing else. The console's API answers
+  `403` with the code `mfa_enrolment_required` to everything else, the Playground included. Once the authenticator
+  is added, everything works again at once.
+- **API keys are not affected**: programs calling `/v1` keep working whatever the setting says. To stop someone's
+  keys, disable the account on **Users**.
+- **Nobody is locked out by it**, the owner included: the password always signs in, and the setup is always
+  reachable.
+
+On **Users** each person who still has to add it shows **Two-factor due** with the date, and **Setup health**
+counts the people in the grace period and past it. The admins without two-factor sign-in become a warning there
+once it is required of admins. Each change of the setting is in the **Audit log** (`mfa_policy.changed`).
+
+### If you lose your authenticator and recovery codes
+
+Ask an admin: on **Users**, **Reset two-factor** removes your authenticators and recovery codes and ends your
+sessions; you then sign in with your password alone and can add an authenticator again (if two-factor sign-in is
+required of you, at once). Nobody resets their own two-factor sign-in there, and only the owner can change the
+owner's, so the owner should keep the recovery codes somewhere safe.
+
+**The owner, or an admin with no other admin to ask**, resets it on the server host, where the server's data is:
+
+```bash
+uv run --no-sync python -m forgeyard users reset-mfa <username>              # a server run from the source
+docker exec <server container> python -m forgeyard users reset-mfa <username>   # the Docker image
+```
+
+It removes that account's authenticators and recovery codes and ends its sessions, and the **Audit log** records
+`user.mfa_reset` with the actor `cli`. It runs with the server running, uses the same `DATA_DIR` (or
+`DATABASE_URL`) as the server and needs no secret key. Anyone with a shell on the server host can do this, which is
+why that host, like its data directory, must be kept to the people who run Forgeyard.
+
+If the server's secret key is lost for good, [`secrets reset`](#back-up-and-restore) removes every authenticator,
+because it can no longer read them.
+
+## Sign in with single sign-on (OIDC)
+
+People can sign in through your organisation's identity provider (1.6.0) over OpenID Connect: Keycloak, Authentik,
+Microsoft Entra ID, Google, or any provider that publishes a discovery document. A server has one provider. Signing
+in with a password stays, for everyone who has one.
+
+The sign-in uses the authorization code flow with PKCE, `state` and `nonce`. Forgeyard accepts only ID tokens signed
+with RS256 or ES256 by a key the provider publishes, for its own client id, from the issuer you set, not expired.
+
+### Register Forgeyard at the provider
+
+Every provider asks for the **redirect URI**. Copy it from **Users → Single sign-on (OIDC)**: it is `PUBLIC_URL`
+followed by `/sso/callback`, for example `https://forgeyard.example.com:7860/sso/callback`. Set `PUBLIC_URL`
+([Network and addresses](reference.md#network-and-addresses)) so it does not change with the address someone typed.
+
+- **Keycloak**: in the realm, **Clients → Create client**, type *OpenID Connect*, **Client authentication** on,
+  **Standard flow** only, **Valid redirect URIs** = the redirect URI. The client secret is on its **Credentials**
+  tab. The issuer is `https://<host>/realms/<realm>`. For roles from groups, add a *Group Membership* mapper to the
+  client's dedicated scope, with the token claim name `groups` and **Full group path** off.
+- **Authentik**: **Applications → Providers → Create**, *OAuth2/OpenID Provider*, client type *Confidential*, the
+  redirect URI as a strict match, then an application that uses it. The issuer is
+  `https://<host>/application/o/<application slug>/` (with the trailing slash, as Authentik publishes it).
+- **Microsoft Entra ID**: **App registrations → New registration**, *Accounts in this organizational directory only*,
+  platform *Web* with the redirect URI; then a client secret under **Certificates & secrets**. The issuer is
+  `https://login.microsoftonline.com/<tenant id>/v2.0`. For roles, define app roles and assign them (they arrive in
+  the `roles` claim). A `groups` claim works too, but Entra leaves it out of the token for people in more than 200
+  groups. Entra does not check the e-mail addresses people put in their profile: keep new accounts waiting for
+  approval, or use allowed domains only with a single-tenant app.
+- **Google**: Google Cloud console, **APIs & Services → Credentials → Create credentials → OAuth client ID**,
+  type *Web application*, with the redirect URI under **Authorized redirect URIs**. The issuer is
+  `https://accounts.google.com`. Google refuses redirect URIs on a raw IP address (`https://192.168.1.20:7860/…`) and
+  on plain `http://` except `localhost`, so the server must be reached by a DNS name over HTTPS (your own certificate,
+  or a proxy in front). Anyone with a Google account can sign in at Google, so set **Allowed e-mail domains**. Google
+  sends no groups: set roles on **Users**.
+
+### Set it up in Forgeyard
+
+On **Users**, under **Single sign-on (OIDC)** (admins):
+
+1. **Name**: the sign-in page shows *Sign in with <name>*.
+2. **Issuer URL**, then **Check**: Forgeyard reads the provider's discovery document and says what it found.
+3. **Client ID** and **Client secret**. The secret is encrypted with the server's secret key and never shown again;
+   leave the field empty to keep it. Tick **No client secret** for a public client (PKCE only).
+4. **Scopes**: `openid email profile` by default. Add the scope that puts groups or roles in the ID token if your
+   provider needs one.
+5. **When someone new signs in**: *wait for an admin's approval* (the default) or *an active account at once*, which
+   needs at least one **allowed e-mail domain**.
+6. Optionally **Roles from the identity provider** (below), then **Turn on single sign-on** and **Save**. Saving with
+   it on reads the discovery document again and refuses a provider that cannot be used.
+
+The sign-in page then shows **Sign in with <name>** under the password form. A provider inside your network with a
+certificate from your own CA needs `SSO_CA_FILE` ([Accounts and sign-in](reference.md#accounts-and-sign-in)): it is
+trusted on top of the system's CAs, so a provider whose certificate comes from a company CA works. Calls to the identity provider
+(its discovery document, keys and token endpoint) go out directly from the server, never through `EGRESS_PROXY`: the
+server must reach the provider itself.
+**Remove** deletes the provider and every link to it; accounts stay, and those without a password then need a
+set-password link from **Users**.
+
+### Who gets in, and with which role
+
+- **Accounts are found by the provider's issuer and subject, never by e-mail.** Someone whose e-mail address at the
+  provider is an existing person's does not reach that person's account: they get a new one.
+- **Someone the server does not know yet** gets a new account named after their `preferred_username` (or the
+  e-mail's first part). With *approval*, it waits on **Users** for **Approve** or **Reject**, and the sign-in page says
+  so; with *an active account at once*, they are signed in. When **Allowed e-mail domains** is set, nobody outside
+  those domains gets an account in either case, and an address the provider marks unverified is refused.
+- **An existing account is linked by its owner**: in **My account**, under **Single sign-on**, type your password (or a
+  code from your authenticator app) and choose **Link <name>**; the provider asks for your password again. **Unlink**
+  works while you still have a password to sign in with.
+- **A disabled account cannot sign in**, through the provider either.
+- **Roles from the identity provider**: name the **Role claim** (for example `groups` or `roles`) and the values for
+  each role. At every sign-in the person gets the highest role one of their values gives, or *user* when none
+  matches; a token without the claim leaves the role as it is. The owner's role never changes. Without a mapping,
+  roles are set on **Users** only.
+
+### Two-factor sign-in and passwords
+
+- A session that signed in through the provider is not asked for Forgeyard's two-factor sign-in, even when it is
+  required ([Require two-factor for everyone](#require-two-factor-for-everyone)): turn on two-factor sign-in at the
+  provider. The same person signing in with their password is still asked.
+- An account made through the provider has **no password**. Where Forgeyard asks for the password again (downloading
+  the secret key backup, adding an authenticator app), such an account chooses **Sign in again with <name>**: the
+  provider asks for the password again (`max_age=0`, plus `prompt=login` except at Google), and for the next 5
+  minutes that counts as the password. A code from an authenticator app works too.
+- **API keys** are not tied to the provider: when someone leaves and is removed at the provider, their keys keep
+  working until an admin disables their account on **Users** (which stops the keys at once).
+
+Each sign-in through the provider is in the **Audit log** as `auth.sso_login`, and each refused one as
+`auth.sso_login_failed` with the reason (for example `state_invalid`, `token_invalid:nonce`, `pending_approval`,
+`account_disabled`, `domain_not_allowed`). New accounts are `user.registered` (via `sso`), links
+`user.identity_linked` and `user.identity_unlinked`, and the admins' changes `idp.created`, `idp.changed` (never with
+the secret) and `idp.deleted`.
+
 ## Use the console in Traditional Chinese
 
 The console speaks English and Traditional Chinese (1.5.1). The first time a browser opens it, it follows the
@@ -1539,8 +1714,9 @@ same switch is at the end of the menu. The page changes at once, without reloadi
 - Numbers, sizes, times and dates follow the language (*41 秒前*, *2026年11月23日*).
 - The server keeps writing its messages in English. The console translates the common ones by their code (for
   example `model_waking`, `cannot_wake`, `budget_exhausted`) and names each **Setup health** finding's kind in
-  Chinese, with the server's own words (which name the machines and models) under it. A message without a
-  translation is shown as the server sent it.
+  Chinese, with the server's own words (which name the machines and models) under it. The two-factor findings
+  (1.6.0) are written in Chinese in full, from the names, counts and dates the server sends with them. A message
+  without a translation is shown as the server sent it.
 - Every page is translated: the frame (menus, sign-in, Get started and Setup health), **Machines**, **Serving**,
   **Models**, **Cloud**, **Playground**, **API keys**, **Usage**, **Users**, the **Audit log**, your account and
   **Trust this server**. Names you choose (machines, models, keys), what engines and agents print, and the API
@@ -1637,7 +1813,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.6
+  docker.io/tonyhuang1101/forgeyard:1.6.0
 sudo docker logs forgeyard
 ```
 
@@ -1671,7 +1847,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.6 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.6.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1680,7 +1856,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.6 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.6.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1705,7 +1881,7 @@ right after it ([how](#upgrade-the-server-and-the-agents)).
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.6
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.6.0
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1713,7 +1889,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.6 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.6.0 .`
 
 ## Run the server as a service
 
@@ -1806,7 +1982,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1821,7 +1997,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+     docker.io/tonyhuang1101/forgeyard-agent:1.6.0
    ```
 
    On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus all`, so the
@@ -2162,7 +2338,8 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
 It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
-(and any deployment's own), and model replicas restart with new internal keys.
+(and any deployment's own), and model replicas restart with new internal keys. Authenticator apps of
+two-factor sign-in are removed too: those people sign in with their password alone and add theirs again.
 
 ## Look at a model or an engine
 

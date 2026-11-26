@@ -29,6 +29,7 @@ import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
 import { OldDeploy, OldDeployment, ServingPage } from "./pages/Serving";
 import { SetupPage } from "./pages/Setup";
+import { SsoCallbackPage } from "./pages/SsoCallback";
 import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
 import { UsersPage } from "./pages/Users";
@@ -56,6 +57,8 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/set-password" element={<SetPasswordPage />} />
+      {/* 1.6.0 (#39): the identity provider sends the browser back here; the page finishes the sign-in. */}
+      <Route path="/sso/callback" element={<SsoCallbackPage />} />
       {/* Public: a device gets the CA before anyone signs in on it. */}
       <Route path="/trust" element={<TrustPage />} />
       {/* Public too: the guide explains how to install the server and add machines. */}

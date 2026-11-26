@@ -19,12 +19,12 @@ from forgeyard.api.deps import (
     current,
     fail,
     normalise_username,
-    optional_user,
+    signed_in,
     user_out,
 )
 from forgeyard.config import get_settings
 from forgeyard.db import Session, User, get_db, utcnow
-from forgeyard.security import passwords, secrets_store, sessions
+from forgeyard.security import mfa, passwords, secrets_store, sessions, sso
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -42,6 +42,11 @@ class SetupIn(BaseModel):
 class LoginIn(BaseModel):
     username: str = Field(max_length=200)
     password: str = Field(max_length=1024)
+
+
+class LoginCodeIn(BaseModel):
+    challenge: str = Field(max_length=200)
+    code: str = Field(max_length=64)
 
 
 class RegisterIn(BaseModel):
@@ -68,8 +73,12 @@ def has_users(db: DbSession) -> bool:
     return (db.scalar(select(func.count()).select_from(User)) or 0) > 0
 
 
-def _start_session(request: Request, response: Response, db: DbSession, user: User) -> None:
-    token, _ = sessions.create(db, user, client_ip(request), request.headers.get("user-agent"))
+def start_session(request: Request, response: Response, db: DbSession, user: User, *, mfa_at=None,
+                  auth_method: str = "password", fresh_until=None) -> None:
+    token, row = sessions.create(db, user, client_ip(request), request.headers.get("user-agent"))
+    row.mfa_at = mfa_at
+    row.auth_method = auth_method      # "sso": signed in through the identity provider (forgeyard/api/sso.py)
+    row.fresh_until = fresh_until
     user.last_login_at = utcnow()
     response.set_cookie(
         sessions.COOKIE,
@@ -91,29 +100,36 @@ def _check_password(password: str, username: str) -> None:
 @router.get("/state")
 def state(request: Request, db: DbSession = Depends(get_db)):
     """What the sign-in screens need before anyone is signed in."""
-    user, ended = optional_user(request, db)
+    row, reason = sessions.resolve(db, request.cookies.get(sessions.COOKIE))
+    user = row.user if row is not None else None
+    ended = None if row is not None or reason == "no_session" else reason
     return {
         "needs_setup": not has_users(db),
         "registration": get_settings().registration,
-        "user": user_out(user) if user else None,
+        "user": user_out(user, via_sso=row.auth_method == "sso") if row is not None else None,
+        # 1.6.0 (#39): how this browser signed in (password | sso), and until when it counts as freshly signed in
+        # through the identity provider (stands in for the password where one is asked again).
+        "session": {"auth_method": row.auth_method, "fresh_until": row.fresh_until} if row is not None else None,
         # Why this browser's session ended, so the sign-in page can say so.
         "ended": ended,
         # HTTPS or not: admins get a warning while the server speaks plain HTTP.
         "tls": tls_state(request),
+        # 1.6.0 (#39): {"name": …} when people can sign in through an identity provider, else None.
+        "sso": sso.public_info(db),
     }
 
 
 @router.post("/setup")
 def setup(body: SetupIn, request: Request, response: Response, db: DbSession = Depends(get_db)):
     ip = client_ip(request)
-    wait = limiter.login_wait("__setup__", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
+    wait = limiter.attempt_wait("setup", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     with _setup_lock:
         if has_users(db):
             raise fail(409, "already_set_up", "Forgeyard already has an owner. Sign in instead.")
         if not secrets_store.setup_token_matches(body.setup_token):
-            limiter.login_failed("__setup__", ip)
+            limiter.attempt_failed("setup", ip)
             audit.record(db, "setup.token_rejected", ip=ip)
             db.commit()
             raise fail(403, "bad_setup_token",
@@ -125,7 +141,7 @@ def setup(body: SetupIn, request: Request, response: Response, db: DbSession = D
         db.add(owner)
         db.flush()
         audit.record(db, "setup.owner_created", actor=owner, target=username, ip=ip)
-        _start_session(request, response, db, owner)
+        start_session(request, response, db, owner)
         db.commit()
         secrets_store.discard_setup_token()
     return {"user": user_out(owner)}
@@ -150,13 +166,61 @@ def login(body: LoginIn, request: Request, response: Response, db: DbSession = D
         raise fail(403, "pending_approval", "Your account is waiting for an admin to approve it.")
     if user.status != "active":
         raise fail(403, "account_disabled", "This account is disabled. Ask an admin.")
-    limiter.login_succeeded(name)
     if passwords.needs_rehash(user.password_hash):
         user.password_hash = passwords.hash_password(body.password)
-    _start_session(request, response, db, user)
+    if mfa.has_factor(db, user.id):
+        # 1.6.0 (#39): the password was right; a code from the account's authenticator (or a recovery code) is
+        # still to come, at POST /api/auth/mfa. No session yet, and the failure count stays until the code is
+        # right, so wrong codes add to the same back-off as wrong passwords.
+        challenge = mfa.new_challenge(db, user)
+        db.commit()
+        return {"mfa_required": True, "challenge": challenge,
+                "expires_in": int(mfa.CHALLENGE_TTL.total_seconds())}
+    limiter.login_succeeded(name)
+    start_session(request, response, db, user)
     audit.record(db, "auth.login", actor=user, ip=ip)
     db.commit()
     return {"user": user_out(user)}
+
+
+@router.post("/mfa")
+def login_code(body: LoginCodeIn, request: Request, response: Response, db: DbSession = Depends(get_db)):
+    """The second step of a sign-in with two-factor: the challenge from /login and a code."""
+    settings = get_settings()
+    ip = client_ip(request)
+    row = mfa.find_challenge(db, body.challenge)
+    if row is None:
+        raise fail(400, "mfa_challenge_expired", "This sign-in took too long or had too many wrong codes. "
+                                                 "Sign in again.")
+    user = db.get(User, row.user_id)
+    wait = limiter.login_wait(user.username, ip, settings.login_free_failures, settings.login_ip_failures)
+    if wait:
+        raise fail(429, "rate_limited", "Too many failed sign-ins. Wait before trying again.",
+                   retry_after=retry_after(wait))
+    if user.status != "active":
+        mfa.finish_challenge(db, row)
+        db.commit()
+        raise fail(403, "account_disabled", "This account is disabled. Ask an admin.")
+    how = mfa.check_code(db, user.id, body.code)
+    if how is None:
+        left = mfa.wrong_code(db, row)
+        limiter.login_failed(user.username, ip)
+        audit.record(db, "auth.login_failed", actor=user, ip=ip, reason="mfa_code")
+        db.commit()
+        raise fail(400, "mfa_code_invalid", "That code is not right.", attempts_left=left)
+    if not mfa.finish_challenge(db, row):  # another request with this challenge won
+        db.rollback()
+        raise fail(400, "mfa_challenge_expired", "This sign-in took too long or had too many wrong codes. "
+                                                 "Sign in again.")
+    limiter.login_succeeded(user.username)
+    start_session(request, response, db, user, mfa_at=utcnow())
+    audit.record(db, "auth.login", actor=user, ip=ip, mfa=how)
+    left = None
+    if how == "recovery":
+        left = mfa.recovery_left(db, user.id)
+        audit.record(db, "auth.recovery_code_used", actor=user, ip=ip, left=left)
+    db.commit()
+    return {"user": user_out(user), "recovery_codes_left": left}
 
 
 @router.post("/logout")
@@ -172,11 +236,13 @@ def logout(request: Request, response: Response, db: DbSession = Depends(get_db)
 
 
 @router.get("/me")
-def me(caller: Caller = Depends(current)):
-    return {"user": user_out(caller.user), "session": {
+def me(caller: Caller = Depends(signed_in)):  # also while a required two-factor setup is overdue
+    return {"user": user_out(caller.user, via_sso=caller.session.auth_method == "sso"), "session": {
         "id": caller.session.public_id,
         "expires_at": caller.session.expires_at,
         "idle_minutes": get_settings().session_idle_minutes,
+        "auth_method": caller.session.auth_method,
+        "fresh_until": caller.session.fresh_until,
     }}
 
 
@@ -187,11 +253,11 @@ def register(body: RegisterIn, request: Request, db: DbSession = Depends(get_db)
     username = normalise_username(body.username)
     _check_password(body.password, username)
     ip = client_ip(request)
-    wait = limiter.login_wait("__register__", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
+    wait = limiter.attempt_wait("register", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     if db.scalar(select(User).where(User.username == username)):
-        limiter.login_failed("__register__", ip)
+        limiter.attempt_failed("register", ip)
         raise fail(409, "username_taken", "That username is taken.")
     user = User(username=username, email=body.email or None, role="user", status="pending",
                 password_hash=passwords.hash_password(body.password))
@@ -227,6 +293,7 @@ def my_sessions(caller: Caller = Depends(current), db: DbSession = Depends(get_d
             "expires_at": s.expires_at,
             "ip": s.ip,
             "user_agent": s.user_agent,
+            "two_factor": s.mfa_at is not None,
         }
         for s in sessions.live_sessions(db, caller.user.id)
     ], "idle_minutes": get_settings().session_idle_minutes, "max_days": get_settings().session_max_days}
@@ -263,12 +330,12 @@ def check_link(body: LinkCheckIn, db: DbSession = Depends(get_db)):
 @router.post("/password-link")
 def use_link(body: LinkUseIn, request: Request, db: DbSession = Depends(get_db)):
     ip = client_ip(request)
-    wait = limiter.login_wait("__link__", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
+    wait = limiter.attempt_wait("link", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     link = links.find(db, body.token)
     if link is None:
-        limiter.login_failed("__link__", ip)
+        limiter.attempt_failed("link", ip)
         raise fail(404, "link_invalid", "This link has expired or was already used. Ask an admin for a new one.")
     user = db.get(User, link.user_id)
     _check_password(body.password, user.username)

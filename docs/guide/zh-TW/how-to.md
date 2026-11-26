@@ -101,7 +101,7 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_JOIN_TOKEN=fyj_… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+     docker.io/tonyhuang1101/forgeyard-agent:1.6.0
    ```
 
    它就是 NVIDIA 的指令少了 `$(for d in /dev/nvidia…)` 那一行：WSL2 透過 `/dev/dxg` 提供 GPU，沒有 `/dev/nvidia*` 裝置。模型目錄請放在發行版自己的磁碟上（預設的 `/srv/forgeyard-models`）。放在 `/mnt/c` 底下也能用，但每個檔案都要經過 WSL 的檔案共用，慢上好幾倍；輸入這種目錄時，頁面會提醒你。
@@ -144,7 +144,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 `$(for d in …)` 那一行會再用 `--device` 傳入主機上每個 NVIDIA 裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm`、`/dev/nvidia-uvm-tools`、`/dev/nvidia-modeset` 和每個 `/dev/nvidiaN`），主機沒有的會跳過。Docker 可以同時接受它們和 `--gpus all`，而且這很重要：`--gpus` 給的裝置是在 Docker 和 systemd 不知道的情況下設定的，主機下一次執行 `systemctl daemon-reload` 時，容器裡的新行程就會失去它們；用 `--device` 給的則會留著（[機器上的新行程打不開它的 GPU](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)）。如果還沒有 `/dev/nvidia-uvm`（主機開機後還沒跑過 CUDA 程式），先執行 `sudo nvidia-modprobe -u -c=0`。設定好 CDI（`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）的話，可以改用 `--device nvidia.com/gpu=all` 取代這兩者：CDI 會宣告這些裝置，所以它們也會留著。
@@ -178,7 +178,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -189,7 +189,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0 inventory
 ```
 
 ### 純 CPU
@@ -203,7 +203,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 ### 為什麼要用這些選項
@@ -221,8 +221,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **進階／離線** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.6 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.6.0 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -236,16 +236,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.6 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.6.0 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.6`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.6.0`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它在容器裡的模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -256,7 +256,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+     docker.io/tonyhuang1101/forgeyard-agent:1.6.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -325,8 +325,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 伺服器升級後，機器的頁面會在 **更新 agent** 顯示完整的指令（[更新 agent](#update-an-agent)）。設成 **一律經由伺服器** 的機器，指令會改為搬運 agent 映像檔，而不是拉取。在連得到 Docker Hub 的機器上執行第一步（把 `USER` 換掉；如果你用別的名稱連到那台機器，主機名稱也要換）：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.6 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.6.0 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 再到 `amd-01` 上執行第二步：`docker rm -f`，然後用載入的映像檔執行同樣的 `docker run`。沒有 `ssh` 連得到那台機器？把映像檔存成檔案帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。1.4.2 之前的 agent 不會回報它的執行方式：請先用這種方式手動更新一次，之後它的頁面就會顯示指令。
@@ -967,6 +967,103 @@ Forgeyard 會這樣告訴你（管理員可以在 **設定健康檢查** 看到�
 
 如果要讓別人自己申請帳號，請以 `REGISTRATION=approval` 啟動伺服器。登入頁就會提供申請帳號的連結，申請會在 **使用者** 等待，直到管理員選 **核准** 或 **拒絕**。
 
+## 開啟雙重驗證
+
+開啟雙重驗證（1.6.0）後，登入時除了密碼，還要輸入手機上驗證器 App 顯示的 6 位數驗證碼，所以就算別人知道你的密碼，也登不進來。任何支援 TOTP 的 App 都可以：Google Authenticator、Microsoft Authenticator、1Password、Bitwarden、Aegis 等等。
+
+1. 打開 **我的帳號**（右上角你的名稱），在 **雙重驗證** 底下選 **加入驗證器 App**。
+2. 用 App 掃描 QR 碼。沒辦法掃描時，改在 App 裡輸入 **設定金鑰**（依時間產生、6 位數、每 30 秒更新）。
+3. 輸入 **App 顯示的驗證碼**，想要的話取個 **名稱**（例如「公司手機」），輸入你的密碼，然後選 **開啟雙重驗證**。驗證碼正確之前什麼都不會儲存，所以金鑰打錯也不會有任何影響。
+4. 把畫面上的 **10 組備用碼** 存好，不要和密碼放在一起（可以 **下載成文字檔** 或複製）。它們只會顯示這一次。手機遺失或不在身邊時，每一組都能代替驗證碼登入一次。
+
+之後 **登入** 時，輸入密碼後還會要求驗證碼。選 **手機不在身邊？改用備用碼** 就能改輸入備用碼。一次登入會等驗證碼 5 分鐘，最多可以錯 5 次，之後請重新登入。驗證碼輸入錯誤和密碼錯誤一樣會被計算，錯太多次時，下一次嘗試要等一下。每組驗證碼只能用一次：已經用來登入過的驗證碼會被拒絕，請等下一組。
+
+在 **我的帳號** 裡也可以：
+
+- **再加入一個驗證器**（最多 5 個），例如第二支手機。要用你的密碼，或已在使用的驗證器顯示的驗證碼確認。
+- **產生新的備用碼**：一組新的 10 個備用碼，舊的會失效。剩下不多時就這樣做。
+- **移除** 驗證器。移除最後一個時，雙重驗證會關閉，備用碼也會一起失效。
+
+這兩個操作都會再要求你的密碼，或 App 目前顯示的驗證碼。下載加密金鑰的備份時也會要求驗證碼。
+
+管理員可以在 **使用者** 頁面看到誰開啟了雙重驗證，**設定健康檢查** 也會列出還沒開啟的管理員。
+
+### 要求所有人開啟雙重驗證
+
+雙重驗證預設由每個人自己決定。管理員可以要求開啟（1.6.0）：在 **使用者** 頁面的 **雙重驗證** 底下，選擇哪些人必須開啟，以及 **寬限期**，然後按 **儲存**。
+
+- **不強制**（預設）：對任何人都沒有影響。
+- **管理員必須開啟**：所有管理員，包括擁有者。
+- **所有人都必須開啟**：所有帳號。
+
+寬限期（沒改的話是 7 天，可設 0 到 90 天）從你開啟這項設定的時間起算；如果帳號是之後才建立的，就從建立帳號的時間起算。從「管理員」改成「所有人」時，其他人會拿到完整的寬限期，管理員的期限則維持不變。
+
+- **寬限期內**，還沒有驗證器的人照常登入，畫面上會有一則提醒，寫著還剩幾天，並附上前往 **我的帳號** 的連結。
+- **寬限期過後**，他們還是能用密碼登入，但只會看到 **請先開啟雙重驗證**：只能加入驗證器 App（步驟如上）或登出，其他都不能做。主控台的 API 對其他所有請求（包括 Playground）都會回應 `403`，代碼是 `mfa_enrolment_required`。加入驗證器之後，一切會立刻恢復。
+- **API 金鑰不受影響**：不論這項設定怎麼選，呼叫 `/v1` 的程式都照常運作。要停用某人的金鑰，請在 **使用者** 停用他的帳號。
+- **沒有人會因此被鎖在外面**，擁有者也一樣：密碼一定能登入，加入驗證器的頁面也一定打得開。
+
+在 **使用者** 頁面，還沒加入的人旁邊會顯示雙重驗證的期限；**設定健康檢查** 會列出還在寬限期內和已經逾期的人數。要求管理員開啟後，沒有開啟雙重驗證的管理員在那裡會變成警告。每次變更這項設定都會記錄在 **稽核紀錄**（`mfa_policy.changed`）。
+
+### 驗證器和備用碼都遺失時
+
+請找管理員：在 **使用者** 頁面選 **重設雙重驗證**，會移除你的驗證器和備用碼，並結束你的工作階段；之後你只用密碼登入，可以再重新加入驗證器（如果你的帳號必須開啟雙重驗證，就要馬上加入）。在那裡不能重設自己的雙重驗證，擁有者的也只有擁有者本人能變更，所以擁有者一定要把備用碼存在安全的地方。
+
+**擁有者，或沒有其他管理員可以求助的管理員**，請在伺服器主機上（伺服器資料所在的地方）重設：
+
+```bash
+uv run --no-sync python -m forgeyard users reset-mfa <username>              # a server run from the source
+docker exec <server container> python -m forgeyard users reset-mfa <username>   # the Docker image
+```
+
+它會移除這個帳號的驗證器和備用碼，並結束它的工作階段；**稽核紀錄** 會記下一筆 `user.mfa_reset`，執行者是 `cli`。伺服器執行中也能用，它和伺服器使用同一個 `DATA_DIR`（或 `DATABASE_URL`），不需要加密金鑰。任何能在伺服器主機上開 shell 的人都能這麼做，所以這台主機和它的資料目錄一樣，只能交給負責維運 Forgeyard 的人。
+
+如果伺服器的加密金鑰永久遺失，[`secrets reset`](#back-up-and-restore) 會移除所有驗證器，因為它已經讀不到它們了。
+
+## 用單一登入（OIDC）登入
+
+大家可以透過貴單位的身分提供者，用 OpenID Connect 登入（1.6.0）：Keycloak、Authentik、Microsoft Entra ID、Google，或任何有公布探索文件（discovery document）的身分提供者。一台伺服器設定一個身分提供者。有密碼的人仍然可以用密碼登入。
+
+登入使用授權碼流程，並搭配 PKCE、`state` 和 `nonce`。Forgeyard 只接受這樣的 ID 權杖：用 RS256 或 ES256 簽署、簽署的金鑰是身分提供者公布的、發給它自己的用戶端 ID、來自你設定的簽發者，而且還沒過期。
+
+### 在身分提供者註冊 Forgeyard
+
+每個身分提供者都會要你填 **重新導向 URI**。請從 **使用者 → 單一登入（OIDC）** 複製：它是 `PUBLIC_URL` 後面加上 `/sso/callback`，例如 `https://forgeyard.example.com:7860/sso/callback`。請設定 `PUBLIC_URL`（[網路與位址](reference.md#network-and-addresses)），這個網址才不會跟著別人輸入的位址變動。
+
+- **Keycloak**：在 realm 裡選 **Clients → Create client**，類型選 *OpenID Connect*，開啟 **Client authentication**，只勾 **Standard flow**，**Valid redirect URIs** 填重新導向 URI。用戶端密鑰在它的 **Credentials** 分頁。簽發者是 `https://<主機>/realms/<realm>`。如果要依群組決定角色，請在這個用戶端專用的 scope 加一個 *Group Membership* mapper，權杖宣告名稱填 `groups`，並關閉 **Full group path**。
+- **Authentik**：選 **Applications → Providers → Create**，類型 *OAuth2/OpenID Provider*，用戶端類型 *Confidential*，重新導向 URI 設為完全相符（strict），再建立一個使用它的 application。簽發者是 `https://<主機>/application/o/<application slug>/`（結尾有斜線，和 Authentik 公布的寫法一樣）。
+- **Microsoft Entra ID**：選 **App registrations → New registration**，選 *Accounts in this organizational directory only*，平台選 *Web* 並填入重新導向 URI；再到 **Certificates & secrets** 建立用戶端密鑰。簽發者是 `https://login.microsoftonline.com/<租用戶 ID>/v2.0`。要依角色對應時，請定義並指派 app roles（會出現在 `roles` 宣告）。`groups` 宣告也可以用，但一個人屬於超過 200 個群組時，Entra 不會把它放進權杖。Entra 不會驗證使用者自己在個人資料填的電子郵件地址：新帳號請維持等待核准，或只在單一租用戶的 app 上使用允許的網域。
+- **Google**：在 Google Cloud 主控台選 **APIs & Services → Credentials → Create credentials → OAuth client ID**，類型選 *Web application*，在 **Authorized redirect URIs** 填入重新導向 URI。簽發者是 `https://accounts.google.com`。Google 不接受直接用 IP 位址的重新導向 URI（`https://192.168.1.20:7860/…`），除了 `localhost` 之外也不接受純 `http://`，所以伺服器必須用 DNS 名稱、透過 HTTPS 連線（用你自己的憑證，或在前面放一台 proxy）。任何有 Google 帳號的人都能在 Google 登入，所以請設定 **允許的電子郵件網域**。Google 不會送群組資訊，角色請在 **使用者** 頁面設定。
+
+### 在 Forgeyard 設定
+
+在 **使用者** 頁面的 **單一登入（OIDC）** 底下（限管理員）：
+
+1. **名稱**：登入頁會顯示「使用 <名稱> 登入」。
+2. **簽發者 URL**，然後按 **檢查**：Forgeyard 會讀取身分提供者的探索文件，並告訴你找到了什麼。
+3. **用戶端 ID** 和 **用戶端密鑰**。密鑰會用伺服器的密鑰加密，之後不會再顯示；欄位留空就會保留原本的密鑰。如果是公開用戶端（只靠 PKCE），請勾選 **不使用用戶端密鑰**。
+4. **範圍（scopes）**：預設是 `openid email profile`。如果你的身分提供者需要額外的範圍，才會把群組或角色放進 ID 權杖，請加上去。
+5. **有新的人登入時**：*等管理員核准*（預設），或 *直接建立可用的帳號*，後者至少要設定一個 **允許的電子郵件網域**。
+6. 視需要設定 **由身分提供者決定角色**（見下方），然後勾選 **開啟單一登入** 並按 **儲存**。在開啟狀態下儲存時，會再讀一次探索文件，無法使用的身分提供者會被拒絕。
+
+之後登入頁的密碼表單下方會出現 **使用 <名稱> 登入**。如果身分提供者在你的內部網路，憑證是自家 CA 簽發的，請設定 `SSO_CA_FILE`（[帳號與登入](reference.md#accounts-and-sign-in)）：它是在系統的 CA 之外另外信任的 CA，所以憑證由公司 CA 簽發的身分提供者也能使用。伺服器呼叫身分提供者（探索文件、金鑰和權杖端點）時一律直接連線，不會經過 `EGRESS_PROXY`：伺服器必須能自己連到身分提供者。按 **移除** 會刪除身分提供者和所有連結到它的帳號連結；帳號本身會保留，沒有密碼的帳號之後需要管理員在 **使用者** 頁面給設定密碼的連結。
+
+### 誰能登入、拿到什麼角色
+
+- **帳號是依身分提供者的簽發者和主體（subject）找到的，絕不依電子郵件。** 就算某人在身分提供者的電子郵件和現有的人一樣，也進不了那個人的帳號，而是會拿到一個新帳號。
+- **伺服器還不認識的人** 會拿到一個新帳號，名稱取自他的 `preferred_username`（或電子郵件 @ 前面的部分）。設定為 *等管理員核准* 時，帳號會在 **使用者** 頁面等待 **核准** 或 **拒絕**，登入頁也會這樣告訴他；設定為 *直接建立可用的帳號* 時，他會直接登入。設定了 **允許的電子郵件網域** 時，兩種情況下網域以外的人都拿不到帳號，身分提供者標示為未驗證的地址也會被拒絕。
+- **現有的帳號由本人連結**：在 **我的帳號** 的 **單一登入** 底下，輸入你的密碼（或驗證器 App 上的驗證碼），再選 **連結 <名稱>**；身分提供者會再要你輸入一次密碼。只要你還有密碼可以登入，就能 **取消連結**。
+- **停用的帳號不能登入**，透過身分提供者也一樣。
+- **由身分提供者決定角色**：填寫 **角色宣告**（例如 `groups` 或 `roles`），以及對應到每個角色的值。每次登入時，這個人會拿到他的值所對應的最高角色；都沒有對應到就是 *使用者*；權杖裡沒有這個宣告時，角色維持不變。擁有者的角色永遠不會改變。沒有設定對應時，角色只在 **使用者** 頁面設定。
+
+### 雙重驗證與密碼
+
+- 透過身分提供者登入的工作階段，不會被要求 Forgeyard 的雙重驗證，即使已經要求所有人開啟（[要求所有人開啟雙重驗證](#require-two-factor-for-everyone)）：請在身分提供者那裡開啟雙重驗證。同一個人改用密碼登入時，仍然會被要求。
+- 透過身分提供者建立的帳號 **沒有密碼**。在 Forgeyard 要求再輸入一次密碼的地方（下載密鑰備份、加入驗證器 App），這種帳號請選 **用 <名稱> 重新登入**：身分提供者會再要求輸入一次密碼（`max_age=0`，Google 以外還會加上 `prompt=login`），之後 5 分鐘內就等同輸入過密碼。也可以改用驗證器 App 上的驗證碼。
+- **API 金鑰** 和身分提供者沒有綁在一起：有人離職、在身分提供者那裡被移除後，他的金鑰仍然能用，直到管理員在 **使用者** 頁面停用他的帳號（停用後金鑰會立刻失效）。
+
+每一次透過身分提供者登入都會記錄在 **稽核紀錄**，動作是 `auth.sso_login`；被拒絕的則是 `auth.sso_login_failed`，並附上原因（例如 `state_invalid`、`token_invalid:nonce`、`pending_approval`、`account_disabled`、`domain_not_allowed`）。新帳號記為 `user.registered`（via `sso`），連結記為 `user.identity_linked` 和 `user.identity_unlinked`，管理員的變更記為 `idp.created`、`idp.changed`（絕不包含密鑰）和 `idp.deleted`。
+
 ## 使用繁體中文的主控台
 
 主控台提供英文和繁體中文（1.5.1）。瀏覽器第一次開啟它時，會跟著瀏覽器的語言：任何中文設定都會顯示繁體中文，其他語言則顯示英文。要切換時，打開帳號選單（右上角你的名稱），在**語言**底下選 **English** 或 **繁體中文**；在手機上，同樣的切換在選單的最後面。頁面會立刻切換，不需要重新載入。
@@ -974,7 +1071,7 @@ Forgeyard 會這樣告訴你（管理員可以在 **設定健康檢查** 看到�
 - 這個選擇存在**這個瀏覽器**裡，而不是你的帳號：換一個瀏覽器或電腦，會再從那邊的語言開始。伺服器上什麼都不會儲存，API 用戶端和腳本也不受影響。
 - 它**也是使用指南的語言**：指南頁面上方的語言連結和主控台的切換，設定的是同一個選擇，主控台裡的說明連結也會用這個語言開啟指南。
 - 數字、大小、時間和日期會跟著語言顯示（*41 秒前*、*2026年11月23日*）。
-- 伺服器的訊息仍然以英文撰寫。主控台會依代碼翻譯常見的訊息（例如 `model_waking`、`cannot_wake`、`budget_exhausted`），並以中文說明每一則**設定健康檢查**項目的種類，底下附上伺服器的原文（裡面有機器和模型的名稱）。沒有翻譯的訊息會照伺服器送來的內容顯示。
+- 伺服器的訊息仍然以英文撰寫。主控台會依代碼翻譯常見的訊息（例如 `model_waking`、`cannot_wake`、`budget_exhausted`），並以中文說明每一則**設定健康檢查**項目的種類，底下附上伺服器的原文（裡面有機器和模型的名稱）。和雙重驗證有關的兩則提醒（1.6.0）則會依伺服器一併送來的名稱、人數和日期，完整以中文顯示。沒有翻譯的訊息會照伺服器送來的內容顯示。
 - 每個頁面都有翻譯：外框（選單、登入、開始使用和設定健康檢查）、**機器**、**服務中**、**模型**、**雲端**、**試用區**、**API 金鑰**、**用量**、**使用者**、**稽核紀錄**、你的帳號，以及**信任這台伺服器**。你自己取的名稱（機器、模型、金鑰）、推論引擎和 agent 印出的內容，以及 API 本身，都維持原樣。
 
 ## 使用自己的憑證或反向代理
@@ -1060,7 +1157,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.6
+  docker.io/tonyhuang1101/forgeyard:1.6.0
 sudo docker logs forgeyard
 ```
 
@@ -1078,7 +1175,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.6 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.6.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1086,7 +1183,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.6 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.6.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -1108,12 +1205,12 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.6
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.6.0
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**機器** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.6 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.6.0 .`
 
 ## 把伺服器當成服務執行
 
@@ -1185,7 +1282,7 @@ sudo systemctl enable --now forgeyard
 - **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.6 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.6.0 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1200,7 +1297,7 @@ sudo systemctl enable --now forgeyard
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+     docker.io/tonyhuang1101/forgeyard-agent:1.6.0
    ```
 
    在 NVIDIA 機器上，指令還會在 `--gpus all` 旁邊用 `--device` 傳入 GPU 的裝置節點，所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。從 1.5.4 起，這些節點是在你執行指令時才從主機上找出來的，用的是和[新增機器](#run-the-agent-in-docker)的 Docker 指令同一行 `$(for d in …)`：當下主機上有的每個 `/dev/nvidia*` 節點都會傳入，所以 agent 啟動後才裝上的 GPU 也包含在內，同一個指令在 1 張或 8 張 GPU 的機器上都能用。shell 會在 Docker 啟動前把這一行展開成一般的 `--device /dev/nvidiaN` 選項，所以 Docker 記錄每個裝置的方式和手動輸入時一樣，這正是 `daemon-reload` 之後裝置還在的原因。傳入每個裝置並不會擴大 Forgeyard 使用的範圍：它可以分配哪些 GPU，仍然由這台機器的 [GPU 存取](#restrict-gpus-on-a-shared-machine)設定決定。只用部分 GPU 啟動的 agent（`--gpus "device=0,2"`）會保留它回報的那些節點，逐一列出名稱；agent 回報、但這一行找不到的節點（其他 `/dev/nvidia…` 名稱）也一樣。
@@ -1399,7 +1496,7 @@ uv run --no-sync python -m forgeyard secrets restore forgeyard-key-backup-ab12cd
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動。
+它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動。雙重驗證的驗證器 App 也會被移除：這些人改用密碼登入，再重新加入自己的驗證器。
 
 ## 查看模型或推論引擎
 

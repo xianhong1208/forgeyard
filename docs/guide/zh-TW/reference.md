@@ -65,6 +65,11 @@
 | `RATE_LIMIT_PER_MINUTE` | `600` | 每個位址每分鐘對網頁介面的 API（`/api`）的請求數（0：不限制）。閘道 `/v1` 則改用每把金鑰的限制 |
 | `LOGIN_FREE_FAILURES` | `5` | 每個帳號登入失敗幾次後，之後每次嘗試都要等待（2 秒起，每次加倍，最多 5 分鐘） |
 | `LOGIN_IP_FAILURES` | `30` | 每個位址在 15 分鐘內登入失敗幾次後，該位址就要等待 |
+| `SSO_CA_FILE` | 空 | 單一登入（1.6.0）：除了系統的 CA 之外，另外信任這個 CA 檔，用於內部網路裡、憑證由自家 CA 簽發的身分提供者（公司 CA）。呼叫身分提供者時一律直接連線，不會經過 `EGRESS_PROXY`。身分提供者本身在 **使用者** 頁面設定 |
+
+要求開啟雙重驗證（1.6.0）不是環境變數：由管理員在 **使用者** 頁面設定（`GET` / `PUT /api/users/mfa-policy`，`mfa_required` 為 `off`、`admins` 或 `everyone`，`mfa_grace_days` 為 0 到 90，預設 7）。某人加入驗證器的期限過了之後，主控台的 API 除了 `GET /api/auth/state`、`GET /api/auth/me`、`POST /api/auth/logout`、`GET /api/auth/mfa/factors`、`POST /api/auth/mfa/totp/start` 和 `POST /api/auth/mfa/totp` 之外，一律回應 `403 mfa_enrolment_required`。每個使用者都帶有 `mfa_enrolment`：`null`，或在必須開啟但還沒有驗證器時為 `{"by": …, "due": …}`。API 金鑰（`/v1`）不受影響。
+
+單一登入（1.6.0）除了 `SSO_CA_FILE` 之外也不是環境變數：由管理員在 **使用者** 頁面設定唯一的身分提供者（`GET` / `PUT` / `DELETE /api/identity-provider`；`POST /api/identity-provider/check` 帶 `{"issuer"}` 可讀取它的探索文件）。`client_secret` 只能寫入：`PUT` 沒帶它就保留原值，`""` 會移除它，回應只會告訴你 `has_client_secret`。`new_accounts` 是 `approve`（預設）或 `automatic`，後者需要 `allowed_domains`；`role_claim` 加上 `role_mapping`（`{"<宣告的值>": "admin" | "operator" | "user"}`）會在每次登入時設定角色。登入本身是 `POST /api/auth/sso/start`（`purpose`：`login`、`link` 或 `reauth`），以及網頁介面的 `/sso/callback` 頁面送出的 `POST /api/auth/sso/finish`；`GET /api/auth/sso/identities` 和 `POST /api/auth/sso/unlink` 給「我的帳號」使用。`GET /api/auth/state` 帶有 `sso`（`{"name"}` 或 `null`）和 `session`（`auth_method`：`password` 或 `sso`，以及 `fresh_until`）。錯誤代碼：`sso_not_configured`、`sso_unavailable`、`sso_provider_unreachable`、`sso_state_invalid`、`sso_denied`、`sso_token_failed`、`sso_token_invalid`（附 `reason`：`alg`、`signature`、`iss`、`aud`、`exp`、`iat`、`nonce` 或 `sub`）、`sso_not_fresh`、`sso_domain_not_allowed`、`sso_email_unverified`、`sso_wrong_account`、`pending_approval`、`account_disabled`、`identity_in_use`、`identity_already_linked`、`no_linked_identity`、`last_way_in`、`fresh_sign_in_required`。稽核動作：`auth.sso_login`、`auth.sso_login_failed`、`user.registered`（`via: sso`）、`user.identity_linked`、`user.identity_unlinked`、`idp.created`、`idp.changed`、`idp.deleted`。
 
 ### 機器
 
@@ -764,7 +769,7 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 
 ### 回 410 的位址
 
-下面這些位址在 1.5.x 剩下的版本都回 **410 Gone**，讓還在呼叫它們的腳本或程式知道原因。從 1.6 起改回一般的 404。
+下面這些位址從 1.5.3 起都回 **410 Gone**（1.6.0 也是），讓還在呼叫它們的腳本或程式知道原因。之後的某個 1.6.x 版會改回一般的 404，屆時的版本說明會寫出來。
 
 | 位址 | 原本是 |
 |---|---|
@@ -1208,6 +1213,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `certificate-name-missing` | 錯誤 | 你自己的憑證沒有包含 `PUBLIC_URL` 的主機 |
 | `certificate-expiring` | 警告 | 你自己的憑證在 30 天內到期，或 Forgeyard 的 CA 在 90 天內到期。14 天內到期則是錯誤 |
 | `registrations-pending` | 提示 | 有人在等待核准 |
+| `admins-without-mfa` | 提示 | 有管理員只用密碼登入（沒有開啟雙重驗證）。要求管理員開啟雙重驗證時，則是警告 |
+| `mfa-setup-pending` | 提示 | 要求開啟雙重驗證，但它涵蓋的人當中有人還沒加入：還在寬限期內的人數（以及最早的期限）和已經逾期的人數（[要求所有人開啟雙重驗證](how-to.md#require-two-factor-for-everyone)） |
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
 | `replica-traffic-plain` | 警告 | 送往某台機器的流量沒有加密：它的 agent 比 1.4.5 舊，閘道以純 HTTP 連它；修正連結會開啟它的更新指令（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)） |
 | `replica-certificate` | 錯誤 | 某台機器的 agent 以 TLS 提供副本，卻沒有這台伺服器簽發的憑證，或憑證已過期、沒有在更新（剩不到 3 天）：連不到它的副本（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)） |
@@ -1256,6 +1263,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`，或單獨的 `python -m forgeyard`）。資料庫的變更會在啟動時執行 |
 | `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器）。沒有 `--yes` 時只說明會捨棄什麼 |
 | `python -m forgeyard secrets restore FILE` | 從主控台下載的金鑰備份放回機密金鑰和 CA（請先停止伺服器）。會詢問通關密語。`--data-dir DIR`：寫到另一個資料夾；`--force`：取代那裡已有的不同金鑰或 CA（舊檔案保留為 `<名稱>.replaced-<時間>`）；`--passphrase-file PATH`：從檔案的第一行讀取通關密語。通關密語錯誤、檔案損壞或那裡已有不同的金鑰時，結束代碼為 2，什麼都不寫入 |
+| `python -m forgeyard users reset-mfa NAME` | 移除某個帳號的雙重驗證（驗證器和備用碼），並結束它的工作階段，給手機和備用碼都遺失的人用，擁有者也可以（[做法](how-to.md#if-you-lose-your-authenticator-and-recovery-codes)）。稽核紀錄會記下 `user.mfa_reset`，執行者是 `cli`。伺服器執行中也能用，不需要加密金鑰。以 2 結束：沒有這個帳號，或那裡沒有資料庫；以 0 結束：完成，或沒有東西要移除 |
 | `python -m forgeyard check-apps` | 列出升級到 1.5.3 會移除（或已移除）的東西（應用程式、API 金鑰的 `/x/` 存取權），不做任何變更（[升級之前](#before-you-upgrade)）。以 1 結束：有東西會被移除；以 0 結束：沒有，或資料庫已經升級。`--json`：機器可讀的輸出 |
 | `python -m forgeyard --version` | 顯示版本 |
 
@@ -1486,7 +1494,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.5.6`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.6.0`（就是那個版本）、`1.6`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**加入機器** 會說明怎麼建置。

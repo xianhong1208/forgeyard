@@ -13,7 +13,8 @@ fix is released as a patch version, and the advisory names you unless you ask ot
 
 | Version | Security fixes and serious bug fixes |
 |---|---|
-| 1.5.x (the newest minor release) | Yes |
+| 1.6.x (the newest minor release) | Yes |
+| 1.5.x | No: upgrade to 1.6.x |
 | 1.4.x (long-term support) | Yes, until 2027-06-30 |
 | Anything older | No: upgrade |
 
@@ -39,6 +40,9 @@ face the internet on its own; put it behind a VPN or a reverse proxy you trust (
 - **The server's data directory is the crown jewels.** It holds the database, the certificate
   authority's key (`data/tls/`) and the key that encrypts stored secrets (`data/secret.key`). Back
   it up, keep it private, and never commit it.
+- **A shell on the server host is trusted like the data directory.** `forgeyard users reset-mfa NAME` run there
+  removes any account's two-factor sign-in, the owner's included (audited as `user.mfa_reset` by `cli`): it is the
+  way back in for an owner who lost both the phone and the recovery codes.
 
 ## What a report can expect us to treat as a vulnerability
 
@@ -55,6 +59,8 @@ face the internet on its own; put it behind a VPN or a reverse proxy you trust (
 
 ## Known limits (not vulnerabilities)
 
+- Two-factor sign-in, required or not, protects signing in to the console. API keys are not affected: they keep
+  working until they are revoked or their owner's account is disabled.
 - A process workload on NVIDIA is kept to its cards cooperatively (`CUDA_VISIBLE_DEVICES`);
   `/dev/nvidia*` is usually world-readable. Use the container runtime when that matters.
 - Without systemd, process workloads get rlimits only: CPU is counted for placement, not capped.

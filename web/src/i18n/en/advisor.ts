@@ -43,6 +43,7 @@ export default {
   "advisor.fix.Open Models": "Open Models",
   "advisor.fix.Open Serving": "Open Serving",
   "advisor.fix.Open Users": "Open Users",
+  "advisor.fix.Open My account": "Open My account",
   "advisor.fix.Open its routing": "Open its routing",
   "advisor.fix.Open the deployment": "Open the deployment",
   "advisor.fix.Open the machine": "Open the machine",
@@ -97,6 +98,24 @@ export default {
   "advisor.finding.provider-no-key": "A provider has no API key",
   "advisor.finding.public-url-unset": "PUBLIC_URL is not set",
   "advisor.finding.registrations-pending": "People are waiting for approval",
+  "advisor.finding.admins-without-mfa": "Admins sign in without two-factor",
+  "advisor.finding.mfa-setup-pending": "People still have to add two-factor sign-in",
+  // 1.6.0 (#39): details written from the finding's facts. English shows the server's own words; these stay in
+  // step with them for the parity test.
+  "advisor.detail.registrationsPending.one": "{names} asked for an account. Approve or remove them on Users.",
+  "advisor.detail.registrationsPending.other": "{names} asked for an account. Approve or remove them on Users.",
+  "advisor.names.more": "{names} and {more} more",
+  "advisor.detail.adminsWithoutMfa.one":
+    "{names} signs in with a password alone. An admin account can change everything here: add an authenticator app in My account (each admin does it for their own account).",
+  "advisor.detail.adminsWithoutMfa.other":
+    "{names} sign in with a password alone. An admin account can change everything here: add an authenticator app in My account (each admin does it for their own account).",
+  "advisor.detail.adminsWithoutMfa.required":
+    " Two-factor sign-in is required of admins: after the grace period, an admin without one can only add it.",
+  "advisor.detail.mfaPending.waiting.one": "{count} person still in the grace period ({names}; the first one ends {date}). ",
+  "advisor.detail.mfaPending.waiting.other": "{count} people still in the grace period ({names}; the first one ends {date}). ",
+  "advisor.detail.mfaPending.overdue.one": "{count} person past it ({names}): they can only add an authenticator until they do. ",
+  "advisor.detail.mfaPending.overdue.other": "{count} people past it ({names}): they can only add an authenticator until they do. ",
+  "advisor.detail.mfaPending.tail": "Each person adds it in My account; an admin can only remind them.",
   "advisor.finding.replica-certificate": "A machine has no certificate for its replicas",
   "advisor.finding.replica-margin-low": "A GPU is almost full",
   "advisor.finding.replica-traffic-plain": "Traffic to a machine is not encrypted: update the agent",
@@ -132,6 +151,8 @@ export default {
   "advisor.backup.passphrase": "Backup passphrase",
   "advisor.backup.passphraseHint": "At least {min} characters, not your password. Write it down: a lost passphrase cannot be recovered.",
   "advisor.backup.confirm": "Passphrase again",
+  "advisor.backup.code": "Code from your authenticator app",
+  "advisor.backup.codeHint": "Your account uses two-factor sign-in: type the code the app shows now.",
   "advisor.backup.busy": "Encrypting…",
   "advisor.backup.submit": "Download the backup",
   "advisor.backup.tooShort": "Use a passphrase of at least {min} characters.",

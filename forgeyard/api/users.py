@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session as DbSession
 from forgeyard import audit
 from forgeyard.api import links
 from forgeyard.api.deps import Caller, fail, normalise_username, public_base, require_admin, user_out
-from forgeyard.db import User, get_db
-from forgeyard.security import sessions
+from forgeyard.db import User, UserIdentity, get_db
+from forgeyard.security import mfa, mfa_policy, sessions
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -25,6 +25,11 @@ class UserCreateIn(BaseModel):
     username: str = Field(max_length=64)
     email: Optional[str] = Field(default=None, max_length=255)
     role: Role = "user"
+
+
+class MfaPolicyIn(BaseModel):
+    mfa_required: Literal["off", "admins", "everyone"]
+    mfa_grace_days: int = Field(default=mfa_policy.DEFAULT_GRACE_DAYS, ge=0, le=mfa_policy.MAX_GRACE_DAYS)
 
 
 class UserPatchIn(BaseModel):
@@ -43,7 +48,41 @@ def _get(db: DbSession, user_id: int) -> User:
 @router.get("")
 def list_users(_: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     users = db.scalars(select(User).order_by(User.status != "pending", User.username)).all()
-    return {"users": [user_out(u) for u in users]}
+    with_mfa = mfa.users_with_factor(db)
+    policy = mfa_policy.load(db)
+    linked = set(db.scalars(select(UserIdentity.user_id).distinct()).all())
+    return {"users": [user_out(u, has_mfa=u.id in with_mfa, policy=policy, sso_linked=u.id in linked) for u in users]}
+
+
+def _policy_out(db: DbSession) -> dict:
+    """The setting, and how many active people it covers who still have no authenticator."""
+    policy = mfa_policy.load(db)
+    with_mfa = mfa.users_with_factor(db)
+    waiting = due = 0
+    for u in db.scalars(select(User).where(User.status == "active")).all():
+        e = mfa_policy.enrolment(db, u, policy=policy, has_factor=u.id in with_mfa)
+        if e:
+            due += e["due"]
+            waiting += not e["due"]
+    return {**policy.out(), "max_grace_days": mfa_policy.MAX_GRACE_DAYS, "in_grace_period": waiting,
+            "setup_overdue": due}
+
+
+@router.get("/mfa-policy")
+def get_mfa_policy(_: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """1.6.0 (#39): whether two-factor sign-in is required, of whom, and the grace period."""
+    return _policy_out(db)
+
+
+@router.put("/mfa-policy")
+def set_mfa_policy(body: MfaPolicyIn, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    before, after = mfa_policy.save(db, body.mfa_required, body.mfa_grace_days, caller.user.username)
+    if (before.level, before.grace_days) != (after.level, after.grace_days):
+        audit.record(db, "mfa_policy.changed", actor=caller.user, ip=caller.ip,
+                     before={"mfa_required": before.level, "mfa_grace_days": before.grace_days},
+                     after={"mfa_required": after.level, "mfa_grace_days": after.grace_days})
+    db.commit()
+    return _policy_out(db)
 
 
 @router.post("", status_code=201)
@@ -127,3 +166,24 @@ def force_sign_out(user_id: int, caller: Caller = Depends(require_admin), db: Db
     audit.record(db, "user.signed_out", actor=caller.user, target=user.username, ip=caller.ip, count=ended)
     db.commit()
     return {"ended": ended}
+
+
+@router.post("/{user_id}/mfa-reset")
+def reset_two_factor(user_id: int, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """For someone who lost their authenticator and their recovery codes: remove every factor and recovery code, and
+    end their sessions. They sign in with their password alone and can add an authenticator again. The owner's
+    factors are the owner's to change, in My account; nobody resets their own here (that would skip the password or
+    code My account asks for)."""
+    user = _get(db, user_id)
+    if user.id == caller.user.id:
+        raise fail(409, "self_protected", "Change your own two-factor sign-in in My account.")
+    if user.is_owner:
+        raise fail(409, "owner_protected", "Only the owner can change the owner's two-factor sign-in.")
+    removed = mfa.remove_all(db, user.id)
+    if not removed:
+        raise fail(409, "mfa_not_enabled", f"{user.username} has no two-factor sign-in to reset.")
+    ended = sessions.revoke_all(db, user.id, "mfa_reset")
+    audit.record(db, "user.mfa_reset", actor=caller.user, target=user.username, ip=caller.ip, factors=removed,
+                 sessions_ended=ended)
+    db.commit()
+    return {"factors_removed": removed, "sessions_ended": ended, "user": user_out(user, has_mfa=False)}

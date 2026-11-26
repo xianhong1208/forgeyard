@@ -20,6 +20,9 @@ machine is in the README's [Tested on](../README.md#tested-on).
   replicas: a model goes asleep and frees its memory, requests wake it exactly once, a key that may spill is served
   by the cloud meanwhile, a load adds a replica and a stream on it finishes while it is drained. It is also the
   `scale` group of `accept_all.py`.
+- **[`scripts/accept_sso.py`](../scripts/accept_sso.py)** (1.6.0), single sign-on against a real OpenID Connect
+  provider in a real browser. It changes server-wide sign-in settings for a few minutes, so it runs on its own, not as
+  a group of `accept_all.py`, and puts back everything it changed.
 - The other `scripts/accept_*.py` scripts cover single features in more depth (chat with images, audio and
   video; text to speech; image and video generation); [docs/development.md](development.md) lists them.
 
@@ -40,6 +43,9 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
+| 1.6.0 | full regression (`accept_all.py`, all groups). The Ryzen AI MAX+ 395 was offline, so models through the server ran with the x86-64 CPU machine and copying an image to another machine was skipped. 21 checks skipped: 5 deploys of the vision and transformers images on the x86-64 CPU machine, which has no container engine (those engines did not change since the 1.5.4 runs below); FLUX.2 [klein] 4B editing and Wan2.2-TI2V-5B, which did not fit on the shared card at that moment (accepted in the 1.5.5 rows below; nothing in those engines changed); 4 that need a second CPU machine in this script, covered by `accept_scale.py`; an expired key, since the API's shortest expiry is a day, covered by a unit test; a provider budget, since the admin has a budget of their own; Gemini, which has no embeddings model; 2 picture checks that need a chat model that reads images; copying an image to another machine; taking a machine offline, which this script does only when told; and 3 information lines. Nothing in 1.6.0 changes an engine, so no engine was accepted separately | A100 host, x86-64 CPU machine, Gemini | 441 | 0 |
+| 1.6.0 | sleep when idle, waking and automatic replicas (`accept_scale.py`) | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
+| 1.6.0 | single sign-on (`accept_sso.py`) against a real Keycloak: a realm with a confidential client that uses PKCE, a groups mapper and six test accounts. Pending then approved accounts, the role mapping, automatic accounts and a refused outside domain, a disabled account, linking the owner's account, the two-factor exemption, the key backup's fresh sign-in, an API key before and after disabling, refused replayed and foreign callbacks | Keycloak on the A100 host, the server, Chrome | 36 | 0 |
 | 1.5.6 | full regression (`accept_all.py`, all groups). The Ryzen AI MAX+ 395 was offline, so models through the server ran with the x86-64 CPU machine. 1 failed: registering a transformers model timed out in the TLS handshake with Hugging Face's download host; the row below re-ran its group. 16 checks skipped: 3 deploys of the vision and transformers images on the x86-64 CPU machine, which has no container engine (those engines did not change since the 1.5.4 runs below); Wan2.2-TI2V-5B, which did not fit on the shared card at that moment (the engine did not change since the 1.5.5 `accept_video.py --image` run below); 4 that need a second CPU machine in this script, covered by `accept_scale.py`; an expired key, since the API's shortest expiry is a day, covered by a unit test; a provider budget, since the admin has a budget of their own; 2 picture checks that need a chat model that reads images; copying an image to another machine, since no other machine with a container engine was online; taking a machine offline, which this script does only when told; and 2 information lines. Nothing in 1.5.6 changes an engine, so no engine was accepted separately | A100 host, x86-64 CPU machine, Gemini | 417 | 1 |
 | 1.5.6 | the transformers group of the full regression, re-run (`accept_all.py --only transformers`). 6 skipped: 4 deploys on the x86-64 CPU machine, which has no container engine; Gemini, which has no embeddings model; 1 information line | A100 host, x86-64 CPU machine, Gemini | 37 | 0 |
 | 1.5.6 | sleep when idle, waking and automatic replicas (`accept_scale.py`) | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
@@ -82,6 +88,6 @@ name machines and networks. Only the hardware models and the counts are.
 | 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
 
 The Ryzen AI MAX+ 395 machine was not part of the 1.4.5, 1.5.0, 1.5.1, 1.5.2 and 1.5.3 runs; it took part in 1.5.4.
-In 1.5.5 it took part in the image-edit acceptance, not in the full regression. It was offline during the 1.5.6 runs.
+In 1.5.5 it took part in the image-edit acceptance, not in the full regression. It was offline during the 1.5.6 and 1.6.0 runs.
 
 Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).

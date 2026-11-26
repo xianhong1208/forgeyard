@@ -335,6 +335,11 @@ def test_fy_adv_008_people_waiting_for_approval(owner, monkeypatch):
     add(User(username="newbie", role="user", status="pending"))
     f = findings()["registrations-pending"][0]
     assert f.severity == "info" and "newbie" in f.detail and f.pages == ("users",)
+    # Every name in facts (the detail shows three), for the console to write the detail in Traditional Chinese.
+    for name in ("ann", "bo", "cy", "dee"):
+        add(User(username=name, role="user", status="pending"))
+    f = findings()["registrations-pending"][0]
+    assert sorted(f.out()["facts"]["people"]) == ["ann", "bo", "cy", "dee", "newbie"] and "and 2 more" in f.detail
 
 
 # ------------------------------------------------------------------ machines

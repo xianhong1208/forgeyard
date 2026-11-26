@@ -21,6 +21,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     event,
 )
@@ -80,6 +81,16 @@ class Session(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # When this session last proved a second factor (1.6.0, #39): at sign-in with a code, or when its person
+    # added an authenticator. NULL: signed in with the password alone.
+    mfa_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How this session signed in (1.6.0, #39): "password" (with or without a second factor) or "sso" (through the
+    # identity provider, which does its own two-factor: these sessions are exempt from required two-factor sign-in).
+    auth_method: Mapped[str] = mapped_column(String(16), default="password", server_default="password")
+    # Until when this session counts as freshly signed in through the identity provider (5 minutes after the
+    # provider's auth_time): it then stands in for the password where one is asked again (the secret-key backup,
+    # adding an authenticator). NULL: never.
+    fresh_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="sessions")
 
@@ -94,6 +105,93 @@ class PasswordLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MfaFactor(Base):
+    """A second factor of an account (1.6.0, #39): an authenticator app (TOTP, RFC 6238)."""
+
+    __tablename__ = "mfa_factors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="totp")                 # totp
+    name: Mapped[str] = mapped_column(String(64))
+    # The shared secret (base32), encrypted with the server's secret key and bound to this column.
+    secret: Mapped[str] = mapped_column(EncryptedText("mfa_factors.secret"))
+    # The last time step a code was accepted for: that step and every earlier one never count again.
+    last_step: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RecoveryCode(Base):
+    """A single-use code that stands in for an account's second factor. Only its SHA-256 is stored."""
+
+    __tablename__ = "recovery_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    hash: Mapped[str] = mapped_column(String(64))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LoginChallenge(Base):
+    """A sign-in half done: the password was right and the second factor is still to come (5 minutes, 5 tries).
+    The browser holds a random token; only its SHA-256 is stored."""
+
+    __tablename__ = "login_challenges"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)           # sha256(token) hex
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class IdentityProvider(Base):
+    """An OpenID Connect provider people sign in through (1.6.0, #39). The community edition keeps one row."""
+
+    __tablename__ = "identity_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="oidc")                  # oidc
+    name: Mapped[str] = mapped_column(String(64))                                  # "Sign in with <name>"
+    issuer: Mapped[str] = mapped_column(String(512))
+    client_id: Mapped[str] = mapped_column(String(255))
+    # Write-only: never returned, logged or audited. NULL: a public client (PKCE alone).
+    client_secret: Mapped[Optional[str]] = mapped_column(EncryptedText("identity_providers.client_secret"),
+                                                         nullable=True)
+    scopes: Mapped[str] = mapped_column(String(255), default="openid email profile")
+    # The ID token claim that carries groups or roles (e.g. "groups"), and {claim value: admin | operator | user}.
+    # Both set: each sign-in sets the person's role from the claim (never the owner's).
+    role_claim: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    role_mapping: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Someone the server does not know yet: "approve" (a pending account an admin approves) or "automatic" (an
+    # active account, only for an e-mail address in allowed_domains).
+    new_accounts: Mapped[str] = mapped_column(String(16), default="approve")
+    allowed_domains: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UserIdentity(Base):
+    """A person's account at an identity provider, linked to their Forgeyard account (1.6.0, #39). Found by the
+    provider's issuer and subject, never by e-mail."""
+
+    __tablename__ = "user_identities"
+    __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_user_identities_issuer_subject"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("identity_providers.id", ondelete="CASCADE"), index=True)
+    issuer: Mapped[str] = mapped_column(String(512))
+    subject: Mapped[str] = mapped_column(String(255))
+    # The e-mail address the provider gave when the link was made (shown, never used to find the account).
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditEvent(Base):

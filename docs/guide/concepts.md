@@ -498,7 +498,7 @@ and on a GPU it shares the card by default.
 | CLIP-like models (CLIP, SigLIP, SigLIP 2) and DINOv2 as embeddings | `transformers` |
 | Text classifiers vLLM runs (BERT, RoBERTa, XLM-R, ModernBERT) | `vllm-pooling` first, `transformers` too (a CPU) |
 | DeBERTa, DistilBERT, BART classifiers; zero-shot (NLI) models | `transformers` |
-| Multimodal embedding models (Qwen3-VL-Embedding, GME) | none yet: refused when added (a later 1.5 patch) |
+| Multimodal embedding models (Qwen3-VL-Embedding, GME) | none yet: refused when added |
 
 - **Image embeddings:** a CLIP-like model puts texts and images in one space (a text finds pictures); DINOv2 embeds
   images only (duplicates, look-alikes). Both answer at `/v1/embeddings`, which takes typed items `{"image": …}`
@@ -617,5 +617,18 @@ password; self-registration is off unless `REGISTRATION=approval`.
 - On **My account**, you change your password (your other sessions are signed out) and see every
   browser signed in as you, each of which you can sign out. An admin can sign someone out everywhere,
   disable them, or give them a new set-password link on **Users**.
+- **Two-factor sign-in** (1.6.0) is each person's choice unless an admin requires it of admins or of everyone:
+  with an authenticator app added in **My account**, signing in also asks for its 6-digit code (or one of 10
+  single-use recovery codes). Wrong codes count like wrong passwords. When it is required, people without one get
+  a grace period (7 days by default); after it they can only add one. An admin can reset someone's two-factor
+  sign-in on **Users**; the owner's is the owner's own, or reset with `forgeyard users reset-mfa` on the server
+  host. It applies to signing in to the console only: API keys work as before. See
+  [Turn on two-factor sign-in](how-to.md#turn-on-two-factor-sign-in) and
+  [Require two-factor for everyone](how-to.md#require-two-factor-for-everyone).
+- **Single sign-on** (1.6.0): an admin can set one OpenID Connect identity provider (Keycloak, Authentik, Entra ID,
+  Google) on **Users**, and people then also sign in through it. Its accounts are matched by the provider's issuer and
+  subject, never by e-mail; someone new waits for approval (or gets an account at once from allowed e-mail domains),
+  and an existing account is linked by its owner in **My account**. The provider does its own two-factor sign-in. See
+  [Sign in with single sign-on (OIDC)](how-to.md#sign-in-with-single-sign-on-oidc).
 - The **Audit log** (admins) records sign-ins, failed sign-ins, changes to accounts, machines, models,
   keys and providers, and budget alerts.

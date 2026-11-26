@@ -72,6 +72,19 @@ reader plainly with 你, never 您.
 | session | 工作階段 | |
 | owner / admin / operator / user | 擁有者 / 管理員 / 操作員 / 使用者 | |
 | sign in / sign out | 登入 / 登出 | |
+| two-factor sign-in | 雙重驗證 | 1.6.0. Not 兩步驟驗證 or 多因素認證. |
+| authenticator app | 驗證器 App | Google Authenticator and the like; app names stay in English. |
+| single sign-on (SSO) | 單一登入 | 1.6.0. |
+| identity provider | 身分提供者 | 身分, not 身份. Product names (Keycloak, Entra ID) stay in English. |
+| link / unlink (an account) | 連結 / 取消連結 | |
+| client ID / client secret | 用戶端 ID / 用戶端密鑰 | Not 客戶端. |
+| claim (in a token) | 宣告 | |
+| issuer | 簽發者 | |
+| redirect URI | 重新導向 URI | |
+| e-mail domain | 電子郵件網域 | |
+| code (from the app) | 驗證碼 | 6 位數驗證碼. |
+| recovery codes | 備用碼 | 一組備用碼 = one code. |
+| setup key | 設定金鑰 | The TOTP secret typed instead of scanning the QR 碼. |
 | image (container) | 映像檔 | pull = 拉取, layer = 層. |
 | relay (through the server) | 經由伺服器 | |
 | try out (an engine: a trial run) / trial | 試跑 / 試跑紀錄 | 1.5.2: a temporary deployment that is checked, then removed. Not 試用 (*Try this version* = 試用這個版本, which makes a copy) and not 試試看 (a deployment's *Try it*, one request). |

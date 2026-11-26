@@ -14,7 +14,7 @@ from sqlalchemy import inspect, select, text
 
 from forgeyard import removed
 from forgeyard.db import ApiKey, AuditEvent, Deployment, Replica, Workload, WorkloadEvent, get_engine, new_session, utcnow
-from forgeyard.migrate import alembic_config, upgrade
+from forgeyard.migrate import alembic_config, upgrade as upgrade_to_head
 from tests.conftest import add_user, sign_in
 from tests.gateway_helpers import api_client, new_key
 from tests.machines_helpers import connect, joined
@@ -27,12 +27,32 @@ GONE_API = [("POST", "/api/workloads"), ("GET", "/api/workloads/templates"), ("P
             ("POST", "/api/playground/vision/detector/detect")]
 
 
+# Columns of later migrations that this code reads on every signed-in request (1.6.0, 0020: sessions.mfa_at; 0021:
+# sessions.auth_method and fresh_until). These
+# tests drive the 1.5.2 database through today's API, so the column stays while the database is at 0018, and goes again
+# just before the upgrade adds it.
+LATER_COLUMNS = (("sessions", "mfa_at", "TIMESTAMP"), ("sessions", "auth_method", "VARCHAR(16) NOT NULL DEFAULT 'password'"),
+                 ("sessions", "fresh_until", "TIMESTAMP"))
+
+
 def down_to_1_5_2() -> None:
     """The database as 1.5.2 had it (migration 0018): the app columns are back."""
     cfg = alembic_config()
     with get_engine().begin() as conn:
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, BEFORE)
+        for table, column, kind in LATER_COLUMNS:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {kind}"))
+
+
+def upgrade() -> None:
+    with get_engine().begin() as conn:
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        if version == BEFORE:
+            for table, column, _ in LATER_COLUMNS:
+                if column in {c["name"] for c in inspect(conn).get_columns(table)}:
+                    conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+    upgrade_to_head()
 
 
 def columns(table: str) -> set[str]:
@@ -337,7 +357,11 @@ def test_fy_apprm_009_check_apps_lists_what_the_upgrade_will_remove_and_then_wha
     assert found["state"] == "pending" and [a["name"] for a in found["apps"]] == ["notebook", "nightly"]
     assert "s3cret" not in json.dumps(found)
     assert "workloads" in columns("api_keys")                     # it changed nothing
-    assert new_session().get(Workload, s["web"]) is not None
+    db = new_session()                                            # closed before the upgrade: an open read holds a
+    try:                                                          # lock that PostgreSQL's DROP COLUMN waits on forever
+        assert db.get(Workload, s["web"]) is not None
+    finally:
+        db.close()
     upgrade()
     assert main(["check-apps"]) == 0
     out = capsys.readouterr().out

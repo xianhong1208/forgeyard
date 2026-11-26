@@ -211,13 +211,14 @@ def test_fy_guide_010_the_reference_lists_every_command_and_install_option():
     install = set(re.findall(r"^\s+(--[a-z-]+)(?:\|(--[a-z-]+))?\)", script, re.M))
     install_flags = {o for pair in install for o in pair if o and o != "--help"}
     assert {"serve", "agent", "secrets", "reset", "restore", "inventory", "runtimes", "init", "join", "config", "trust",
-            "check-apps"} <= words
+            "check-apps", "users", "reset-mfa"} <= words
     for lang in ("en", "zh-TW"):
         text = (guide.directory(lang) / "reference.md").read_text()
-        for w in words - {"agent", "secrets", "reset", "restore", "serve", "check-apps"}:
+        for w in words - {"agent", "secrets", "reset", "restore", "serve", "check-apps", "users", "reset-mfa"}:
             assert f"forgeyard agent {w}" in text, (lang, w)
         assert "forgeyard serve" in text and "forgeyard secrets reset" in text and "forgeyard secrets restore" in text
         assert "forgeyard check-apps" in text  # 1.5.3 (#89): what the upgrade removes
+        assert "forgeyard users reset-mfa" in text  # 1.6.0 (#39): the owner's way back in
         for f in flags | install_flags:
             assert re.search(rf"(?<![\w-]){re.escape(f)}(?![\w-])", text), (lang, f)
 
@@ -236,7 +237,7 @@ def test_fy_guide_011_the_roadmap_in_both_languages_stays_in_step():
         assert len(heading.findall(en)) == len(heading.findall(zh)), level
     row = re.compile(r"^\|\s*\*\*(\d+(?:\.\d+)+)", re.M)
     en_versions = set(row.findall(en))
-    assert {"1.6.0", "1.7.0", "1.8.0", "1.8.1"} <= en_versions
+    assert {"1.6.1", "1.7.0", "1.8.0", "1.8.1"} <= en_versions
     assert set(row.findall(zh)) == en_versions
     readme = (ROOT / "README.zh-TW.md").read_text()
     assert "(ROADMAP.zh-TW.md)" in readme and "(ROADMAP.md)" not in readme
