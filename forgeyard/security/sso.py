@@ -1,9 +1,10 @@
 """Single sign-on (1.6.0, #39, PR 3): the half-done sign-ins and what a provider's ID token means for accounts.
 
 Half-done sign-ins. `POST /api/auth/sso/start` makes a random `state`, a PKCE verifier and a nonce, and keeps them
-here, in the server's memory, found by sha256(state), for 10 minutes and once only. Why memory and not a table:
-nothing else needs them, they are useless after a restart (the person simply signs in again), and there is no
-account yet for login_challenges' user_id on someone's first sign-in. The browser that started gets a random token
+here, in the server's memory, found by sha256(state), for 10 minutes and once only. Why memory and not a table
+(one of the two options in the approved design): Forgeyard runs one server process, there is no account yet for
+login_challenges' user_id on someone's first sign-in, and the trade-off is small: a server restart in the middle of a
+sign-in only means signing in again. 1.8 (HA, several server processes) will need a table for this. The browser that started gets a random token
 in its own cookie (HttpOnly, SameSite=Strict, only for /api/auth/sso); `finish` must come with it, so a sign-in
 someone else started (a link with their code and state) cannot sign this browser in as them.
 

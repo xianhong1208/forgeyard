@@ -131,6 +131,10 @@ export function findingDetail(f: Pick<Finding, "id" | "detail" | "facts">, lang:
       return { detail: parts.filter(Boolean).join(""), translated: true };
     }
   }
+  if (lang !== "en" && f.id === "registrations-pending") {
+    const people = strings(facts.people);
+    if (people?.length) return { detail: plural(lang, "advisor.detail.registrationsPending", people.length, { names: names(people, lang) }), translated: true };
+  }
   return { detail: f.detail, translated: false };
 }
 

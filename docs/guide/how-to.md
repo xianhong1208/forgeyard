@@ -1658,7 +1658,10 @@ On **Users**, under **Single sign-on (OIDC)** (admins):
    it on reads the discovery document again and refuses a provider that cannot be used.
 
 The sign-in page then shows **Sign in with <name>** under the password form. A provider inside your network with a
-certificate from your own CA needs `SSO_CA_FILE` ([Accounts and sign-in](reference.md#accounts-and-sign-in)).
+certificate from your own CA needs `SSO_CA_FILE` ([Accounts and sign-in](reference.md#accounts-and-sign-in)): it is
+trusted on top of the system's CAs, so a provider whose certificate comes from a company CA works. Calls to the identity provider
+(its discovery document, keys and token endpoint) go out directly from the server, never through `EGRESS_PROXY`: the
+server must reach the provider itself.
 **Remove** deletes the provider and every link to it; accounts stay, and those without a password then need a
 set-password link from **Users**.
 

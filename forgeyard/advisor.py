@@ -427,7 +427,8 @@ def registrations_pending(ctx: Context) -> Iterator[Finding]:
     if waiting:
         yield Finding("registrations-pending", "info", f"{_plural(len(waiting), 'person', 'people')} waiting for approval",
                       f"{_names(waiting)} asked for an account. Approve or remove them on Users.", "/users", "Open Users",
-                      pages=("users",))
+                      # Every name (the detail shows three): the console writes the detail in its language from them.
+                      pages=("users",), facts={"people": waiting})
 
 
 @check

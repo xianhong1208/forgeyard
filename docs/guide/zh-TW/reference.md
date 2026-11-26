@@ -65,7 +65,7 @@
 | `RATE_LIMIT_PER_MINUTE` | `600` | 每個位址每分鐘對網頁介面的 API（`/api`）的請求數（0：不限制）。閘道 `/v1` 則改用每把金鑰的限制 |
 | `LOGIN_FREE_FAILURES` | `5` | 每個帳號登入失敗幾次後，之後每次嘗試都要等待（2 秒起，每次加倍，最多 5 分鐘） |
 | `LOGIN_IP_FAILURES` | `30` | 每個位址在 15 分鐘內登入失敗幾次後，該位址就要等待 |
-| `SSO_CA_FILE` | 空 | 單一登入（1.6.0）：除了系統的 CA 之外，另外信任這個 CA 檔，用於內部網路裡、憑證由自家 CA 簽發的身分提供者。身分提供者本身在 **使用者** 頁面設定 |
+| `SSO_CA_FILE` | 空 | 單一登入（1.6.0）：除了系統的 CA 之外，另外信任這個 CA 檔，用於內部網路裡、憑證由自家 CA 簽發的身分提供者（公司 CA）。呼叫身分提供者時一律直接連線，不會經過 `EGRESS_PROXY`。身分提供者本身在 **使用者** 頁面設定 |
 
 要求開啟雙重驗證（1.6.0）不是環境變數：由管理員在 **使用者** 頁面設定（`GET` / `PUT /api/users/mfa-policy`，`mfa_required` 為 `off`、`admins` 或 `everyone`，`mfa_grace_days` 為 0 到 90，預設 7）。某人加入驗證器的期限過了之後，主控台的 API 除了 `GET /api/auth/state`、`GET /api/auth/me`、`POST /api/auth/logout`、`GET /api/auth/mfa/factors`、`POST /api/auth/mfa/totp/start` 和 `POST /api/auth/mfa/totp` 之外，一律回應 `403 mfa_enrolment_required`。每個使用者都帶有 `mfa_enrolment`：`null`，或在必須開啟但還沒有驗證器時為 `{"by": …, "due": …}`。API 金鑰（`/v1`）不受影響。
 

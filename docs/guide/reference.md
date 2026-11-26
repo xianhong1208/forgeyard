@@ -76,7 +76,7 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 | `RATE_LIMIT_PER_MINUTE` | `600` | Requests per minute per address to the web UI's API, `/api` (0: no limit). The gateway, `/v1`, has per-key limits instead |
 | `LOGIN_FREE_FAILURES` | `5` | Failed sign-ins per account before each further try waits (2 s, doubling, at most 5 min) |
 | `LOGIN_IP_FAILURES` | `30` | Failed sign-ins per address within 15 minutes before that address waits |
-| `SSO_CA_FILE` | empty | Single sign-on (1.6.0): a CA file to trust for the identity provider on top of the system's, for a provider inside your network with your own CA. The provider itself is set on **Users** |
+| `SSO_CA_FILE` | empty | Single sign-on (1.6.0): a CA file to trust for the identity provider on top of the system's, for a provider inside your network with your own CA (a company CA). Calls to the provider go out directly, never through `EGRESS_PROXY`. The provider itself is set on **Users** |
 
 Required two-factor sign-in (1.6.0) is not an environment setting: admins set it on **Users** (`GET` / `PUT
 /api/users/mfa-policy` with `mfa_required` = `off`, `admins` or `everyone`, and `mfa_grace_days`, 0 to 90, default

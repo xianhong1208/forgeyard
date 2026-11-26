@@ -99,6 +99,8 @@ export default {
   "advisor.finding.registrations-pending": "有人在等候核准",
   "advisor.finding.admins-without-mfa": "有管理員沒有開啟雙重驗證",
   "advisor.finding.mfa-setup-pending": "有人還沒依規定開啟雙重驗證",
+  "advisor.detail.registrationsPending.one": "{names} 申請了帳號。請在「使用者」頁面核准或移除。",
+  "advisor.detail.registrationsPending.other": "{names} 申請了帳號。請在「使用者」頁面核准或移除。",
   "advisor.names.more": "{names} 和另外 {more} 人",
   "advisor.detail.adminsWithoutMfa.one":
     "{names} 只用密碼登入。管理員帳號能變更這裡的所有設定：請到「我的帳號」加入驗證器 App（每位管理員各自替自己的帳號加入）。",

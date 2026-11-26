@@ -102,6 +102,8 @@ export default {
   "advisor.finding.mfa-setup-pending": "People still have to add two-factor sign-in",
   // 1.6.0 (#39): details written from the finding's facts. English shows the server's own words; these stay in
   // step with them for the parity test.
+  "advisor.detail.registrationsPending.one": "{names} asked for an account. Approve or remove them on Users.",
+  "advisor.detail.registrationsPending.other": "{names} asked for an account. Approve or remove them on Users.",
   "advisor.names.more": "{names} and {more} more",
   "advisor.detail.adminsWithoutMfa.one":
     "{names} signs in with a password alone. An admin account can change everything here: add an authenticator app in My account (each admin does it for their own account).",

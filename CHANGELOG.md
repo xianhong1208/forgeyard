@@ -78,7 +78,10 @@ version until 1.0.
   `GET /api/auth/state` carries `sso` and `session` (`auth_method`, `fresh_until`), `GET /api/auth/me` the same in
   its `session`, `GET /api/secret-key` `sso_linked` and `fresh_until`; `POST /api/secret-key/backup` takes no
   password from an account without one.
-- New setting `SSO_CA_FILE`: a CA to trust for an identity provider inside your network.
+- New setting `SSO_CA_FILE`: a CA to trust for an identity provider inside your network whose certificate comes
+  from a company CA. Calls to the provider go out directly, never through `EGRESS_PROXY`.
+- **Setup health**: `registrations-pending` sends its names as `facts`, so the console writes its detail in
+  Traditional Chinese too.
 - **Migration `0021_single_sign_on`**: new tables `identity_providers` (the client secret encrypted with the server's
   secret key) and `user_identities` (unique issuer and subject; deleted with the account or the provider), and
   `sessions.auth_method` (`password` for every existing session) and `sessions.fresh_until`. With no provider set
