@@ -104,7 +104,7 @@ export function UsagePage() {
   return (
     <>
       <PageHeader index={t("usage.index")} title={t("usage.title")}
-        lead={data?.team ? t("usage.lead.team", { name: data.team.title }) : data?.everyone ? t("usage.lead.everyone") : t("usage.lead.mine")} />
+        lead={tab === "gpu" && gpuTab ? t("usage.gpu.lead") : data?.team ? t("usage.lead.team", { name: data.team.title }) : data?.everyone ? t("usage.lead.everyone") : t("usage.lead.mine")} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="tabs" role="tablist" aria-label={t("usage.tabs")}>
         {(["requests", "cost", "gpu"] as const).filter((id) => id !== "gpu" || gpuTab).map((id) => (

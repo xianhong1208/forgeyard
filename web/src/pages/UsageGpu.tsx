@@ -53,7 +53,6 @@ export function UsageGpu({ days, onDays, teams: known, everything: canAll }: { d
   const label = GROUP_LABEL[(data?.group_by as GroupId) ?? group] ?? GROUP_LABEL[group];
   return (
     <>
-      <p className="muted usage-gpu-lead">{t("usage.gpu.lead")}</p>
       <div className="usage-controls">
         <div className="segmented" role="group" aria-label={t("usage.period")}>
           {DAYS.map((d) => (
