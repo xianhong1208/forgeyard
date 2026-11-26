@@ -56,8 +56,8 @@ workload（runtime 為 `model`）執行；微調（1.8）也會。
 用 `POST /api/workloads` 建立，可以公開在 `/x/`。Forgeyard 的重點是執行和管理模型，所以 1.4 把應用程式從 console 拿掉（頁面、範本、
 金鑰的 *Apps at /x/* 設定、Playground 的視覺應用程式），其餘淘汰，並以 `Deprecation` 標頭、伺服器紀錄的警告和 Setup health 檢查告知。
 **1.5.3 移除它們**（#89）：透過 `/api/workloads` 建立、公開、停止、啟動和刪除應用程式，`GET /api/workloads/templates`、`/x/`，以及
-console 送到公開視覺應用程式的路由，在 1.5.x 剩下的版本都回 **410 Gone**（`forgeyard/removed.py`：code `apps_removed`，本文寫出版本和
-指南的章節，帶 `Deprecation` 與 `Link` 標頭；`/x/` 保留 gateway 的錯誤格式），1.6 起回 404。用 410 而不是 404，是為了讓還在呼叫的腳本
+console 送到公開視覺應用程式的路由，從 1.5.3 起都回 **410 Gone**（1.6.0 也是；`forgeyard/removed.py`：code `apps_removed`，本文寫出版本和
+指南的章節，帶 `Deprecation` 與 `Link` 標頭；`/x/` 保留 gateway 的錯誤格式），之後的某個 1.6.x 版改回 404。用 410 而不是 404，是為了讓還在呼叫的腳本
 知道原因。migration `0019_remove_apps` 為每個剩下的應用程式寫一筆稽核紀錄（`workload.removed_in_upgrade`：不含環境變數值的 spec、
 replica 跑在哪裡），每把能呼叫 `/x/` 的 API key 也寫一筆（`api_key.x_access_removed`），然後刪除應用程式，並刪除 `workloads.gateway`
 以及 key 的 `workloads`、`workload_list`、`workloads_locked_by`。選擇刪除而不是封存：稽核紀錄本來就是管理員或稽核人員查變更的地方，

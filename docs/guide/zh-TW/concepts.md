@@ -219,7 +219,7 @@ Forgeyard 自己的模型伺服器（1.5.4），也就是 `transformers` 配方�
 | CLIP 類模型（CLIP、SigLIP、SigLIP 2）和 DINOv2 當嵌入模型 | `transformers` |
 | vLLM 支援的文字分類模型（BERT、RoBERTa、XLM-R、ModernBERT） | `vllm-pooling` 優先，`transformers` 也可以（CPU） |
 | DeBERTa、DistilBERT、BART 分類模型；零樣本（NLI）模型 | `transformers` |
-| 多模態嵌入模型（Qwen3-VL-Embedding、GME） | 還沒有：加入時會被拒絕（之後的 1.5 修補版） |
+| 多模態嵌入模型（Qwen3-VL-Embedding、GME） | 還沒有：加入時會被拒絕 |
 
 - **圖片嵌入：**CLIP 類模型把文字和圖片放在同一個空間（文字能找到圖片）；DINOv2 只收圖片（找重複圖、相似圖）。兩者都在 `/v1/embeddings` 回應，它在一般字串之外也接受有型別的項目 `{"image": …}`；只有文字的請求仍是 OpenAI 的請求。帶圖片的請求絕不溢出到雲端供應商：另一個模型的向量對不上。見[操作指南](how-to.md#search-images-by-text-image-embeddings)。
 - **一個目錄項目做一件事：**CLIP 類的儲存庫既是圖片分類模型（`/v1/vision/classify`，配方 `vision`），也是嵌入模型（`transformers`）：用兩個名稱各加入一次，各自部署。

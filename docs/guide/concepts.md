@@ -498,7 +498,7 @@ and on a GPU it shares the card by default.
 | CLIP-like models (CLIP, SigLIP, SigLIP 2) and DINOv2 as embeddings | `transformers` |
 | Text classifiers vLLM runs (BERT, RoBERTa, XLM-R, ModernBERT) | `vllm-pooling` first, `transformers` too (a CPU) |
 | DeBERTa, DistilBERT, BART classifiers; zero-shot (NLI) models | `transformers` |
-| Multimodal embedding models (Qwen3-VL-Embedding, GME) | none yet: refused when added (a later 1.5 patch) |
+| Multimodal embedding models (Qwen3-VL-Embedding, GME) | none yet: refused when added |
 
 - **Image embeddings:** a CLIP-like model puts texts and images in one space (a text finds pictures); DINOv2 embeds
   images only (duplicates, look-alikes). Both answer at `/v1/embeddings`, which takes typed items `{"image": …}`

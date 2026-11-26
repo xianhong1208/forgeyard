@@ -7,7 +7,7 @@ the apps that were left, writing one audit entry per app (and per API key that c
 parts of the API that only apps used are gone.
 
 So that a script or a program that still calls them learns why, instead of a bare 404, those addresses
-answer **410 Gone** for the rest of 1.5.x (they become ordinary 404s in 1.6):
+answer **410 Gone** from 1.5.3 on, 1.6.0 included (a later 1.6.x makes them ordinary 404s):
 
 - `apps`: creating an app (`POST /api/workloads`), exposing one (`PUT /api/workloads/{id}/gateway`) and
   stopping, starting or deleting one (`POST /api/workloads/{id}/stop|start`, `DELETE /api/workloads/{id}`);

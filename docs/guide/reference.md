@@ -994,8 +994,8 @@ detection, segmentation, depth and image classification models deployed from **M
 
 ### What answers 410
 
-These addresses answer **410 Gone** for the rest of 1.5.x, so a script or program that still calls them learns why.
-From 1.6 they are ordinary 404s.
+These addresses answer **410 Gone** in 1.5.3 and later, 1.6.0 included, so a script or program that still calls them
+learns why. A later 1.6.x release makes them ordinary 404s; its release notes will say so.
 
 | Address | Was |
 |---|---|

@@ -77,9 +77,9 @@ templates, a key's *Apps at /x/* setting, the Playground's vision apps) and depr
 `Deprecation` header on every answer, a log warning and a Setup health finding. **1.5.3 removes them**
 (#89): creating, exposing, stopping, starting and deleting one through `/api/workloads`,
 `GET /api/workloads/templates`, `/x/` and the console's route to an exposed vision app answer **410
-Gone** for the rest of 1.5.x (`forgeyard/removed.py`: code `apps_removed`, the release and the guide's
+Gone** from 1.5.3 on, 1.6.0 included (`forgeyard/removed.py`: code `apps_removed`, the release and the guide's
 section named in the body, `Deprecation` and `Link` headers; `/x/` keeps the gateway's error shape), and
-404 from 1.6. A 410 rather than a 404 so that a script that still calls them learns why. Migration
+404 from a later 1.6.x release. A 410 rather than a 404 so that a script that still calls them learns why. Migration
 `0019_remove_apps` writes one audit entry per remaining app (`workload.removed_in_upgrade`: its spec
 without environment values, where its replicas ran) and per API key that could call `/x/`
 (`api_key.x_access_removed`), deletes the apps, and drops `workloads.gateway` and the keys' `workloads`,
