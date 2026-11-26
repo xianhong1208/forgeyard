@@ -19,9 +19,11 @@ from joserfc import jwt
 from joserfc.jwk import ECKey, KeySet, OctKey, RSAKey
 from sqlalchemy import select, text, update
 
+from forgeyard.config import get_settings
 from forgeyard.db import AuditEvent, IdentityProvider, Session, User, UserIdentity, new_session, utcnow
 from forgeyard.security import oidc, sso, totp
-from tests.conftest import OWNER, add_user, sign_in
+from forgeyard.security.ratelimit import limiter
+from tests.conftest import OWNER, add_user, make_client, sign_in
 
 ISSUER = "https://idp.example.test/realms/forge"
 CLIENT_ID = "forgeyard-console"
@@ -787,3 +789,91 @@ def test_fy_sso_026_an_issuer_with_a_trailing_slash_is_kept_as_the_provider_spel
     state, code = idp.authorize(start(b), "sub-slash", iss=slash)
     assert finish(b, state, code).status_code == 200
     assert one(UserIdentity, subject="sub-slash").issuer == slash
+
+
+# ------------------------------------------------------------------ back-off of failed finishes, per address
+A, B = "203.0.113.10", "198.51.100.20"
+
+
+@pytest.fixture()
+def two_addresses(monkeypatch):
+    """Browsers that reach the server from different addresses (through a trusted proxy), and a stopped clock for
+    the back-off: a wait it asks for never runs out during the test."""
+    monkeypatch.setenv("TRUSTED_PROXIES", "testclient")
+    get_settings.cache_clear()
+    monkeypatch.setattr(limiter, "_clock", lambda: 1000.0)
+
+
+def browser_at(app_client, ip) -> TestClient:
+    b = browser(app_client)
+    b.headers["X-Forwarded-For"] = ip
+    return b
+
+
+def bogus(c):
+    return finish(c, "made-up-state", "code-x")
+
+
+def test_fy_sso_027_failed_finishes_from_one_address_never_delay_another(owner, idp, two_addresses):
+    """FY-SSO-027: an address that sends 40 made-up finishes is refused (400, then 429 with Retry-After), while a
+    person at another address still finishes a real sign-in at once, and a mistake of theirs is a plain 400. Each
+    failure is audited as before (auth.sso_login_failed, reason state_invalid)."""
+    configure(owner, new_accounts="automatic", allowed_domains=["example.com"])
+    a = browser_at(owner, A)
+    codes = [bogus(a).status_code for _ in range(40)]
+    assert codes[:5] == [400] * 5 and set(codes[5:]) == {429}
+    assert "retry-after" in bogus(a).headers
+    failed = audit("auth.sso_login_failed")
+    assert len(failed) == 5 and {d["reason"] for _, _, d in failed} == {"state_invalid"}
+    b = browser_at(owner, B)
+    assert code_of(bogus(b)) == "sso_state_invalid"
+    state, code = idp.authorize(start(b), "sub-bea")
+    r = finish(b, state, code)
+    assert r.status_code == 200, r.text
+    assert b.get("/api/auth/state").json()["user"]["username"] == "sub-bea"
+
+
+def test_fy_sso_028_an_address_is_slowed_after_the_free_failures_of_any_kind(owner, idp, two_addresses):
+    """FY-SSO-028: unknown states, a finish from the wrong browser and a forged ID token all count; after
+    LOGIN_FREE_FAILURES (5) the next finish from that address waits, even a real one, and goes through once the
+    wait is over (no permanent lock)."""
+    configure(owner, new_accounts="automatic", allowed_domains=["example.com"])
+    a = browser_at(owner, A)
+    assert code_of(bogus(a)) == code_of(bogus(a)) == "sso_state_invalid"
+    for _ in range(2):  # started in one browser, finished in another
+        state, code = idp.authorize(start(browser_at(owner, A)), "sub-a")
+        assert code_of(finish(a, state, code)) == "sso_state_invalid"
+    state, _ = idp.authorize(start(a), "sub-a", token="not.a.token")
+    assert code_of(finish(a, state, f"code-{idp.n}")) == "sso_token_invalid"
+    state, code = idp.authorize(start(a), "sub-a")
+    r = finish(a, state, code)
+    assert r.status_code == 429 and code_of(r) == "rate_limited" and int(r.headers["retry-after"]) >= 1
+    limiter._clock = lambda: 1000.0 + 3  # the first wait is 2 s
+    state, code = idp.authorize(start(a), "sub-a")
+    assert finish(a, state, code).status_code == 200
+
+
+def test_fy_sso_029_a_good_finish_clears_that_address_s_back_off(owner, idp, two_addresses):
+    """FY-SSO-029: four failures, then a real sign-in from the same address: the count starts again, so five more
+    failures are still plain 400s (not counted on from four, which would make the second one wait)."""
+    configure(owner, new_accounts="automatic", allowed_domains=["example.com"])
+    a = browser_at(owner, A)
+    assert [bogus(a).status_code for _ in range(4)] == [400] * 4
+    state, code = idp.authorize(start(a), "sub-a")
+    assert finish(a, state, code).status_code == 200
+    assert [bogus(a).status_code for _ in range(5)] == [400] * 5
+    assert bogus(a).status_code == 429
+
+
+def test_fy_sso_030_names_typed_at_the_password_sign_in_never_reach_the_finish_back_off(owner, idp, two_addresses):
+    """FY-SSO-030: password sign-ins with usernames that look like the back-off's own names (the old shared one,
+    an address) from one address do not delay a single sign-on finish from that or any other address."""
+    configure(owner, new_accounts="automatic", allowed_domains=["example.com"])
+    a = make_client(headers={"X-Forwarded-For": A})
+    for name in ("__sso__", f"__sso__@{B}", f"__sso__@{A}", f"sso@{B}", ""):
+        for _ in range(6):
+            a.post("/api/auth/login", json={"username": name, "password": "wrong-wrong-wrong-1"})
+    b = browser_at(owner, B)
+    state, code = idp.authorize(start(b), "sub-bea")
+    assert finish(b, state, code).status_code == 200
+    assert code_of(bogus(browser_at(owner, "192.0.2.30"))) == "sso_state_invalid"

@@ -4,6 +4,10 @@
 - Sign-in failures, per account and per IP. Past the free failures each further try has to
   wait, doubling up to five minutes. Nothing is ever locked permanently, so an attacker
   cannot lock the owner out by guessing; a correct password after the wait still works.
+- Tries with no account to count against (a single sign-on finish, an agent's join token, the
+  setup token, a set-password link, a registration): the same back-off, counted per client
+  address. Never under one name for the whole server: then anyone's failures would make
+  everybody wait.
 
 A limited request gets 429 with Retry-After. It never ends the session: the UI treats 429
 as "wait", not as "signed out".
@@ -34,12 +38,14 @@ class RateLimiter:
         self._windows: dict[str, tuple[int, int]] = {}
         self._accounts: dict[str, _Failures] = {}
         self._ips: dict[str, _Failures] = {}
+        self._attempts: dict[tuple[str, str], _Failures] = {}
 
     def reset(self) -> None:
         with self._lock:
             self._windows.clear()
             self._accounts.clear()
             self._ips.clear()
+            self._attempts.clear()
 
     # ------------------------------------------------------------- global budget
     def hit(self, key: str, per_minute: int) -> float:
@@ -65,17 +71,14 @@ class RateLimiter:
         """Seconds the caller must wait before another sign-in try (0 = go ahead)."""
         now = self._clock()
         with self._lock:
-            wait = 0.0
-            acc = self._accounts.get(account.lower())
-            if acc and acc.count >= free:
-                delay = min(MAX_DELAY, 2.0 ** (acc.count - free + 1))
-                wait = max(wait, acc.last + delay - now)
-            rec = self._ips.get(ip)
-            if rec:
-                rec.times = [t for t in rec.times if now - t < IP_WINDOW]
-                if len(rec.times) >= ip_limit:
-                    wait = max(wait, rec.times[0] + IP_WINDOW - now)
-        return max(0.0, wait)
+            return max(_backoff(self._accounts.get(account.lower()), free, now), self._ip_wait(ip, ip_limit, now))
+
+    def _ip_wait(self, ip: str, ip_limit: int, now: float) -> float:
+        rec = self._ips.get(ip)
+        if not rec:
+            return 0.0
+        rec.times = [t for t in rec.times if now - t < IP_WINDOW]
+        return max(0.0, rec.times[0] + IP_WINDOW - now) if len(rec.times) >= ip_limit else 0.0
 
     def login_failed(self, account: str, ip: str) -> None:
         now = self._clock()
@@ -88,6 +91,35 @@ class RateLimiter:
     def login_succeeded(self, account: str) -> None:
         with self._lock:
             self._accounts.pop(account.lower(), None)
+
+    # ------------------------------------------------------------- tries without an account
+    # `kind` names the door (sso, join, setup, link, register). The back-off is per (kind, client address), in its
+    # own table: a name typed at the password sign-in can never reach it. The per-address cap of login_wait
+    # (ip_limit failures in 15 minutes, every door and password sign-in together) still holds, and a success does
+    # not clear that cap.
+    def attempt_wait(self, kind: str, ip: str, free: int, ip_limit: int) -> float:
+        now = self._clock()
+        with self._lock:
+            return max(_backoff(self._attempts.get((kind, ip)), free, now), self._ip_wait(ip, ip_limit, now))
+
+    def attempt_failed(self, kind: str, ip: str) -> None:
+        now = self._clock()
+        with self._lock:
+            rec = self._attempts.setdefault((kind, ip), _Failures())
+            rec.count += 1
+            rec.last = now
+            self._ips.setdefault(ip, _Failures()).times.append(now)
+
+    def attempt_succeeded(self, kind: str, ip: str) -> None:
+        with self._lock:
+            self._attempts.pop((kind, ip), None)
+
+
+def _backoff(rec: _Failures | None, free: int, now: float) -> float:
+    """Past `free` failures, each further try waits 2, 4, 8 … s after the last failure, up to MAX_DELAY."""
+    if rec is None or rec.count < free:
+        return 0.0
+    return max(0.0, rec.last + min(MAX_DELAY, 2.0 ** (rec.count - free + 1)) - now)
 
 
 def retry_after(seconds: float) -> str:
