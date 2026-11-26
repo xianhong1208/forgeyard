@@ -9,6 +9,9 @@
   a current code. Removing the last factor removes the recovery codes too.
 
 Every password or code typed here counts like a sign-in (the same back-off per account and address).
+
+The first three take `signed_in`, not `current`: someone whose required two-factor setup is overdue (PR 2,
+security/mfa_policy.py) can still add an authenticator, and nothing else.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import audit
-from forgeyard.api.deps import Caller, current, fail
+from forgeyard.api.deps import Caller, current, fail, signed_in
 from forgeyard.config import get_settings
 from forgeyard.db import MfaFactor, get_db, utcnow
 from forgeyard.security import mfa, passwords, totp
@@ -73,19 +76,19 @@ def _status(db: DbSession, user_id: int) -> dict:
 
 
 @router.get("/factors")
-def my_factors(caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+def my_factors(caller: Caller = Depends(signed_in), db: DbSession = Depends(get_db)):
     return _status(db, caller.user.id)
 
 
 @router.post("/totp/start")
-def start_totp(caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+def start_totp(caller: Caller = Depends(signed_in), db: DbSession = Depends(get_db)):
     if len(mfa.factors(db, caller.user.id)) >= mfa.MAX_FACTORS:
         raise fail(409, "mfa_factor_limit", f"An account can have at most {mfa.MAX_FACTORS} authenticators.")
     return mfa.start_enrolment(caller.user)
 
 
 @router.post("/totp")
-def confirm_totp(body: TotpConfirmIn, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+def confirm_totp(body: TotpConfirmIn, caller: Caller = Depends(signed_in), db: DbSession = Depends(get_db)):
     user = caller.user
     secret = mfa.open_enrolment(user, body.enrolment)
     if secret is None:

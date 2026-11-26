@@ -66,6 +66,8 @@
 | `LOGIN_FREE_FAILURES` | `5` | 每個帳號登入失敗幾次後，之後每次嘗試都要等待（2 秒起，每次加倍，最多 5 分鐘） |
 | `LOGIN_IP_FAILURES` | `30` | 每個位址在 15 分鐘內登入失敗幾次後，該位址就要等待 |
 
+要求開啟雙重驗證（1.6.0）不是環境變數：由管理員在 **使用者** 頁面設定（`GET` / `PUT /api/users/mfa-policy`，`mfa_required` 為 `off`、`admins` 或 `everyone`，`mfa_grace_days` 為 0 到 90，預設 7）。某人加入驗證器的期限過了之後，主控台的 API 除了 `GET /api/auth/state`、`GET /api/auth/me`、`POST /api/auth/logout`、`GET /api/auth/mfa/factors`、`POST /api/auth/mfa/totp/start` 和 `POST /api/auth/mfa/totp` 之外，一律回應 `403 mfa_enrolment_required`。每個使用者都帶有 `mfa_enrolment`：`null`，或在必須開啟但還沒有驗證器時為 `{"by": …, "due": …}`。API 金鑰（`/v1`）不受影響。
+
 ### 機器
 
 | 變數 | 預設值 | 用途 |
@@ -1208,7 +1210,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `certificate-name-missing` | 錯誤 | 你自己的憑證沒有包含 `PUBLIC_URL` 的主機 |
 | `certificate-expiring` | 警告 | 你自己的憑證在 30 天內到期，或 Forgeyard 的 CA 在 90 天內到期。14 天內到期則是錯誤 |
 | `registrations-pending` | 提示 | 有人在等待核准 |
-| `admins-without-mfa` | 提示 | 有管理員只用密碼登入（沒有開啟雙重驗證） |
+| `admins-without-mfa` | 提示 | 有管理員只用密碼登入（沒有開啟雙重驗證）。要求管理員開啟雙重驗證時，則是警告 |
+| `mfa-setup-pending` | 提示 | 要求開啟雙重驗證，但它涵蓋的人當中有人還沒加入：還在寬限期內的人數（以及最早的期限）和已經逾期的人數（[要求所有人開啟雙重驗證](how-to.md#require-two-factor-for-everyone)） |
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
 | `replica-traffic-plain` | 警告 | 送往某台機器的流量沒有加密：它的 agent 比 1.4.5 舊，閘道以純 HTTP 連它；修正連結會開啟它的更新指令（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)） |
 | `replica-certificate` | 錯誤 | 某台機器的 agent 以 TLS 提供副本，卻沒有這台伺服器簽發的憑證，或憑證已過期、沒有在更新（剩不到 3 天）：連不到它的副本（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)） |
@@ -1257,6 +1260,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`，或單獨的 `python -m forgeyard`）。資料庫的變更會在啟動時執行 |
 | `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器）。沒有 `--yes` 時只說明會捨棄什麼 |
 | `python -m forgeyard secrets restore FILE` | 從主控台下載的金鑰備份放回機密金鑰和 CA（請先停止伺服器）。會詢問通關密語。`--data-dir DIR`：寫到另一個資料夾；`--force`：取代那裡已有的不同金鑰或 CA（舊檔案保留為 `<名稱>.replaced-<時間>`）；`--passphrase-file PATH`：從檔案的第一行讀取通關密語。通關密語錯誤、檔案損壞或那裡已有不同的金鑰時，結束代碼為 2，什麼都不寫入 |
+| `python -m forgeyard users reset-mfa NAME` | 移除某個帳號的雙重驗證（驗證器和備用碼），並結束它的工作階段，給手機和備用碼都遺失的人用，擁有者也可以（[做法](how-to.md#if-you-lose-your-authenticator-and-recovery-codes)）。稽核紀錄會記下 `user.mfa_reset`，執行者是 `cli`。伺服器執行中也能用，不需要加密金鑰。以 2 結束：沒有這個帳號，或那裡沒有資料庫；以 0 結束：完成，或沒有東西要移除 |
 | `python -m forgeyard check-apps` | 列出升級到 1.5.3 會移除（或已移除）的東西（應用程式、API 金鑰的 `/x/` 存取權），不做任何變更（[升級之前](#before-you-upgrade)）。以 1 結束：有東西會被移除；以 0 結束：沒有，或資料庫已經升級。`--json`：機器可讀的輸出 |
 | `python -m forgeyard --version` | 顯示版本 |
 

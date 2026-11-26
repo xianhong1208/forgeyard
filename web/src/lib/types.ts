@@ -12,6 +12,9 @@ export type User = {
   has_password: boolean;
   // 1.6.0 (#39): the account has an authenticator app (two-factor sign-in). Older servers leave it out.
   has_mfa?: boolean;
+  // 1.6.0 (#39, PR 2): while two-factor sign-in is required of this account and it has no authenticator: by when,
+  // and whether that is past (then its session reaches only the setup). null otherwise; older servers leave it out.
+  mfa_enrolment?: { by: string; due: boolean } | null;
   created_at: string;
   last_login_at: string | null;
 };
@@ -901,3 +904,13 @@ export type EngineUpdatesResult = {
   checked_at: string; checked_by: string; seconds: number; github_requests: number; engines: Record<string, EngineUpdate>;
 };
 export type EngineUpdatesResponse = { result: EngineUpdatesResult | null; can_check: boolean; signatures?: Record<string, EngineSigned> };
+
+// GET/PUT /api/users/mfa-policy (admins, 1.6.0 #39 PR 2): required two-factor sign-in and how many it still waits for.
+export type MfaLevel = "off" | "admins" | "everyone";
+export type MfaPolicy = {
+  mfa_required: MfaLevel;
+  mfa_grace_days: number;
+  max_grace_days: number;
+  in_grace_period: number;
+  setup_overdue: number;
+};

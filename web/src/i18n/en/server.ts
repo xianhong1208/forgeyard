@@ -35,6 +35,7 @@ export default {
   "server.code.mfa_factor_limit": "An account can have at most 5 authenticators.",
   "server.code.mfa_not_enabled": "Two-factor sign-in is not on for this account.",
   "server.code.reauth_required": "Type your password, or a current code from your authenticator app.",
+  "server.code.mfa_enrolment_required": "Add an authenticator app in My account first: two-factor sign-in is required for your account.",
   "server.code.passphrase_is_password": "The passphrase must not be your password.",
   "server.code.name_taken": "That name is taken: {message}",
   "server.code.served_name_taken": "Another deployment or route already serves that model name: {message}",

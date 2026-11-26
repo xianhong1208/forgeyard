@@ -103,7 +103,7 @@ const ACTIONS = [
   "auth.logout", "auth.mfa_enrolled", "auth.mfa_removed", "auth.other_sessions_ended", "auth.recovery_code_used", "auth.recovery_codes_created", "auth.password_changed", "auth.password_set_by_link", "auth.session_ended", "budget.exhausted",
   "budget.warning", "deployment.changed", "deployment.created", "deployment.deleted", "deployment.started", "deployment.stopped",
   "hf_token.cleared", "hf_token.set", "machine.gpu_allowlist_changed", "machine.gpu_keys_changed", "machine.join_refused",
-  "machine.join_token_cancelled", "machine.join_token_created", "machine.joined", "machine.removed", "machine.revoked", "model.added",
+  "machine.join_token_cancelled", "machine.join_token_created", "machine.joined", "machine.removed", "machine.revoked", "mfa_policy.changed", "model.added",
   "model.cache_removed", "model.changed", "model.checksum_recorded", "model.download_cancelled", "model.download_requested", "model.removed",
   "model_sources.changed", "node.fetch_via_changed", "node.gpus_changed", "node.image_copied", "node.image_removed", "node.image_uploaded", "node.relay_copy_refused",
   "provider.changed", "provider.cloned", "provider.created", "provider.deleted", "provider.model_changed", "provider.model_removed",

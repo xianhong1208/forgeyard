@@ -164,9 +164,11 @@ function ConfirmForm({ pending, last, onDone, onCancel }: {
   );
 }
 
-export function TwoFactorPanel({ say }: { say: Say }) {
+// `onChange`: after an authenticator is added or removed (My account then reloads its sessions, whose
+// "two-factor" chip changes with it).
+export function TwoFactorPanel({ say, onChange }: { say: Say; onChange?: () => void }) {
   const t = useT();
-  const { user, setUser } = useAuth();
+  const { user, setUser, reload: reloadAuth } = useAuth();
   const { data, error, reload } = useApi<MfaStatus>("/auth/mfa/factors");
   const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
   const [starting, setStarting] = useState(false);
@@ -175,8 +177,11 @@ export function TwoFactorPanel({ say }: { say: Say }) {
   const factors = data?.factors ?? [];
   const on = factors.length > 0;
 
-  const markUser = (hasMfa: boolean) => {
-    if (user && user.has_mfa !== hasMfa) setUser({ ...user, has_mfa: hasMfa });
+  // After the first authenticator, the account counts as having one only once its recovery codes are put away: a
+  // required setup that was overdue (MfaRequired.tsx) would otherwise leave this page, and the codes with it.
+  const [markAfterCodes, setMarkAfterCodes] = useState(false);
+  const markUser = () => {
+    if (user && !user.has_mfa) setUser({ ...user, has_mfa: true, mfa_enrolment: null });
   };
 
   const start = async () => {
@@ -242,7 +247,9 @@ export function TwoFactorPanel({ say }: { say: Say }) {
             reload();
             if (pending.kind === "remove") {
               const off = r.factors.length === 0;
-              markUser(!off);
+              onChange?.();
+              // Off again: the server says whether it is required of this account, and by when.
+              if (off) void reloadAuth();
               say({ tone: "ok", text: off ? t("mfa.done.off", { name: pending.factor.name }) : t("mfa.done.removed", { name: pending.factor.name }) });
             } else {
               setCodes(r.recovery_codes ?? null);
@@ -251,7 +258,15 @@ export function TwoFactorPanel({ say }: { say: Say }) {
           }}
         />
       )}
-      {codes && user && <RecoveryCodes codes={codes} username={user.username} onDone={() => setCodes(null)} />}
+      {codes && user && (
+        <RecoveryCodes codes={codes} username={user.username} onDone={() => {
+          setCodes(null);
+          if (markAfterCodes) {
+            setMarkAfterCodes(false);
+            markUser();
+          }
+        }} />
+      )}
       {enrolment ? (
         <EnrolForm
           enrolment={enrolment}
@@ -260,8 +275,13 @@ export function TwoFactorPanel({ say }: { say: Say }) {
           onDone={(r) => {
             setEnrolment(null);
             reload();
-            markUser(true);
-            if (r.recovery_codes) setCodes(r.recovery_codes);
+            onChange?.();
+            if (r.recovery_codes) {
+              setCodes(r.recovery_codes);
+              setMarkAfterCodes(true);
+            } else {
+              markUser();
+            }
             say({ tone: "ok", text: on ? t("mfa.done.added", { name: r.factor.name }) : t("mfa.done.on") });
           }}
         />

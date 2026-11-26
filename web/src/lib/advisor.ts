@@ -1,6 +1,7 @@
 // The setup advisor (GET /api/advisor, admins only): findings about the setup, with where to fix them.
 
-import { hasKey, labels, lookup, t, tMaybe, tPlural } from "../i18n/core";
+import { hasKey, labels, lookup, t, tMaybe, tPlural, translateMaybe } from "../i18n/core";
+import { formatDate, formatTime, pluralForm } from "../i18n/format";
 import { getLang, type Lang } from "../i18n/lang";
 import { guideHref, type GuideLang } from "./guide";
 
@@ -18,6 +19,8 @@ export type Finding = {
   pages: string[];
   snoozable: boolean;
   snoozed_until?: string;
+  // 1.6.0 (#39): what the detail is made of, for findings whose detail the console writes in another language.
+  facts?: Record<string, unknown>;
 };
 
 export type AdvisorReport = {
@@ -83,6 +86,52 @@ export function findingTitle(f: Pick<Finding, "id" | "title">, lang: Lang = getL
   const key = `advisor.finding.${f.id}`;
   if (lang === "en" || !hasKey(key)) return { title: f.title, translated: false };
   return { title: lookup(lang, key), translated: true };
+}
+
+// "tony, uma, vera and 2 more" / "tony、uma、vera 和另外 2 人", as the server names people (at most three).
+function names(list: string[], lang: Lang): string {
+  const shown = list.slice(0, 3).join(lang === "en" ? ", " : "、");
+  if (list.length <= 3) return shown;
+  return interpolateIn(lang, "advisor.names.more", { names: shown, more: list.length - 3 });
+}
+
+function interpolateIn(lang: Lang, key: string, vars: Record<string, string | number>): string {
+  return translateMaybe(lang, key, key, vars);
+}
+
+function plural(lang: Lang, base: string, count: number, vars: Record<string, string | number>): string {
+  const key = `${base}.${pluralForm(count, lang)}`;
+  return interpolateIn(lang, hasKey(key) ? key : `${base}.other`, { count, ...vars });
+}
+
+const strings = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === "string") ? v : null);
+
+// A finding's detail in the reader's language, for the findings that send what it is made of (`facts`); else the
+// server's English words, as sent (translated: false).
+export function findingDetail(f: Pick<Finding, "id" | "detail" | "facts">, lang: Lang = getLang()): { detail: string; translated: boolean } {
+  const facts = f.facts ?? {};
+  if (lang !== "en" && f.id === "admins-without-mfa") {
+    const admins = strings(facts.admins);
+    if (admins?.length) {
+      const text = plural(lang, "advisor.detail.adminsWithoutMfa", admins.length, { names: names(admins, lang) });
+      return { detail: facts.required ? `${text}${lookup(lang, "advisor.detail.adminsWithoutMfa.required")}` : text, translated: true };
+    }
+  }
+  if (lang !== "en" && f.id === "mfa-setup-pending") {
+    const waiting = strings(facts.waiting);
+    const overdue = strings(facts.overdue);
+    if (waiting && overdue) {
+      const first = typeof facts.first_ends === "string" ? facts.first_ends : null;
+      const parts = [
+        waiting.length && first ? plural(lang, "advisor.detail.mfaPending.waiting", waiting.length,
+          { names: names(waiting, lang), date: `${formatDate(first, lang)} ${formatTime(first, lang)}` }) : "",
+        overdue.length ? plural(lang, "advisor.detail.mfaPending.overdue", overdue.length, { names: names(overdue, lang) }) : "",
+        lookup(lang, "advisor.detail.mfaPending.tail"),
+      ];
+      return { detail: parts.filter(Boolean).join(""), translated: true };
+    }
+  }
+  return { detail: f.detail, translated: false };
 }
 
 // The fix button's words: the server's labels are a small fixed set.

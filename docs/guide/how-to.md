@@ -1555,13 +1555,57 @@ In **My account** you can also:
 Both ask for your password or a current code from the app again. Downloading the secret key backup asks for a code
 too.
 
-**Lost the phone and the recovery codes?** Ask an admin: on **Users**, **Reset two-factor** removes your
-authenticators and recovery codes and ends your sessions; you then sign in with your password alone and can add an
-authenticator again. Nobody resets their own two-factor sign-in there, and only the owner can change the owner's, so
-the owner should keep the recovery codes somewhere safe. If the server's secret key is lost for good,
-[`secrets reset`](#back-up-and-restore) removes every authenticator, because it can no longer read them.
-
 Admins see who uses two-factor sign-in on **Users**, and **Setup health** names the admins who do not.
+
+### Require two-factor for everyone
+
+By default two-factor sign-in is each person's choice. An admin can require it (1.6.0): on **Users**, under
+**Two-factor sign-in**, choose who must use it and the **Grace period**, then **Save**.
+
+- **Not required** (the default): nothing changes for anyone.
+- **Required of admins**: every admin, the owner included.
+- **Required of everyone**: every account.
+
+The grace period (7 days unless you change it, 0 to 90) counts from when you switched the setting on, or from when
+the account was made, if that is later. Moving from admins to everyone gives the others a full grace period and
+keeps the admins' deadline.
+
+- **During the grace period**, people without an authenticator sign in as before and see a banner with the days
+  left and a link to **My account**.
+- **After it**, they still sign in with their password, but they see only **Add two-factor sign-in to continue**:
+  they can add an authenticator app (the steps above) or sign out, and nothing else. The console's API answers
+  `403` with the code `mfa_enrolment_required` to everything else, the Playground included. Once the authenticator
+  is added, everything works again at once.
+- **API keys are not affected**: programs calling `/v1` keep working whatever the setting says. To stop someone's
+  keys, disable the account on **Users**.
+- **Nobody is locked out by it**, the owner included: the password always signs in, and the setup is always
+  reachable.
+
+On **Users** each person who still has to add it shows **Two-factor due** with the date, and **Setup health**
+counts the people in the grace period and past it. The admins without two-factor sign-in become a warning there
+once it is required of admins. Each change of the setting is in the **Audit log** (`mfa_policy.changed`).
+
+### If you lose your authenticator and recovery codes
+
+Ask an admin: on **Users**, **Reset two-factor** removes your authenticators and recovery codes and ends your
+sessions; you then sign in with your password alone and can add an authenticator again (if two-factor sign-in is
+required of you, at once). Nobody resets their own two-factor sign-in there, and only the owner can change the
+owner's, so the owner should keep the recovery codes somewhere safe.
+
+**The owner, or an admin with no other admin to ask**, resets it on the server host, where the server's data is:
+
+```bash
+uv run --no-sync python -m forgeyard users reset-mfa <username>              # a server run from the source
+docker exec <server container> python -m forgeyard users reset-mfa <username>   # the Docker image
+```
+
+It removes that account's authenticators and recovery codes and ends its sessions, and the **Audit log** records
+`user.mfa_reset` with the actor `cli`. It runs with the server running, uses the same `DATA_DIR` (or
+`DATABASE_URL`) as the server and needs no secret key. Anyone with a shell on the server host can do this, which is
+why that host, like its data directory, must be kept to the people who run Forgeyard.
+
+If the server's secret key is lost for good, [`secrets reset`](#back-up-and-restore) removes every authenticator,
+because it can no longer read them.
 
 ## Use the console in Traditional Chinese
 
@@ -1577,8 +1621,9 @@ same switch is at the end of the menu. The page changes at once, without reloadi
 - Numbers, sizes, times and dates follow the language (*41 秒前*, *2026年11月23日*).
 - The server keeps writing its messages in English. The console translates the common ones by their code (for
   example `model_waking`, `cannot_wake`, `budget_exhausted`) and names each **Setup health** finding's kind in
-  Chinese, with the server's own words (which name the machines and models) under it. A message without a
-  translation is shown as the server sent it.
+  Chinese, with the server's own words (which name the machines and models) under it. The two-factor findings
+  (1.6.0) are written in Chinese in full, from the names, counts and dates the server sends with them. A message
+  without a translation is shown as the server sent it.
 - Every page is translated: the frame (menus, sign-in, Get started and Setup health), **Machines**, **Serving**,
   **Models**, **Cloud**, **Playground**, **API keys**, **Usage**, **Users**, the **Audit log**, your account and
   **Trust this server**. Names you choose (machines, models, keys), what engines and agents print, and the API

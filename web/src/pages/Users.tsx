@@ -2,6 +2,8 @@ import { IconPlus } from "@tabler/icons-react";
 import { useState, type FormEvent } from "react";
 
 import { AdvisorBanner } from "../components/Advisor";
+import { MfaPolicyPanel } from "../components/MfaRequired";
+import { formatDate } from "../i18n/format";
 import { useAuth } from "../auth";
 import { CopyBox, Field, Notice, PageHeader, StatusChip } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -147,6 +149,11 @@ export function UsersPage() {
                       {u.is_owner && <span className="chip chip-owner">{t("admin.users.owner")}</span>}
                       {self && <span className="chip chip-here">{t("admin.users.you")}</span>}
                       {u.has_mfa && <span className="chip chip-status-active" title={t("admin.users.twoFactorTitle")}>{t("admin.users.twoFactor")}</span>}
+                      {u.mfa_enrolment && !u.has_mfa && (u.mfa_enrolment.due
+                        ? <span className="chip chip-sev-warning" title={t("admin.users.mfaOverdueTitle")}>{t("admin.users.mfaOverdue")}</span>
+                        : <span className="chip chip-sev-info" title={t("admin.users.mfaDueTitle", { date: formatDate(u.mfa_enrolment.by) })}>
+                            {t("admin.users.mfaDue", { date: formatDate(u.mfa_enrolment.by) })}
+                          </span>)}
                     </div>
                     {u.email && <div className="muted small">{u.email}</div>}
                     {!u.has_password && u.status !== "pending" && <div className="muted small">{t("admin.users.noPassword")}</div>}
@@ -207,6 +214,7 @@ export function UsersPage() {
           </tbody>
         </table>
       </div>
+      <MfaPolicyPanel say={(m) => { setMessage(m); load(); }} />
     </>
   );
 }

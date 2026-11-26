@@ -54,4 +54,14 @@ export default {
   "mfa.done.removed": "Removed {name}.",
   "mfa.done.off": "Removed {name}. Two-factor sign-in is off.",
   "mfa.done.codes": "New recovery codes made; the old ones no longer work.",
+  // Required two-factor sign-in (1.6.0, #39, PR 2): the banner during the grace period, the page after it.
+  "mfa.required.banner.one":
+    "Two-factor sign-in is required for your account. Add an authenticator app by {date} ({count} day left); after that, it is the only thing you can do here.",
+  "mfa.required.banner.other":
+    "Two-factor sign-in is required for your account. Add an authenticator app by {date} ({count} days left); after that, it is the only thing you can do here.",
+  "mfa.required.bannerLink": "Add it now",
+  "mfa.required.index": "Two-factor sign-in",
+  "mfa.required.title": "Add two-factor sign-in to continue",
+  "mfa.required.lead":
+    "Two-factor sign-in is required for your account, and its grace period ended {date}. Add an authenticator app here: everything else opens as soon as it is added.",
 } as const;

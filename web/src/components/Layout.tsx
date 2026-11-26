@@ -7,6 +7,7 @@ import { LANG_NAME, LANGS, setLang } from "../i18n/lang";
 import { useT } from "../i18n/react";
 import { AdvisorProvider, HealthBadge } from "./Advisor";
 import { Mark } from "./Mark";
+import { EnrolmentRequiredPage, MfaBanner, setupOverdue } from "./MfaRequired";
 import { Notice } from "./ui";
 
 export function Layout() {
@@ -35,8 +36,11 @@ export function Layout() {
   // 1.4 (#81, #92): Machines, Serving (what runs now), Models (the library), Cloud (cloud providers and
   // cloud models, admins only, as Providers was), the everyday pages, then the admin pages. Apps left
   // the console in 1.4 (#88).
-  const admin = user?.role === "admin";
-  const links = [
+  // 1.6.0 (#39): two-factor sign-in is required of this account and its grace period is over. Only the setup is
+  // shown (the server refuses everything else with 403 mfa_enrolment_required), with the guide, language and sign-out.
+  const overdue = setupOverdue(user);
+  const admin = user?.role === "admin" && !overdue;
+  const links = overdue ? [] : [
     { to: "/machines", label: t("shell.nav.machines") },
     { to: "/serving", label: t("shell.nav.serving") },
     { to: "/models", label: t("shell.nav.models") },
@@ -53,7 +57,7 @@ export function Layout() {
   ];
 
   return (
-    <AdvisorProvider enabled={user?.role === "admin"}>
+    <AdvisorProvider enabled={admin}>
     <div className="shell">
       <header className="topbar">
         <div className="topbar-inner">
@@ -76,21 +80,25 @@ export function Layout() {
                 {l.label}
               </NavLink>
             ))}
-            <NavLink to="/start" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
-              {t("shell.nav.start")}
-            </NavLink>
+            {!overdue && (
+              <NavLink to="/start" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
+                {t("shell.nav.start")}
+              </NavLink>
+            )}
             <NavLink to="/guide" onClick={() => setNav(false)} className="only-narrow">
               {t("shell.nav.guide")}
             </NavLink>
-            <NavLink to="/account" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
-              {t("shell.nav.account")}
-            </NavLink>
+            {!overdue && (
+              <NavLink to="/account" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
+                {t("shell.nav.account")}
+              </NavLink>
+            )}
             <button type="button" className="only-narrow navbutton" onClick={() => void signOut()}>
               {t("shell.menu.signOut")}
             </button>
             <LangSwitch className="only-narrow nav-langs" onPick={() => setNav(false)} />
           </nav>
-          <HealthBadge onClick={() => setNav(false)} />
+          {!overdue && <HealthBadge onClick={() => setNav(false)} />}
           <div className="usermenu" ref={menuRef}>
             <button type="button" className="usermenu-button" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
               <IconUserCircle size={20} stroke={1.6} aria-hidden="true" />
@@ -100,15 +108,19 @@ export function Layout() {
             </button>
             {menu && (
               <div className="usermenu-panel" role="menu">
-                <NavLink to="/start" role="menuitem" onClick={() => setMenu(false)}>
-                  <IconChecklist size={16} aria-hidden="true" /> {t("shell.menu.start")}
-                </NavLink>
+                {!overdue && (
+                  <NavLink to="/start" role="menuitem" onClick={() => setMenu(false)}>
+                    <IconChecklist size={16} aria-hidden="true" /> {t("shell.menu.start")}
+                  </NavLink>
+                )}
                 <NavLink to="/guide" role="menuitem" onClick={() => setMenu(false)}>
                   <IconBook2 size={16} aria-hidden="true" /> {t("shell.menu.guide")}
                 </NavLink>
-                <NavLink to="/account" role="menuitem" onClick={() => setMenu(false)}>
-                  <IconUserCircle size={16} aria-hidden="true" /> {t("shell.menu.account")}
-                </NavLink>
+                {!overdue && (
+                  <NavLink to="/account" role="menuitem" onClick={() => setMenu(false)}>
+                    <IconUserCircle size={16} aria-hidden="true" /> {t("shell.menu.account")}
+                  </NavLink>
+                )}
                 <NavLink to="/trust" role="menuitem" onClick={() => setMenu(false)}>
                   <IconLock size={16} aria-hidden="true" /> {t("shell.menu.trust")}
                 </NavLink>
@@ -133,7 +145,7 @@ export function Layout() {
             </Notice>
           </div>
         )}
-        <Outlet />
+        {overdue ? <EnrolmentRequiredPage /> : <><MfaBanner /><Outlet /></>}
       </main>
     </div>
     </AdvisorProvider>

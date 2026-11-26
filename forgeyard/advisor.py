@@ -93,6 +93,9 @@ class Finding:
     fix_label: str = "Fix it"
     scope: str = "server"
     pages: tuple[str, ...] = ()
+    # 1.6.0 (#39): what the detail is made of (names, counts, times), for the console to write it in another
+    # language. Only findings that have it send it.
+    facts: Optional[dict] = None
 
     @property
     def key(self) -> str:
@@ -105,7 +108,7 @@ class Finding:
     def out(self) -> dict:
         return {"id": self.id, "key": self.key, "severity": self.severity, "title": self.title, "detail": self.detail,
                 "fix_url": self.fix_url, "fix_label": self.fix_label, "scope": self.scope, "pages": list(self.pages),
-                "snoozable": self.snoozable}
+                "snoozable": self.snoozable, **({"facts": self.facts} if self.facts is not None else {})}
 
 
 def _names(items: Iterable[str], most: int = 3) -> str:
@@ -429,16 +432,63 @@ def registrations_pending(ctx: Context) -> Iterator[Finding]:
 
 @check
 def admins_without_mfa(ctx: Context) -> Iterator[Finding]:
-    """1.6.0 (#39): active admins who sign in with a password alone."""
-    from forgeyard.security import mfa
+    """1.6.0 (#39): active admins who sign in with a password alone. A warning once two-factor sign-in is required
+    of admins (PR 2): they are then on a deadline."""
+    from forgeyard.security import mfa, mfa_policy
 
     with_mfa = mfa.users_with_factor(ctx.db)
     bare = sorted(u.username for u in ctx.users if u.role == "admin" and u.status == "active" and u.id not in with_mfa)
-    if bare:
-        yield Finding("admins-without-mfa", "info", f"{_plural(len(bare), 'admin')} without two-factor sign-in",
-                      f"{_names(bare)} {'signs' if len(bare) == 1 else 'sign'} in with a password alone. An admin "
-                      "account can change everything here: add an authenticator app in My account (each admin "
-                      "does it for their own account).", "/account", "Open My account", pages=("users",))
+    if not bare:
+        return
+    required = mfa_policy.load(ctx.db).level != "off"  # admins and everyone both cover admins
+    detail = (f"{_names(bare)} {'signs' if len(bare) == 1 else 'sign'} in with a password alone. An admin account "
+              "can change everything here: add an authenticator app in My account (each admin does it for their own "
+              "account).")
+    if required:
+        detail += (" Two-factor sign-in is required of admins: after the grace period, an admin without one can "
+                   "only add it.")
+    yield Finding("admins-without-mfa", "warning" if required else "info",
+                  f"{_plural(len(bare), 'admin')} without two-factor sign-in", detail, "/account", "Open My account",
+                  pages=("users",), facts={"admins": bare, "required": required})
+
+
+@check
+def mfa_setup_pending(ctx: Context) -> Iterator[Finding]:
+    """1.6.0 (#39, PR 2): two-factor sign-in is required and some people it covers have not added it yet."""
+    from forgeyard.security import mfa, mfa_policy
+
+    policy = mfa_policy.load(ctx.db)
+    if policy.level == "off":
+        return
+    with_mfa = mfa.users_with_factor(ctx.db)
+    waiting: list[tuple[str, datetime]] = []
+    overdue: list[str] = []
+    for u in ctx.users:
+        if u.status != "active":
+            continue
+        e = mfa_policy.enrolment(ctx.db, u, policy=policy, has_factor=u.id in with_mfa)
+        if e is None:
+            continue
+        if e["due"]:
+            overdue.append(u.username)
+        else:
+            waiting.append((u.username, e["by"]))
+    if not waiting and not overdue:
+        return
+    parts = []
+    if waiting:
+        first = min(by for _, by in waiting)
+        parts.append(f"{_plural(len(waiting), 'person', 'people')} still in the grace period "
+                     f"({_names(sorted(n for n, _ in waiting))}; the first one ends {first:%Y-%m-%d %H:%M} UTC).")
+    if overdue:
+        parts.append(f"{_plural(len(overdue), 'person', 'people')} past it ({_names(sorted(overdue))}): they can "
+                     "only add an authenticator until they do.")
+    yield Finding("mfa-setup-pending", "info",
+                  f"{_plural(len(waiting) + len(overdue), 'person', 'people')} still to add two-factor sign-in",
+                  " ".join(parts) + " Each person adds it in My account; an admin can only remind them.",
+                  "/users", "Open Users", pages=("users",),
+                  facts={"waiting": sorted(n for n, _ in waiting), "overdue": sorted(overdue),
+                         "first_ends": min(by for _, by in waiting).isoformat() if waiting else None})
 
 
 # --- machines

@@ -5,7 +5,7 @@ import { Link, useLocation } from "react-router";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { KeyBackupButton } from "./KeyBackup";
-import { SEVERITY_LABEL, asReport, backupKid, findingTitle, fixHref, fixLabel, forPage, summary, worst, type AdvisorReport, type Finding,
+import { SEVERITY_LABEL, asReport, backupKid, findingDetail, findingTitle, fixHref, fixLabel, forPage, summary, worst, type AdvisorReport, type Finding,
   type Severity } from "../lib/advisor";
 
 // The setup advisor for admins: one report, fetched by the shell and shared by the nav badge, the
@@ -144,6 +144,13 @@ function FindingActions({ f, compact }: { f: Finding; compact?: boolean }) {
   );
 }
 
+// The detail: in the reader's language when the finding sends what it is made of, else the server's English.
+function Detail({ f, titleTranslated }: { f: Finding; titleTranslated: boolean }) {
+  const t = useT();
+  const { detail, translated } = findingDetail(f, t.lang);
+  return <p className="finding-detail" lang={translated || !titleTranslated ? undefined : "en"}>{detail}</p>;
+}
+
 // The finding's own words: translated by its id, with what the server said under it (in English, naming the
 // machines and models); in English just what the server said.
 function FindingText({ f }: { f: Finding }) {
@@ -153,7 +160,7 @@ function FindingText({ f }: { f: Finding }) {
     <>
       <p className="finding-title"><strong>{title}</strong></p>
       {translated && <p className="finding-sent small" lang="en"><span className="muted" lang={t.lang}>{t("advisor.serverSaid")}</span> {f.title}</p>}
-      <p className="finding-detail" lang={translated ? "en" : undefined}>{f.detail}</p>
+      <Detail f={f} titleTranslated={translated} />
     </>
   );
 }
@@ -169,7 +176,7 @@ function FindingRow({ f }: { f: Finding }) {
           <span className={`chip chip-sev-${f.severity}`}>{SEVERITY_LABEL[f.severity]}</span> <strong>{title}</strong>
         </p>
         {translated && <p className="finding-sent small" lang="en"><span className="muted" lang={t.lang}>{t("advisor.serverSaid")}</span> {f.title}</p>}
-        <p className="finding-detail" lang={translated ? "en" : undefined}>{f.detail}</p>
+        <Detail f={f} titleTranslated={translated} />
         {f.snoozed_until && <p className="muted small">{t("advisor.snoozedUntil", { date: f.snoozed_until.slice(0, 10) })}</p>}
         <FindingActions f={f} />
       </div>

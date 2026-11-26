@@ -53,4 +53,13 @@ export default {
   "mfa.done.removed": "已移除「{name}」。",
   "mfa.done.off": "已移除「{name}」。雙重驗證已關閉。",
   "mfa.done.codes": "已產生新的備用碼，舊的已經失效。",
+  "mfa.required.banner.one":
+    "你的帳號必須開啟雙重驗證。請在 {date} 之前加入驗證器 App（還剩 {count} 天），過了之後，這裡就只能做這件事。",
+  "mfa.required.banner.other":
+    "你的帳號必須開啟雙重驗證。請在 {date} 之前加入驗證器 App（還剩 {count} 天），過了之後，這裡就只能做這件事。",
+  "mfa.required.bannerLink": "現在就加入",
+  "mfa.required.index": "雙重驗證",
+  "mfa.required.title": "請先開啟雙重驗證",
+  "mfa.required.lead":
+    "你的帳號必須開啟雙重驗證，寬限期已在 {date} 結束。請在這裡加入驗證器 App，加入之後，其他功能就會立刻恢復。",
 } satisfies Record<keyof typeof en, string>;
