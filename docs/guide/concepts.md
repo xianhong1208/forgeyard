@@ -634,6 +634,31 @@ rights on every deployment; an operator chooses a deployment's team when deployi
 - **Deleting a team** is refused while one of its keys still works (`409 team_has_keys`) or a deployment belongs to it
   (`409 team_has_deployments`). Its revoked keys go with it; usage rows keep its id.
 
+## GPU hours
+
+**GPU hours** (1.6.1) say how much GPU time each deployment held: what its replicas took from the cards, whether they
+answered one request or a thousand. Nobody else can use a card (or the part of it) a replica holds, so this is what a
+deployment costs the machines. **Usage** → **GPU hours** shows them by deployment, team, machine and GPU model, and a
+deployment's page shows its GPU hours and busy share this month.
+
+- **When it counts.** From the moment a replica's engine starts until its cards are free again. Not while the replica
+  downloads its model, engine or image (on a slow network that can take hours), not once someone stops it, and not
+  while its deployment is asleep: a model that sleeps when idle stops counting. Every 5 seconds the server adds the
+  time since its last count, so a start or a stop can be off by up to 5 seconds.
+- **How much.** A card a replica holds alone counts 1 per hour; a replica on two cards counts 2. A shared card counts
+  the reservation's share of the card's memory: 20 GiB of an 80 GiB card is 0.25 per hour. A CPU replica holds no
+  GPU: its reserved RAM × hours (GiB·h) is shown instead.
+- **Busy share.** Of that GPU time, the part when at least one request was in flight through this server. A deployment
+  that holds a card and is rarely busy is a candidate for [sleeping when idle](#sleep-when-idle).
+- **Per GPU model.** An A100 hour and a Radeon APU hour are not the same thing, so the hours are kept per GPU model and
+  are not converted into each other.
+- **What it is not.** Not utilisation (how hard the card worked), not the card's power, and not a limit: in the
+  community edition GPU hours are shown, never enforced. They count only while the server runs: **when the server is
+  down nothing is counted**, even if the replicas keep running on their machines. The Usage page says since when this
+  server has been counting. Days are UTC days, months UTC calendar months, as for budgets.
+- **Teams.** A team's deployment counts to the team. Moved to another team, its hours from then on count to the new
+  one. A team's managers see their team's GPU hours; admins and operators see every deployment's.
+
 ## Sign-in and sessions
 
 - Passwords have at least 12 characters, and common passwords are refused. Repeated failed sign-ins

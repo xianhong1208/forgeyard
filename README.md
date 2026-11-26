@@ -84,6 +84,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
   its requests count to the team, and it keeps working when the person who made it leaves. The team's managers add
   members, make its keys, see its usage and stop, start and change its deployments without being operators. Without
   a team, keys and deployments work as before ([how](docs/guide/how-to.md#share-models-with-a-team)).
+- **GPU hours (1.6.1).** How much GPU time each deployment, team, machine and GPU model held, counted from the
+  moment an engine starts until its cards are free again (not while it downloads or sleeps), with the busy share
+  beside it. A shared card counts the reservation's share of it. On **Usage** → **GPU hours**, on a deployment's page
+  and in `/metrics` ([how](docs/guide/how-to.md#see-who-holds-the-gpus)).
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging

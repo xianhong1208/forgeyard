@@ -178,8 +178,9 @@ function EditView({ d, recipe: current, recipes, model, machines: usable, operat
               {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
             </div>
             <details className="spec-preview" style={{ marginTop: 14 }}>
+              {/* 1.6.1 (#190): a team's manager does not change the engine's extra arguments, so the summary leaves them out. */}
               <summary>{t("deploy.edit.advanced", { scaling: auto ? t("deploy.adv.scaling") : "", limits: advanced.length ? t("deploy.adv.limits") : "",
-                first: takesFirstAnswer(recipe) ? t("deploy.adv.firstEdit") : "" })}</summary>
+                args: operator ? t("deploy.adv.argsEdit") : "", first: takesFirstAnswer(recipe) ? t("deploy.adv.firstEdit") : "" })}</summary>
               <div className="grid-3">
                 {auto && <ScaleAdvancedFields id="e" scale={scale} onScale={setScale} />}
                 {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}

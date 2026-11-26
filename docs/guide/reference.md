@@ -958,6 +958,13 @@ When a replica of a model deployment becomes ready (1.5.0):
 |---|---|---|---|
 | `forgeyard_replica_start_seconds` | histogram | `recipe`, `model` | How long the start took: from its agent beginning it (the model's files, the image, the engine) to its first healthy answer. From an agent older than 1.5.0, the engine's part only ([See how long a model takes to start](how-to.md#see-how-long-a-model-takes-to-start)) |
 
+GPU time model replicas held (1.6.1, [GPU hours](concepts.md#gpu-hours)), added every 5 seconds when the server writes
+it:
+
+| Metric | Type | Labels | What it is |
+|---|---|---|---|
+| `forgeyard_gpu_seconds_total` | counter | `deployment`, `gpu_model` | GPU-seconds held, weighted by each replica's share of a card (an exclusive card 1, 20 of 80 GiB 0.25). Not while a replica downloads or its deployment is asleep, and not while the server is down. `rate(forgeyard_gpu_seconds_total[1h])` = GPUs held on average |
+
 Read from the database at each scrape:
 
 | Metric | Labels | What it is |
@@ -1320,6 +1327,18 @@ Elsewhere:
   `teams` (the teams whose usage you may see).
 - `GET /api/budgets` lists `teams` with their budgets: the ones you manage, or every team for admins with
   `?everyone=true`.
+
+GPU hours (1.6.1, [GPU hours](concepts.md#gpu-hours)):
+
+- `GET /api/usage/gpu?days=7&group=deployment` (`days` 1-366; `group` `deployment`, `team`, `machine` or `gpu_model`;
+  `team=<name>`): `{from, to, days, group_by, total, rows, team, teams, everything, counting_since}`. Each row and the
+  total have `gpu_ms` (GPU-milliseconds, weighted by share), `busy_ms` (the busy part of it), `busy_share` (`busy_ms` ÷
+  `gpu_ms`, `null` without GPU time), `ram_mib_ms` and `cpu_busy_ms` (CPU replicas); rows by GPU model also `vendor`.
+  Admins and operators see every deployment's, or one team's with `team=`; a team's managers only their team's, with
+  `team=` (`403 not_team_manager` for a member, `404 team_not_found` outside the team, `403 forbidden` without
+  `team=`). `422 bad_group`. `counting_since`: when this server started counting (time before it is not counted).
+- `GET /api/deployments/{id}` has `usage.gpu`: this UTC month's `gpu_ms`, `busy_ms`, `busy_share`, `ram_mib_ms`,
+  `month` and `counting_since`.
 
 Audit actions: `team.created`, `team.changed` (with `changes`), `team.deleted`, `team.member_added`,
 `team.member_changed`, `team.member_removed`. `api_key.created`, `api_key.changed`, `api_key.revoked`,

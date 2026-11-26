@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session as DbSession
 from forgeyard import extensions
 from forgeyard.db import ApiKey, Provider, ProviderModel, Team, UsageDaily, new_session
 from forgeyard.gateway import pricing
+from forgeyard.workloads import gpu_hours
 
 log = logging.getLogger("forgeyard")
 
@@ -138,6 +139,8 @@ def teams_of_keys(db: DbSession, key_ids: set) -> dict[int, int]:
 class Recorder:
     def __init__(self, clock: Callable[[], float] = time.time):
         self.clock = clock
+        # 1.6.1 (#190): GPU hours, counted on each write (forgeyard/workloads/gpu_hours.py).
+        self.gpu = gpu_hours.Meter(clock)
         self._lock = threading.Lock()
         self._flush_lock = threading.Lock()
         self._pending: dict[tuple, _Count] = {}
@@ -149,6 +152,7 @@ class Recorder:
         with self._lock:
             self._pending.clear()
             self._carry.clear()
+        self.gpu.reset()
 
     def record(self, *, source: str, key_id: int, user_id: int, username: str, model: str,
                deployment_id: Optional[int], status: int, latency_ms: float, prompt_tokens: int = 0,
@@ -185,12 +189,11 @@ class Recorder:
             c.buckets[bucket_of(latency_ms)] += 1
 
     def flush(self, db: Optional[DbSession] = None) -> int:
-        """Write what was counted; returns the number of rows touched."""
+        """Write what was counted, and (1.6.1, #190) the GPU time the replicas held since the last write; returns the
+        number of usage rows touched."""
         with self._flush_lock:
             with self._lock:
                 pending, self._pending = self._pending, {}
-            if not pending:
-                return 0
             own = db is None
             db = db or new_session()
             carry: dict[tuple, int] = {}
@@ -236,18 +239,21 @@ class Recorder:
                     merged = list(row.latency_buckets or [])
                     merged += [0] * (len(c.buckets) - len(merged))
                     row.latency_buckets = [a + b for a, b in zip(merged, c.buckets)]
+                self.gpu.collect(db, self.clock())
                 db.commit()
+                self.gpu.committed()
                 with self._lock:
                     for slot in pending:
                         self._carry.pop(slot, None)
                     self._carry.update(carry)
                     today = day_of(self.clock())
                     self._carry = {k: v for k, v in self._carry.items() if k[0] >= today}
-                if extensions.registry.usage_observers:   # 1.6.1 (#190): what this write added, to an extension
+                if pending and extensions.registry.usage_observers:   # 1.6.1 (#190): what this write added, to an extension
                     extensions.registry.usage_written([
                         _written(slot, c, teams.get(slot[2], 0) if slot[1] == "api" else 0) for slot, c in pending.items()])
             except Exception:
                 db.rollback()
+                self.gpu.failed()
                 with self._lock:  # keep the counts for the next try
                     for slot, c in pending.items():
                         self._pending.setdefault(slot, _Count()).merge(c)

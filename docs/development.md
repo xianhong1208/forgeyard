@@ -87,6 +87,9 @@ names the one Forgeyard version it was built for, and the server refuses to star
   object by `tests/test_extensions.py` (FY-EXT-*): a route, a migration, a refused placement and a refused gateway
   request, a finding. Keep it working when a hook's call site moves: it is how public CI notices a broken hook.
   `web/src/pages/Extensions.test.tsx` fills the console's slots the same way.
+- **GPU hours** are read, not observed: an extension that enforces GPU-hour quotas calls
+  `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)` from its placement check (this UTC month's `gpu_ms`, from
+  the database, at most 5 seconds behind). The usage observer gets request rows only.
 - Community code never checks a licence; it only asks the registry.
 
 ## Before a release

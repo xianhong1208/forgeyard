@@ -6,6 +6,9 @@ A replica the gateway could not connect to is tried last for a few seconds (`PEN
 reports a dead engine within seconds, and until it does, requests should not keep knocking on it.
 The penalty ends early when the replica has become ready again since (it was restarted).
 
+1.6.1 (#190): how long each replica had at least one request in flight (`take_busy`): the busy part of its GPU hours
+(forgeyard/workloads/gpu_hours.py).
+
 A replica the autoscaler removes is **drained** first (1.5.0, #37; forgeyard/workloads/autoscale.py): it takes no new
 request (try_acquire refuses it, order puts it last), the ones it has finish, and `drained` says when none is left.
 
@@ -58,6 +61,9 @@ class Balancer:
         self._cool: dict[str, float] = {}                    # provider target -> cooled down until
         self._listeners: list[Callable[[str], None]] = []    # told when a slot is released (1.4.5)
         self._draining: set[str] = set()                     # replicas being drained: no new requests (1.5.0)
+        # 1.6.1 (#190): since when a replica has had a request in flight, and its busy seconds not yet taken.
+        self._busy_since: dict[str, float] = {}
+        self._busy: dict[str, float] = {}
 
     def reset(self) -> None:
         with self._lock:
@@ -67,6 +73,8 @@ class Balancer:
             self._failed.clear()
             self._cool.clear()
             self._draining.clear()
+            self._busy_since.clear()
+            self._busy.clear()
 
     def order(self, route: str, targets: list[Target]) -> list[Target]:
         """Every target, best first: not being drained, not recently failed, fewest in flight, then in turn."""
@@ -86,10 +94,16 @@ class Balancer:
 
             return [t for _, t in sorted(enumerate(targets), key=key)]
 
+    def _take_slot(self, uid: str) -> None:
+        """One more request in flight (the lock is held)."""
+        if not self.inflight.get(uid) and not uid.startswith("pm:"):   # replicas only: provider targets hold no GPU
+            self._busy_since[uid] = self._clock()
+        self.inflight[uid] = self.inflight.get(uid, 0) + 1
+        self.served[uid] = self.served.get(uid, 0) + 1
+
     def acquire(self, uid: str) -> None:
         with self._lock:
-            self.inflight[uid] = self.inflight.get(uid, 0) + 1
-            self.served[uid] = self.served.get(uid, 0) + 1
+            self._take_slot(uid)
 
     def try_acquire(self, uid: str, cap: Optional[int]) -> bool:
         """Take a slot only while the replica has fewer than `cap` requests in flight (its deployment's
@@ -100,8 +114,7 @@ class Balancer:
                 return False
             if cap and self.inflight.get(uid, 0) >= cap:
                 return False
-            self.inflight[uid] = self.inflight.get(uid, 0) + 1
-            self.served[uid] = self.served.get(uid, 0) + 1
+            self._take_slot(uid)
             return True
 
     def drain(self, uid: str) -> None:
@@ -136,6 +149,9 @@ class Balancer:
                 self.inflight[uid] = left
             else:
                 self.inflight.pop(uid, None)
+                since = self._busy_since.pop(uid, None)
+                if since is not None:
+                    self._busy[uid] = self._busy.get(uid, 0.0) + max(0.0, self._clock() - since)
             listeners = list(self._listeners)
         for fn in listeners:
             fn(uid)
@@ -155,6 +171,18 @@ class Balancer:
     def cooldown_left(self, key: str) -> float:
         with self._lock:
             return max(0.0, self._cool.get(key, 0.0) - self._clock())
+
+    def take_busy(self, uid: str) -> float:
+        """Seconds this replica had at least one request in flight since the last call (or since the server started),
+        the request still in flight counted up to now."""
+        with self._lock:
+            busy = self._busy.pop(uid, 0.0)
+            since = self._busy_since.get(uid)
+            if since is not None:
+                now = self._clock()
+                busy += max(0.0, now - since)
+                self._busy_since[uid] = now
+            return busy
 
     def snapshot(self, uid: str) -> dict:
         with self._lock:

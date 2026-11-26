@@ -79,6 +79,11 @@ export default {
   "deployment.gw.requestsDays": "Requests, {days} days",
   "deployment.gw.errors": "Errors",
   "deployment.gw.tokens": "Tokens",
+  "deployment.gw.gpuMonth": "GPU hours, {month}",
+  "deployment.gw.ramMonth": "RAM, {month}",
+  "deployment.gw.busy": "Busy",
+  "deployment.gw.gpuTitle":
+    "Counted from the moment its engine starts until its replicas' cards are free again: not while they download, not while it is asleep, and not while the server is down. A shared card counts the reservation's share of the card's memory.",
   "deployment.gw.behind": "Replicas behind it",
   "deployment.gw.ready": "ready",
   "deployment.gw.on": " on {machine}",

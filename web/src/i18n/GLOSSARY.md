@@ -53,6 +53,8 @@ reader plainly with 你, never 您.
 | team | 團隊 | 1.6.1: people who share keys, deployments and a budget. |
 | team member / manager | 成員 / 管理者 | Team roles. 管理者 (a team's manager) is never 管理員 (an admin of the install). |
 | team key / personal key | 團隊金鑰 / 個人金鑰 | |
+| GPU hours | GPU 時數 | 1.6.1: GPU time a deployment held (allocation, not utilisation). |
+| busy share | 忙碌比例 | The part of the GPU time with a request in flight. |
 | usage | 用量 | |
 | audit log | 稽核紀錄 | |
 | setup health | 設定健康檢查 | The advisor's panel. |

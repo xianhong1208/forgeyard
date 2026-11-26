@@ -5,8 +5,8 @@ process collector, never a library's.
 
 **Labels are bounded on purpose.** A model label is a served name the gateway has a route for (a request for a
 model nobody serves counts under `_unknown`, since the name comes from the client), an endpoint label one of the
-gateway's endpoints, a status the HTTP status code, a machine label the machine's name, a GPU label its index and a
-recipe label a recipe's name.
+gateway's endpoints, a status the HTTP status code, a machine label the machine's name, a GPU label its index, a
+gpu_model label a card's model name (1.6.1) and a recipe label a recipe's name.
 No metric carries an API key, a key id, a user name, a prompt or a provider's model id. As a last guard, a label
 that has seen MAX_VALUES different values already takes `_other`.
 
@@ -82,6 +82,11 @@ WAKES = Counter("forgeyard_deployment_wakes", "Asleep deployments woken, per dep
 # 1.5.0 (#37): automatic replicas (forgeyard/workloads/autoscale.py).
 AUTOSCALED = Counter("forgeyard_autoscale", "Replicas the autoscaler added (direction up) or removed after draining "
                      "them (down), per deployment", ("deployment", "direction"), registry=REGISTRY)
+
+# 1.6.1 (#190): GPU time held (forgeyard/workloads/gpu_hours.py), counted when the usage recorder writes it.
+GPU_SECONDS = Counter("forgeyard_gpu_seconds", "GPU time model replicas held (GPU-seconds, weighted by their share of "
+                      "each card), per deployment and GPU model, as written to the GPU hours", ("deployment", "gpu_model"),
+                      registry=REGISTRY)
 
 SPILL_REASONS = frozenset({"unavailable", "busy", "waking", "refused", "too_long", "budget"})
 WOKEN_BY = frozenset({"request", "person"})
@@ -174,6 +179,15 @@ def scaled(deployment: str, direction: str) -> None:
         AUTOSCALED.labels(bounded("deployment", deployment), bounded("direction", direction, ("up", "down"))).inc()
     except Exception:
         log.exception("Counting an autoscaling change for /metrics failed")
+
+
+def gpu_seconds(deployment: str, gpu_model: str, seconds: float) -> None:
+    """GPU-seconds of `deployment` on cards of `gpu_model` were written (1.6.1)."""
+    try:
+        if seconds > 0:
+            GPU_SECONDS.labels(bounded("deployment", deployment), bounded("gpu_model", gpu_model)).inc(seconds)
+    except Exception:
+        log.exception("Counting GPU time for /metrics failed")
 
 
 # ------------------------------------------------------------------ the state, read at scrape time

@@ -742,6 +742,12 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 |---|---|---|---|
 | `forgeyard_replica_start_seconds` | histogram | `recipe`、`model` | 啟動花了多久：從 agent 開始啟動它（模型檔案、映像檔、推論引擎）到第一次健康檢查通過。agent 比 1.5.0 舊時只有推論引擎的部分（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)） |
 
+模型副本占用的 GPU 時間（1.6.1，[GPU 時數](concepts.md#gpu-hours)），伺服器每 5 秒寫入時加上：
+
+| 指標 | 類型 | 標籤 | 是什麼 |
+|---|---|---|---|
+| `forgeyard_gpu_seconds_total` | counter | `deployment`、`gpu_model` | 占用的 GPU 秒數，依副本占每張卡的比例加權（獨占一張卡算 1，80 GiB 中保留 20 GiB 算 0.25）。副本下載期間、部署休眠期間和伺服器停止運作的期間都不計算 |
+
 每次收集時從資料庫讀取：
 
 | 指標 | 標籤 | 是什麼 |
@@ -999,6 +1005,11 @@ docker run --rm -v forgeyard-data:/data tonyhuang1101/forgeyard:1.5.3 python -m 
 - `POST /api/deployments` 和 `PATCH /api/deployments/{id}` 接受 `team`（名稱；變更時 `null` 表示不屬於任何團隊）；只有管理員和操作員能設定（`404 team_not_found`）。部署會回應 `team` 和 `can_manage`。不是操作員的團隊管理者可以停止、啟動和變更它，但不能改 `recipe`、`params.extra_args` 或 `team`（`403 operators_only`，帶 `fields`）；其他人會得到 `403 forbidden`。
 - `GET /api/usage` 和 `GET /api/usage/series` 接受 `team=<name>`（管理員和團隊的管理者；否則是 `403 not_team_manager` 或 `404 team_not_found`），以及 `group=team` / `split=team`。`GET /api/usage` 會回應 `team` 和 `teams`（你可以查看哪些團隊的用量）。
 - `GET /api/budgets` 會列出 `teams` 和它們的預算：你管理的團隊；管理員加上 `?everyone=true` 時是所有團隊。
+
+GPU 時數（1.6.1，[GPU 時數](concepts.md#gpu-hours)）：
+
+- `GET /api/usage/gpu?days=7&group=deployment`（`days` 1 到 366；`group` 是 `deployment`、`team`、`machine` 或 `gpu_model`；`team=<name>`）：回應 `{from, to, days, group_by, total, rows, team, teams, everything, counting_since}`。每一列和總計都有 `gpu_ms`（依比例加權的 GPU 毫秒數）、`busy_ms`（其中忙碌的部分）、`busy_share`（`busy_ms` ÷ `gpu_ms`，沒有 GPU 時間時是 `null`）、`ram_mib_ms` 和 `cpu_busy_ms`（CPU 副本）；依 GPU 型號分組時另有 `vendor`。管理員和操作員可以查看所有部署的，或加上 `team=` 查看某個團隊的；團隊的管理者只能加上 `team=` 查看自己團隊的（成員會得到 `403 not_team_manager`，團隊外的人 `404 team_not_found`，沒有 `team=` 時 `403 forbidden`）。`422 bad_group`。`counting_since`：這台伺服器從什麼時候開始計算（之前的時間不計算）。
+- `GET /api/deployments/{id}` 有 `usage.gpu`：本 UTC 月的 `gpu_ms`、`busy_ms`、`busy_share`、`ram_mib_ms`、`month` 和 `counting_since`。
 
 稽核動作：`team.created`、`team.changed`（帶 `changes`）、`team.deleted`、`team.member_added`、`team.member_changed`、`team.member_removed`。`api_key.created`、`api_key.changed`、`api_key.revoked`、`deployment.created` 和 `deployment.changed` 會寫出 `team`。團隊的預算警示 `scope` 是 `team`。
 

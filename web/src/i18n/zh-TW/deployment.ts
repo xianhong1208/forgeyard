@@ -76,6 +76,11 @@ export default {
   "deployment.gw.requestsDays": "請求數（{days} 天）",
   "deployment.gw.errors": "錯誤",
   "deployment.gw.tokens": "Token 數",
+  "deployment.gw.gpuMonth": "GPU 時數（{month}）",
+  "deployment.gw.ramMonth": "記憶體（{month}）",
+  "deployment.gw.busy": "忙碌比例",
+  "deployment.gw.gpuTitle":
+    "從推論引擎啟動起算，到副本釋出顯示卡為止：下載期間、部署休眠期間和伺服器停止運作的期間都不計算。共用的顯示卡依保留量占該卡記憶體的比例計算。",
   "deployment.gw.behind": "背後的副本",
   "deployment.gw.ready": "就緒",
   "deployment.gw.on": "，在 {machine}",

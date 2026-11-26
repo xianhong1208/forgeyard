@@ -14,4 +14,5 @@ export const SAME_IN_BOTH: readonly string[] = [
   "serving.ram",
   "enginetrial.gpu",
   "machine.workloadLine",
+  "usage.gpu.chip.cpu",
 ];
