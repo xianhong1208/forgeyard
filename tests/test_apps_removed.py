@@ -357,7 +357,11 @@ def test_fy_apprm_009_check_apps_lists_what_the_upgrade_will_remove_and_then_wha
     assert found["state"] == "pending" and [a["name"] for a in found["apps"]] == ["notebook", "nightly"]
     assert "s3cret" not in json.dumps(found)
     assert "workloads" in columns("api_keys")                     # it changed nothing
-    assert new_session().get(Workload, s["web"]) is not None
+    db = new_session()                                            # closed before the upgrade: an open read holds a
+    try:                                                          # lock that PostgreSQL's DROP COLUMN waits on forever
+        assert db.get(Workload, s["web"]) is not None
+    finally:
+        db.close()
     upgrade()
     assert main(["check-apps"]) == 0
     out = capsys.readouterr().out
