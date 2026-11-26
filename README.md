@@ -104,6 +104,13 @@ approval by default, an existing account is linked by its owner, and one claim c
 ([how](docs/guide/how-to.md#sign-in-with-single-sign-on-oidc)). Two migrations run on start; a server run from source
 needs `uv sync --extra server`, and the agents need no update ([release notes](CHANGELOG.md#160--2026-11-26)).
 
+1.6.1 adds **teams** and **GPU hours**, both in the community edition. A team shares API keys, deployments and a
+monthly cloud budget; its managers run its deployments without being operators, and a team key keeps working when the
+person who made it leaves ([how](docs/guide/how-to.md#share-models-with-a-team)). **Usage** → **GPU hours** shows how
+much GPU time each deployment, team, machine and GPU model held, counted from the first start of 1.6.1
+([how](docs/guide/how-to.md#see-who-holds-the-gpus)). Two migrations run on start; without a team nothing changes, and
+the agents need no update ([release notes](CHANGELOG.md#161--2026-11-27)).
+
 ## What's new in 1.5
 
 1.5.0 uses GPUs only while they are needed. A deployment can **sleep when idle** and give its memory back; the
@@ -189,7 +196,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.6.0
+  docker.io/tonyhuang1101/forgeyard:1.6.1
 sudo docker logs forgeyard
 ```
 
@@ -235,7 +242,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.1
 ```
 
 The join token works once, within 15 minutes. AMD, CPU-only and Windows machines:

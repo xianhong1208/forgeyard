@@ -82,7 +82,7 @@ export function UsageGpu({ days, onDays, teams: known, everything: canAll }: { d
       </div>
       {error && <Notice tone="error">{error}</Notice>}
       {sum && (
-        <dl className="fleet usage-totals" aria-label={t("usage.gpu.totals")}>
+        <dl className="fleet usage-totals usage-totals-gpu" aria-label={t("usage.gpu.totals")}>
           <div><dt>{t("usage.gpu.hours")}</dt><dd>{gpuHours(sum.gpu_ms)}</dd></div>
           <div><dt>{t("usage.gpu.busy")}</dt><dd>{percent(sum.busy_share)} <span className="muted small">{t("usage.gpu.busyDetail")}</span></dd></div>
           {cpu && <div><dt>{t("usage.gpu.ram")}</dt><dd>{t("usage.gpu.gibHours", { n: gibHours(sum.ram_mib_ms) })} <span className="muted small">{t("usage.gpu.ramDetail")}</span></dd></div>}

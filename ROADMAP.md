@@ -520,16 +520,35 @@ Two migrations (`0020_two_factor`, `0021_single_sign_on`) add tables and session
 `uv sync --extra server` (Authlib). The agents need no update: no agent code changed. Passkeys follow in a later
 1.6.x release; SAML, SCIM, group sync, SSO-only sign-in and several identity providers are in the enterprise edition.
 
+## Shipped: 1.6.1 (2026-11-27), teams and GPU hours
+
+1. ✅ **Teams** (#309, for #190), in the community edition: admins make teams and choose their members and managers.
+   A team key belongs to the team and keeps working when the person who made it leaves; a deployment may belong to a
+   team, whose managers stop, start and change it; a team has its own monthly cloud budget; **Usage** splits by team.
+2. ✅ **GPU hours** (#310, for #190), in the community edition: how much GPU time each deployment held, per day, team,
+   machine and GPU model, from the moment its engine starts until its cards are free again. Shown on **Usage** →
+   **GPU hours**, on a deployment's page and in `/metrics`; not enforced.
+3. ✅ **An extension interface** (#308, for #190): internal and versioned to the exact release, so a separately
+   distributed package can add API routes, checks before placement and before each request, and console pages.
+   It is not a stable plugin API.
+
+Two migrations (`0022_teams`, `0023_gpu_usage`) add tables and columns; without a team nothing changes, and GPU hours
+count from the first start of 1.6.1. The agents need no update: no agent code changed. Quotas (GPU hours, tokens),
+machine pools per team, priced cost reports and statements, organisations above teams, SCIM and group-to-team sync are
+in the enterprise edition.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
 The community edition keeps everything needed to run models on your own machines: machines and their
 GPUs, memory estimates, scheduling, the `/v1` gateway, cloud spill, per-key cloud policies and budgets,
-usage, local accounts and roles, the audit log of admin actions, scale to zero and autoscaling,
+usage, local accounts and roles, teams with their own keys, deployments and cloud budget, GPU hours
+per deployment, team, machine and GPU model, the audit log of admin actions, scale to zero and autoscaling,
 Prometheus metrics, and TLS between the gateway and the machines.
 
 Some features for larger organisations are planned for a separate **enterprise edition**: SAML,
-SCIM, group-to-team sync, sign-in through SSO only, more than one identity provider, organisations and teams with quotas and cost reports, the per-request audit
+SCIM, group-to-team sync, sign-in through SSO only, more than one identity provider, team quotas (GPU hours, tokens), machine pools per team, priced cost
+reports per team, organisations above teams, the per-request audit
 log and its export, PII masking, tunnels for machines at other sites, more than one server for high
 availability, and extended support (longer support periods, with fixes back-ported to older releases). They
 are marked *(enterprise edition)* in the table below.
@@ -549,7 +568,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
 | **1.6.2: request log and audit export** *(enterprise edition)* | **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log and the request log can be sent out (syslog, OpenTelemetry), with tamper evidence (#40). |
 | **1.6.3: notifications and alerts** | Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**. Each kind of event goes to the channels chosen for it (#191). |
 | **1.6.4: Batch API** | An **OpenAI-compatible Batch API:** large jobs run at quiet times (#192). |

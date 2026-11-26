@@ -39,6 +39,8 @@
 
 1.6.0 加入**雙重驗證**和**單一登入**。每個人都可以在 **我的帳號** 加入驗證器 App，之後登入時還要輸入它顯示的 6 位數驗證碼；手機遺失時可以用 10 組備用碼登入。管理員可以要求管理員或所有人都必須開啟，並給一段寬限期；API 金鑰不受影響（[作法](docs/guide/zh-TW/how-to.md#turn-on-two-factor-sign-in)）。除了密碼之外，大家也可以透過一個 OpenID Connect 身分提供者（Keycloak、Authentik、Entra ID、Google）登入：新的人預設要等管理員核准，現有的帳號由本人連結，也可以用一個宣告決定角色（[作法](docs/guide/zh-TW/how-to.md#sign-in-with-single-sign-on-oidc)）。啟動時會執行兩個資料庫遷移；從原始碼執行的伺服器需要 `uv sync --extra server`，agent 不必更新（[版本說明](CHANGELOG.md#160--2026-11-26)（英文））。
 
+1.6.1 加入**團隊**和 **GPU 時數**，兩者都屬於社群版。團隊共用 API 金鑰、部署和每月的雲端預算；團隊的管理者不必是操作員，也能管理團隊的部署，團隊金鑰在建立它的人離開後仍然有效（[作法](docs/guide/zh-TW/how-to.md#share-models-with-a-team)）。**用量** → **GPU 時數** 會顯示每個部署、團隊、機器和 GPU 型號占用了多少 GPU 時間，從第一次啟動 1.6.1 開始計算（[作法](docs/guide/zh-TW/how-to.md#see-who-holds-the-gpus)）。啟動時會執行兩個資料庫遷移；沒有建立團隊就什麼都不會變，agent 也不必更新（[版本說明](CHANGELOG.md#161--2026-11-27)（英文））。
+
 ## 1.5 的新功能
 
 1.5.0 只在需要時使用 GPU。部署可以**閒置時休眠**，把記憶體還回來；下一個請求會喚醒它，不論同時來了多少個請求都只喚醒一次，
@@ -83,7 +85,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.6.0
+  docker.io/tonyhuang1101/forgeyard:1.6.1
 sudo docker logs forgeyard
 ```
 
@@ -126,7 +128,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.1
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD、純 CPU 與 Windows 機器：
