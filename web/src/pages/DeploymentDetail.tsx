@@ -20,6 +20,7 @@ import type { CatalogResponse, Deployment, DeploymentResponse, LiveCard, RouteIn
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel, statusLabel } from "../lib/workloads";
 import { RoutingEditor } from "./RouteDetail";
+import { gibHours, gpuHours, percent } from "./UsageGpu";
 import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
 import { AutoscaleLine } from "../components/Replicas";
 import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
@@ -235,6 +236,7 @@ function Gateway({ d }: { d: Deployment }) {
   const base = `${window.location.origin}/v1`;
   const path = d.route ? (API_LABEL[d.route.api] ?? "/v1").replace(/^\/v1/, "") : "";
   const u = d.usage?.total;
+  const g = d.usage?.gpu;
   return (
     <section className="panel gw-panel" aria-labelledby="gw-title">
       <h2 id="gw-title">{t("deployment.gw.title")}</h2>
@@ -271,6 +273,15 @@ function Gateway({ d }: { d: Deployment }) {
           <div><dt>{t("deployment.gw.errors")}</dt><dd>{num(u.errors)}</dd></div>
           <div><dt>{t("deployment.gw.tokens")}</dt><dd>{num(u.tokens)}</dd></div>
           <div><dt>p50 / p95</dt><dd className="small-dd">{ms(u.latency_p50_ms)} / {ms(u.latency_p95_ms)}</dd></div>
+          {/* 1.6.1 (#190): its GPU hours and busy share this month (a CPU deployment: its RAM × hours). */}
+          {g && g.ram_mib_ms > 0 && !g.gpu_ms ? (
+            <div title={t("deployment.gw.gpuTitle")}><dt>{t("deployment.gw.ramMonth", { month: g.month })}</dt><dd>{t("usage.gpu.gibHours", { n: gibHours(g.ram_mib_ms) })}</dd></div>
+          ) : g && (
+            <>
+              <div title={t("deployment.gw.gpuTitle")}><dt>{t("deployment.gw.gpuMonth", { month: g.month })}</dt><dd>{gpuHours(g.gpu_ms)}</dd></div>
+              <div><dt>{t("deployment.gw.busy")}</dt><dd>{percent(g.busy_share)}</dd></div>
+            </>
+          )}
         </dl>
       )}
       {d.endpoints.length > 0 && (

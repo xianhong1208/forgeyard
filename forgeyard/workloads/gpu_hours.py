@@ -55,10 +55,9 @@ GROUPS = ("deployment", "team", "machine", "gpu_model")
 
 
 def counting(r: Replica) -> bool:
-    """Does this replica hold its reservation with its engine started (not fetching, not stopping, not asleep)?"""
+    """Does this replica hold its reservation with its engine started? Not while it fetches; not once it is asked to stop
+    or its deployment goes to sleep: its state is then "stopping" (forgeyard/workloads/state.py), then "stopped"."""
     if r.final or r.node_id is None or r.state not in COUNTED:
-        return False
-    if r.workload.desired_state != "running":   # stopped or asleep (its replicas are "stopping" by then anyway)
         return False
     return r.download is None and not (r.reason or "").startswith(FETCHING)
 

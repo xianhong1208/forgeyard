@@ -29,6 +29,7 @@ export default {
   "deploy.adv.limits": "request limits, ",
   "deploy.adv.firstDeploy": "first-answer wait, ",
   "deploy.adv.firstEdit": ", first-answer wait",
+  "deploy.adv.argsEdit": ", engine arguments",
   "deploy.advancedHint": "Every value here has a default that works; change it only when you need to.",
   "deploy.vramOverride": "Memory per device (override)",
   "deploy.vramPlaceholder": "e.g. 20Gi",
@@ -89,7 +90,7 @@ export default {
   "deploy.edit.pinnedOption": "Pinned to {name} · {status}",
   "deploy.edit.pinnedHint": "Its replicas run on this machine only; a replica elsewhere moves there.",
   "deploy.edit.autoHint": "Forgeyard chooses; a restart goes back to the machine a replica ran on when it still fits.",
-  "deploy.edit.advanced": "Advanced: {scaling}{limits}memory override, engine arguments{first}, wake wait",
+  "deploy.edit.advanced": "Advanced: {scaling}{limits}memory override{args}{first}, wake wait",
   "deploy.theEstimate": "the estimate",
   "deploy.edit.vramHint": "Empty: the estimate.",
   "deploy.edit.firstHint":

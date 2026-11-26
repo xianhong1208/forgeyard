@@ -124,13 +124,17 @@ def test_fy_gpuh_001_one_exclusive_card_for_ten_minutes(chat):
 
 def test_fy_gpuh_002_a_shared_card_counts_its_reservations_share(chat):
     """FY-GPUH-002: 20 GiB reserved on a shared 80 GiB card is a quarter of the card: 10 minutes = 150,000 GPU-ms. A
-    reservation larger than the card counts the card once."""
+    reservation larger than the card counts the card once. Fractions of a millisecond add up across writes (7 of 80 GiB
+    is 437.5 GPU-ms per 5-second write: 52,500 in 10 minutes, not 52,440)."""
     hold("chat", cards=[4], vram=20 * GIB, share="vram")
     run(chat.clock, 600)
     assert gpu_ms() == 150_000
     hold("chat", cards=[4], vram=100 * GIB, share="vram")
     run(chat.clock, 60)
     assert gpu_ms() == 150_000 + 60_000
+    hold("chat", cards=[4], vram=7 * GIB, share="vram")
+    run(chat.clock, 600)
+    assert gpu_ms() == 150_000 + 60_000 + 52_500
 
 
 def test_fy_gpuh_003_an_exclusive_replica_on_two_cards_counts_two(chat):
@@ -152,6 +156,7 @@ def test_fy_gpuh_004_downloading_and_pending_do_not_count(chat):
     for state, download, reason in (
             ("starting", {"phase": "model", "done": 1, "total": 9}, "downloading the model: 0.00 of 0.00 GiB (11%)"),
             ("starting", {"phase": "image", "done": 1, "total": 9}, "pulling the image: 1 of 9 layers"),
+            ("starting", {"phase": "engine", "done": 1, "total": 9}, None),
             ("starting", None, "downloading the model: 420 MiB"),
             ("starting", None, "preparing the model"),
             ("pending", None, None)):
@@ -269,7 +274,7 @@ def test_fy_gpuh_009_metrics_counts_gpu_seconds_per_deployment_and_model(chat):
 
 def test_fy_gpuh_010_busy_is_the_part_with_a_request_in_flight(chat):
     """FY-GPUH-010: a replica with a request in flight for 150 of 600 seconds is busy a quarter of its GPU time; a
-    request still in flight counts up to the write."""
+    request still in flight counts up to the write, and one that starts and ends between two writes counts its own length."""
     uid = hold("chat", cards=[4], share="exclusive")
     b, t = chat.clock.busy, chat.clock.t
     for _ in range(3):   # 50 s busy in each of the first three minutes
@@ -290,6 +295,15 @@ def test_fy_gpuh_010_busy_is_the_part_with_a_request_in_flight(chat):
     finally:
         db.close()
     assert total["busy_share"] == round(153_000 / 603_000, 4)
+    t[0] += 2                     # the request ends 2 s later; another runs 1 s, all before the next write
+    b.release(uid)
+    t[0] += 1
+    b.acquire(uid)
+    t[0] += 1
+    b.release(uid)
+    t[0] += 1
+    recorder.flush()
+    assert rows()[0].busy_ms == 153_000 + 3_000
 
 
 def test_fy_gpuh_011_the_api_and_who_sees_what(chat):

@@ -21,6 +21,7 @@ import { shown, useInfo } from "../lib/info";
 import type { UsageResponse, UsageRow } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { usePoll } from "../lib/poll";
+import { UsageGpu } from "./UsageGpu";
 
 const DAYS = [1, 7, 30];
 // The words are read when shown, so they follow the language (#189).
@@ -78,6 +79,9 @@ export function UsagePage() {
   const nameLabel = GROUPS.find((g) => g.id === data?.group_by)?.label ?? t("usage.name");
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone && !team));
   const teams = data?.teams ?? [];
+  // 1.6.1 (#190): GPU hours, for admins and operators (every deployment) and a team's managers (their team's).
+  const allGpu = user?.role === "admin" || user?.role === "operator";
+  const gpuTab = allGpu || teams.length > 0;
   // Back from a view that had the person or team grouping: to a grouping every view has.
   const plainGroups = () => {
     if (group === "user" || group === "team") setGroup("model");
@@ -103,10 +107,10 @@ export function UsagePage() {
         lead={data?.team ? t("usage.lead.team", { name: data.team.title }) : data?.everyone ? t("usage.lead.everyone") : t("usage.lead.mine")} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="tabs" role="tablist" aria-label={t("usage.tabs")}>
-        {(["requests", "cost"] as const).map((id) => (
+        {(["requests", "cost", "gpu"] as const).filter((id) => id !== "gpu" || gpuTab).map((id) => (
           <button key={id} type="button" role="tab" id={`usage-tab-${id}`} aria-selected={tab === id} aria-controls="usage-panel"
             className={tab === id ? "on" : ""} onClick={() => setTab(id)}>
-            {id === "requests" ? t("usage.tab.requests") : t("usage.tab.cost")}
+            {id === "requests" ? t("usage.tab.requests") : id === "cost" ? t("usage.tab.cost") : t("usage.tab.gpu")}
           </button>
         ))}
         {moreTabs.map((x) => (
@@ -116,7 +120,8 @@ export function UsagePage() {
           </button>
         ))}
       </div>
-      {more ? <div id="usage-panel" role="tabpanel" aria-labelledby={`usage-tab-${more.id}`}>{more.render()}</div> : <>
+      {more ? <div id="usage-panel" role="tabpanel" aria-labelledby={`usage-tab-${more.id}`}>{more.render()}</div>
+        : tab === "gpu" && gpuTab ? <div id="usage-panel" role="tabpanel" aria-labelledby="usage-tab-gpu"><UsageGpu days={days} onDays={setDays} teams={teams} everything={allGpu} /></div> : <>
       <div className="usage-controls">
         <div className="segmented" role="group" aria-label={t("usage.period")}>
           {DAYS.map((d) => (

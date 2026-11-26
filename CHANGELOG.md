@@ -27,6 +27,20 @@ version until 1.0.
   ledger a `team` scope (alerts at 80 % and 100 %); the audit log `team.*` actions. A team with working keys or with
   deployments cannot be deleted. Without a team nothing changes. Guide:
   [Share models with a team](docs/guide/how-to.md#share-models-with-a-team).
+- **GPU hours** (#190, community edition): how much GPU time each deployment held, per UTC day, team, machine and GPU
+  model. Counted by the server every 5 seconds (no agent change) from the moment a replica's engine starts until its
+  cards are free again: not while it downloads its model, engine or image, and not once it is stopped or asleep. A card
+  held alone counts whole, a shared card the reservation's share of its memory, a CPU replica its reserved RAM ×
+  time. The busy share beside it is the part with a request in flight. Shown, not enforced: **Usage** → **GPU hours**
+  (by deployment, team, machine or GPU model; admins and operators see every deployment's, a team's managers their
+  team's), a deployment's page (this month), and `/metrics`. Time while the server is down is not counted. An
+  extension that enforces GPU-hour quotas reads `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)`. Guide:
+  [GPU hours](docs/guide/concepts.md#gpu-hours), [See who holds the GPUs](docs/guide/how-to.md#see-who-holds-the-gpus).
+
+### Fixed
+
+- A team's manager no longer sees "engine arguments" in the **Advanced** summary of a deployment's **Change** page,
+  whose field is hidden for them.
 
 ### Migrations
 
@@ -34,6 +48,9 @@ version until 1.0.
   `api_keys.user_id` becomes nullable (on SQLite `api_keys` is rebuilt; nothing references it);
   `deployments.team_id`; `usage_daily.team_id` (0 on every existing row) with an index on (team_id, day). No team
   exists after the upgrade and no existing row changes meaning. Going down deletes the team keys.
+- `0023_gpu_usage`: table `gpu_usage_daily` (day, deployment, team, machine, vendor, GPU model, `gpu_ms`, `ram_mib_ms`,
+  `busy_ms`; unique on day, deployment, team, machine and GPU model; no foreign keys). No existing row changes;
+  counting starts when the upgraded server runs. Going down drops the table and the hours in it.
 
 ### API changes
 
@@ -49,6 +66,9 @@ version until 1.0.
   `X-Forgeyard-Budget-Exhausted` may say `team`. New error codes: `bad_team_name`, `team_name_taken`, `team_not_found`,
   `not_team_manager`, `admins_only`, `no_such_user`, `not_a_member`, `team_has_keys`, `team_has_deployments`,
   `operators_only`. See [Teams through the API](docs/guide/reference.md#teams-through-the-api).
+- GPU hours: `GET /api/usage/gpu` (`days`, `group` = `deployment` | `team` | `machine` | `gpu_model`, `team`);
+  `GET /api/deployments/{id}` gains `usage.gpu` (this month). `/metrics` gains `forgeyard_gpu_seconds_total`
+  (labels `deployment`, `gpu_model`). See [Teams through the API](docs/guide/reference.md#teams-through-the-api).
 - A preview that an extension refuses (`POST /api/deployments/estimate`, and the plans in deploy, edit and engine
   trial answers) has `fits: false` and `refused: {code, message}`; deploy, edit and trials then answer 409 with the
   extension's code instead of `does_not_fit`. Without an extension nothing changes.

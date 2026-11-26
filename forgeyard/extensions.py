@@ -28,6 +28,10 @@ A gateway check runs on the event loop for every request: it must answer from me
 no network). A hook that raises is logged and treated as allowing (a placement or request goes on): an extension's
 bug must not stop models from serving.
 
+**GPU hours** (1.6.1) are read, not observed: the usage observer gets the request rows only. An extension that
+enforces GPU-hour quotas (at placement, through `placement_check`) reads this month's GPU time of a team with
+`forgeyard.workloads.gpu_hours.month_total(db, team_id=…)["gpu_ms"]`, from the database, at most one write (5 s) behind.
+
 Community code never checks a licence; it only asks the registry.
 """
 

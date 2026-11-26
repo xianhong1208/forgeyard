@@ -300,6 +300,39 @@ describe("a deployment's team", () => {
   });
 });
 
+describe("a deployment's team and GPU hours", () => {
+  it("FY-WEB-1046 the Advanced summary of the Change page names engine arguments only to those who may change them", async () => {
+    deploymentServer(MIA, false);
+    mount("/serving/3/edit");
+    const manager = await screen.findByText(/^Advanced: /);
+    expect(manager.textContent).toBe("Advanced: memory override, first-answer wait, wake wait");
+    cleanup();
+    deploymentServer(OLA, true);
+    mount("/serving/3/edit");
+    expect((await screen.findByText(/^Advanced: /)).textContent).toBe("Advanced: memory override, engine arguments, first-answer wait, wake wait");
+  });
+
+  it("FY-WEB-1047 a deployment's page shows its GPU hours this month (one decimal) and its busy share; a CPU one its RAM", async () => {
+    const gpu = { month: "2026-11", gpu_ms: 600_000, ram_mib_ms: 0, busy_ms: 150_000, cpu_busy_ms: 0, busy_share: 0.25, counting_since: "2026-11-26T06:00:00Z" };
+    const total = { id: "total", name: "Total", requests: 3, errors: 0, limited: 0, prompt_tokens: 0, completion_tokens: 0, tokens: 0,
+      latency_avg_ms: null, latency_p50_ms: null, latency_p95_ms: null };
+    const serve = (usage: Deployment["usage"]) => server(OLA, (url) => {
+      if (url === "/api/deployments/3") return { status: 200, body: { deployment: dep({ usage }), events: [], server_time: "", can_manage: true } };
+      return undefined;
+    });
+    serve({ days: 7, total, by_day: [], gpu });
+    mount("/serving/3");
+    const hours = await screen.findByText("GPU hours, 2026-11");
+    expect(hours.nextElementSibling?.textContent).toBe("0.2");
+    expect(screen.getByText("Busy").nextElementSibling?.textContent).toBe("25%");
+    cleanup();
+    serve({ days: 7, total, by_day: [], gpu: { ...gpu, gpu_ms: 0, busy_ms: 0, busy_share: null, ram_mib_ms: 2048 * 3_600_000 } });
+    mount("/serving/3");
+    expect((await screen.findByText("RAM, 2026-11")).nextElementSibling?.textContent).toBe("2.0 GiB·h");
+    expect(screen.queryByText("GPU hours, 2026-11")).toBeNull();
+  });
+});
+
 describe("teams in zh-TW", () => {
   it("FY-WEB-1044 the Teams page and a team's roles read in Traditional Chinese (團隊, 管理者, 成員)", async () => {
     localStorage.setItem(LANG_KEY, "zh-TW");

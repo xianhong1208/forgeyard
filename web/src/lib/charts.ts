@@ -264,5 +264,8 @@ export function rowName(id: string, name: string, lang: Lang = getLang()): strin
   if ((m = /^deleted team #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedTeam", { id: m[1] });
   if ((m = /^team key \(deleted team #(\d+)\)$/.exec(name))) return translate(lang, "usage.row.teamKeyDeleted", { id: m[1] });
   if ((m = /^team key \((.+)\)$/.exec(name))) return translate(lang, "usage.row.teamKey", { name: m[1] });
+  // GPU hours (1.6.1, #190): deployments and machines that are gone.
+  if ((m = /^deleted deployment #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedDeployment", { id: m[1] });
+  if ((m = /^removed machine #(\d+)$/.exec(name))) return translate(lang, "usage.row.removedMachine", { id: m[1] });
   return name;
 }

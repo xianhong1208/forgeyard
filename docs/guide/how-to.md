@@ -1551,6 +1551,22 @@ Through the API: `POST /api/teams`, `PUT /api/teams/{name}/members/{username}` w
 To delete a team, revoke its working keys and move or delete its deployments first: until then **Delete team**
 answers `team_has_keys` or `team_has_deployments`.
 
+## See who holds the GPUs
+
+GPU hours (1.6.1) show which deployments, teams and machines hold the cards, and whether they use them. See
+[GPU hours](concepts.md#gpu-hours) for what is counted.
+
+1. Open **Usage** → **GPU hours** (admins and operators; a team's managers see their team's).
+2. Choose the period (**Today**, **7 days**, **30 days**) and how to split it: **Deployment**, **Team**, **Machine** or
+   **GPU model**. Admins and operators pick **Every deployment** or one team.
+3. Read the table: **GPU hours** with one decimal, the **Share** of the period's total, and **Busy**: the part of that
+   time with a request in flight. A deployment with many GPU hours and a low busy share holds cards it rarely uses:
+   turn on [sleep when idle](#let-a-deployment-sleep-when-nobody-uses-it) or share its card.
+4. On a deployment's page, **GPU hours** and **Busy** show this month's.
+
+For a dashboard, `/metrics` has `forgeyard_gpu_seconds_total{deployment, gpu_model}`
+([Metrics](reference.md#metrics)). Time while the server was down is not counted.
+
 ## Turn on two-factor sign-in
 
 With two-factor sign-in (1.6.0), signing in asks for your password and a 6-digit code from an authenticator app on

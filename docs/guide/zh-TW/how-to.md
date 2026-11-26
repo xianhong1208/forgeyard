@@ -982,6 +982,17 @@ Forgeyard 會這樣告訴你（管理員可以在 **設定健康檢查** 看到�
 
 要刪除團隊，請先撤銷它還能用的金鑰，並移走或刪除它的部署：在那之前，**刪除團隊**會回應 `team_has_keys` 或 `team_has_deployments`。
 
+## 查看誰占用了 GPU
+
+GPU 時數（1.6.1）顯示哪些部署、團隊和機器占用了顯示卡，以及它們有沒有在用。計算方式請見 [GPU 時數](concepts.md#gpu-hours)。
+
+1. 打開 **用量** → **GPU 時數**（管理員和操作員；團隊的管理者看得到自己團隊的）。
+2. 選擇期間（**今天**、**7 天**、**30 天**）和分組方式：**部署**、**團隊**、**機器** 或 **GPU 型號**。管理員和操作員可以選 **所有部署** 或某一個團隊。
+3. 看表格：**GPU 時數**（取到小數一位）、占這段期間總數的 **占比**，以及 **忙碌比例**：這段時間中正在處理請求的部分。GPU 時數多、忙碌比例低的部署，代表它占著很少用到的顯示卡：可以開啟[閒置時休眠](#let-a-deployment-sleep-when-nobody-uses-it)，或讓它共用顯示卡。
+4. 部署的頁面上，**GPU 時數** 和 **忙碌比例** 顯示的是本月的數字。
+
+要做儀表板的話，`/metrics` 有 `forgeyard_gpu_seconds_total{deployment, gpu_model}`（[指標](reference.md#metrics)）。伺服器停止運作的期間不計算。
+
 ## 開啟雙重驗證
 
 開啟雙重驗證（1.6.0）後，登入時除了密碼，還要輸入手機上驗證器 App 顯示的 6 位數驗證碼，所以就算別人知道你的密碼，也登不進來。任何支援 TOTP 的 App 都可以：Google Authenticator、Microsoft Authenticator、1Password、Bitwarden、Aegis 等等。

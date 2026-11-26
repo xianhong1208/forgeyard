@@ -193,6 +193,36 @@ export default {
   "usage.table.others.other": "{count} others",
   "usage.table.sortBy": "Sort by",
 
+  // GPU hours (1.6.1, #190)
+  "usage.tab.gpu": "GPU hours",
+  "usage.gpu.lead": "The GPU time model replicas held, by deployment, team, machine or GPU model.",
+  "usage.gpu.group.deployment": "Deployment",
+  "usage.gpu.group.team": "Team",
+  "usage.gpu.group.machine": "Machine",
+  "usage.gpu.group.gpu_model": "GPU model",
+  "usage.gpu.whose": "Whose GPU hours",
+  "usage.gpu.all": "Every deployment",
+  "usage.gpu.totals": "GPU hours in this period",
+  "usage.gpu.hours": "GPU hours",
+  "usage.gpu.busy": "Busy",
+  "usage.gpu.busyDetail": "of the GPU time with a request in flight",
+  "usage.gpu.ram": "CPU replicas",
+  "usage.gpu.ramDetail": "reserved RAM × hours",
+  "usage.gpu.gibHours": "{n} GiB·h",
+  "usage.gpu.col.hours": "GPU hours",
+  "usage.gpu.col.share": "Share",
+  "usage.gpu.col.busy": "Busy",
+  "usage.gpu.col.busyTitle": "Of this GPU time, the part with at least one request in flight through this server",
+  "usage.gpu.col.ram": "RAM (GiB·h)",
+  "usage.gpu.col.ramTitle": "CPU replicas: their reserved RAM in GiB × hours",
+  "usage.gpu.by": "GPU hours by {name}",
+  "usage.gpu.chip.cpu": "CPU",
+  "usage.gpu.empty": "No GPU time in this period. It is counted while a deployment's replicas hold their cards.",
+  "usage.gpu.foot":
+    "{range} (UTC days). Counted from the moment an engine starts until its replica's cards are free again: not while it downloads, not while its deployment is asleep. A shared card counts the reservation's share of the card's memory (20 of 80 GiB: a quarter). Nothing is counted while the server is down; this server has been counting since {since}.",
+  "usage.row.deletedDeployment": "deleted deployment #{id}",
+  "usage.row.removedMachine": "removed machine #{id}",
+
   // Budgets
   "usage.budgets.title": "Budgets this month",
   "usage.budgets.lead":

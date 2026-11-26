@@ -492,7 +492,7 @@ export type Deployment = {
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
   // 1.2: the deployment's own route with its tiers, and other routes it is a target of.
   routing?: RouteInfo | null; also_in?: string[];
-  usage?: { days: number; total: UsageRow; by_day: UsageRow[] };
+  usage?: { days: number; total: UsageRow; by_day: UsageRow[]; gpu?: GpuMonth };
   // 1.3.1: the machine a person chose (null: Forgeyard chooses), and an edit's restarts in progress.
   pinned?: { id: number; name: string | null } | null;
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
@@ -663,6 +663,17 @@ export type UsageResponse = {
   // 1.6.1 (#190): the team shown (?team=), and the teams whose usage the signed-in person may see.
   team?: TeamBrief | null; teams?: TeamBrief[];
 };
+
+// ---------------------------------------------------------------- GPU hours (1.6.1, #190)
+// GPU-milliseconds held (weighted by each replica's share of a card); RAM MiB × ms of CPU replicas; the busy part of the
+// GPU time (busy_share = busy_ms ÷ gpu_ms, null without GPU time) and of CPU replicas' time.
+export type GpuAmounts = { gpu_ms: number; ram_mib_ms: number; busy_ms: number; cpu_busy_ms: number; busy_share: number | null };
+export type GpuRow = GpuAmounts & { id: string; name: string; vendor?: string; deleted?: boolean };
+export type GpuUsageResponse = {
+  from: string; to: string; days: number; group_by: string; total: GpuAmounts & { id: string; name: string }; rows: GpuRow[];
+  team: TeamBrief | null; teams: TeamBrief[]; everything: boolean; counting_since: string;
+};
+export type GpuMonth = GpuAmounts & { month: string; counting_since: string };
 
 // ---------------------------------------------------------------- teams (1.6.1, #190)
 export type TeamBrief = { id: number; name: string; title: string };
