@@ -380,7 +380,7 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
     if why := extensions.registry.gateway_refused(caller, route):
         # 1.6.1 (#190): an extension refuses it (a quota), from memory; before the rate limits, so it takes no slot.
         record(caller, route.served_name, route.deployment_id, why[0], started, endpoint=endpoint)
-        raise GatewayError(*why)
+        raise GatewayError(*why[:3], extra=why[3])   # 1.6.2: with the extension's extra fields
     if caller.source == "api":
         verdict = key_limiter.admit(caller.key_id, caller.rpm, caller.tpm, parsed.max_tokens)
         if isinstance(verdict, Refusal):

@@ -4,7 +4,8 @@ public CI: tests/test_extensions.py loads it through a real entry point object a
 What it refuses is driven by the module's sets below, which the tests fill: a deployment whose served name is in
 REFUSE_PLACEMENT is refused (code `sample_quota`), one in REFUSE_ADDING only when the placement adds replicas (as a
 quota would: running replicas placed again keep serving), machines named in HIDDEN are left out of placement, and a
-request with an API key named in REFUSE_KEYS gets 402 `sample_quota_exhausted`. ASKED and FILTERED record what the
+request with an API key named in REFUSE_KEYS gets 402 `sample_quota_exhausted` (with the fields of EXTRA_FIELDS in its
+error body, when set: the 4th element a gateway check may answer). ASKED and FILTERED record what the
 placement check and the machine filter were given (1.6.2)."""
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ REFUSE_PLACEMENT: set[str] = set()
 REFUSE_ADDING: set[str] = set()
 HIDDEN: set[str] = set()
 REFUSE_KEYS: set[str] = set()
+EXTRA_FIELDS: dict = {}            # the gateway refusal's extra error fields (empty: it answers three elements)
 RAISE: set[str] = set()            # hooks that raise, to check that a broken extension does not stop serving
 OBSERVED: list[dict] = []          # what the usage observer was given
 ASKED: list[dict] = []             # what each placement check was asked: the deployment's team and the Ask
@@ -56,7 +58,8 @@ def gateway_check(caller, route):
     if "gateway_check" in RAISE:
         raise RuntimeError("sample gateway check is broken")
     if caller.key_name in REFUSE_KEYS:
-        return 402, "sample_quota_exhausted", f"The sample extension's token quota for {caller.key_name} is used up."
+        why = 402, "sample_quota_exhausted", f"The sample extension's token quota for {caller.key_name} is used up."
+        return (*why, dict(EXTRA_FIELDS)) if EXTRA_FIELDS else why
     return None
 
 
@@ -102,5 +105,5 @@ def extension() -> SampleExtension:
 def reset() -> None:
     for s in (REFUSE_PLACEMENT, REFUSE_ADDING, HIDDEN, REFUSE_KEYS, RAISE):
         s.clear()
-    for x in (OBSERVED, ASKED, FILTERED):
+    for x in (OBSERVED, ASKED, FILTERED, EXTRA_FIELDS):
         x.clear()

@@ -95,6 +95,9 @@ names the one Forgeyard version it was built for, and the server refuses to star
   offline move, a failed download, no free port, a removed machine). A quota that refuses only when `ask.adding` is
   above 0 never stops a running model. The table is in `forgeyard/extensions.py`; FY-EXT-012 to FY-EXT-018 check it
   at every call site.
+- **A gateway check's extra error fields** (1.6.2): a check may answer `(status, code, text, extra)`; the dict's
+  fields go into the error body next to `message`, `type`, `param` and `code` (which it cannot replace), as a budget's
+  refusal carries its numbers, e.g. `resets_at`. A 3-tuple still works (FY-EXT-019).
 - **GPU hours** are read, not observed: an extension that enforces GPU-hour quotas calls
   `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)` from its placement check (this UTC month's `gpu_ms`, from
   the database, at most 5 seconds behind). The usage observer gets request rows only.

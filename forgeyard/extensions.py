@@ -17,12 +17,16 @@ and `register(reg)`, which calls the registration methods below. The server logs
 | `migrations(path)` | migrate.upgrade(): the path joins Alembic's version locations; `upgrade heads` | `heads` = `head` |
 | `placement_filter(fn(db, ctx, nodes) -> nodes)` | scheduler.evaluate(): machines left out are refused with a reason | every machine |
 | `placement_check(fn(db, ctx, ask) -> None or (code, text))` | scheduler.preview() (deploy, edit, trials, model pages), scheduler.place_replica() (start, wake, restart, move, new replicas), autoscale's room check | allowed |
-| `gateway_check(fn(caller, route) -> None or (status, code, text))` | the gateway, before the key's rate limits and before routing (forward(), video jobs) | allowed |
+| `gateway_check(fn(caller, route) -> None or (status, code, text[, extra]))` | the gateway, before the key's rate limits and before routing (forward(), video jobs) | allowed |
 | `usage_observer(fn(rows))` | the usage recorder, after each write: the counts it added | — |
 | `findings(fn(advisor_ctx) -> findings)` | the setup advisor | none |
 | `features(names)` | GET /api/info `features`: which pages the console shows | [] |
 | `audit_actions(prefixes)` | GET /api/info `audit_actions`: the audit page's action filter | [] |
 | `switch_policy(fn(db, deployment, recipe) -> None or (code, text))` | changing a deployment's engine version | allowed |
+
+A gateway check's optional 4th element (1.6.2), a dict, adds fields to the error body next to `message`, `type`,
+`param` and `code` (as a budget's refusal carries its numbers), e.g. `{"resets_at": "2026-12-01T00:00:00Z"}`; it
+cannot replace those four. A 3-tuple adds none.
 
 A gateway check runs on the event loop for every request: it must answer from memory and never block (no database,
 no network). A hook that raises is logged and treated as allowing (a placement or request goes on): an extension's
@@ -78,6 +82,10 @@ class Ask:
     adding: int
     release: frozenset[int] = frozenset()
     replacing: bool = False
+
+
+# The fields of a gateway error body that a gateway check's extra fields cannot replace (forgeyard/gateway/errors.py).
+GATEWAY_ERROR_FIELDS = ("message", "type", "param", "code")
 
 
 class ExtensionError(RuntimeError):
@@ -151,10 +159,16 @@ class Registry:
     def placement_refused(self, db, ctx, ask: Ask) -> Optional[tuple[str, str]]:
         return self._first(self.placement_checks, "placement check", db, ctx, ask)
 
-    def gateway_refused(self, caller, route) -> Optional[tuple[int, str, str]]:
+    def gateway_refused(self, caller, route) -> Optional[tuple[int, str, str, dict]]:
+        """(status, code, text, extra fields of the error body) when a gateway check refuses the request, else None.
+        A check may answer three elements (no extra fields) or four (1.6.2); the error's own fields stay its own."""
         if not self.gateway_checks:
             return None
-        return self._first(self.gateway_checks, "gateway check", caller, route)
+        why = self._first(self.gateway_checks, "gateway check", caller, route)
+        if why is None:
+            return None
+        extra = why[3] if len(why) > 3 and isinstance(why[3], dict) else {}
+        return why[0], why[1], why[2], {k: v for k, v in extra.items() if k not in GATEWAY_ERROR_FIELDS}
 
     def switch_refused(self, db, deployment, recipe) -> Optional[tuple[str, str]]:
         return self._first(self.switch_policies, "engine switch policy", db, deployment, recipe)

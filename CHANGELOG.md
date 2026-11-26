@@ -18,6 +18,9 @@ version until 1.0.
   team, and a replica placed again looked like a new one, so a quota at its limit would have stopped a running model
   on its next rolling restart. Without an extension nothing changes. See
   [docs/development.md](docs/development.md#extensions).
+- **An extension's gateway check may add fields to its error** (#190, the same interface): it may answer
+  `(status, code, text, extra)`, and the dict's fields (a quota's `resets_at`, for example) go into the error body
+  next to `message`, `type`, `param` and `code`, which they cannot replace. A 3-tuple works as before.
 
 ### Added
 

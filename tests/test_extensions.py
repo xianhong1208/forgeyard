@@ -253,6 +253,7 @@ def test_fy_ext_009_a_refused_request_gets_its_status_and_code(sample, gw):  # n
     assert chat(gw.api).status_code == 200
     sample.REFUSE_KEYS.clear()
     assert chat(api).status_code == 200   # its one request this minute is still free
+    assert set(err(r)) == {"message", "type", "param", "code"}   # three elements: no extra fields
     recorder.flush()
     assert sum(r["requests"] for r in sample.OBSERVED) == 4
     assert sum(r["errors"] for r in sample.OBSERVED) == 2
@@ -505,3 +506,20 @@ def test_fy_ext_018_autoscale_asks_for_one_more_replica(sample, cpus, monkeypatc
     assert run.run(20) == ["Wants 2 replicas, room for 1: The sample extension's quota allows no more replicas of "
                            "chat."]
     assert asked("chat") == [ask("chat", red, 1, 1)]
+
+
+def test_fy_ext_019_a_gateway_refusal_carries_its_extra_fields(sample, gw, vid):  # noqa: F811
+    """FY-EXT-019: a gateway check that answers a 4th element (a dict) puts its fields into the error body next to the
+    four of every error, for chat and for video jobs; it cannot replace those four (code, message, type, param)."""
+    sample.EXTRA_FIELDS.update({"resets_at": "2026-12-01T00:00:00Z", "limit_tokens": 1000, "code": "other",
+                                "message": "other", "type": "other", "param": "other"})
+    blocked = new_key(gw.owner, "blocked")["key"]
+    sample.REFUSE_KEYS.update({"blocked", "laptop"})
+    r = chat(api_client(gw.owner, blocked))
+    assert r.status_code == 402, r.text
+    assert err(r) == {"message": "The sample extension's token quota for blocked is used up.",
+                      "type": "insufficient_quota", "param": None, "code": "sample_quota_exhausted",
+                      "resets_at": "2026-12-01T00:00:00Z", "limit_tokens": 1000}
+    r = make(vid.api)
+    assert r.status_code == 402 and err(r)["code"] == "sample_quota_exhausted", r.text
+    assert err(r)["resets_at"] == "2026-12-01T00:00:00Z" and err(r)["limit_tokens"] == 1000
