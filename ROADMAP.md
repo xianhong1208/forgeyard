@@ -487,6 +487,19 @@ and only does not report the GPUs it cannot see.
 No migration. Update the agents that run from the agent image with the machine page's command: with the 1.5.4 image,
 the CPU process engines of the built-in `llama-cpp` and `sd-cpp` recipes exit with code 127.
 
+## Shipped: 1.5.6 (2026-11-26), clearer machine pages and Windows machines
+
+1. ✅ **Clearer machine and model pages** (#292, for #282): the deploy page, a model's page and an engine's page say
+   whether a machine has the engine's image now and, when not, how it comes and its size; a finished download says
+   only how the model came. A machine whose GPU the engine cannot use (an APU for faster-whisper) is judged on its
+   CPU, with its system memory. Every machine command says to run it in bash on that machine.
+2. ✅ **Windows machines with WSL2** (#292, for #282): an NVIDIA command for an agent in Docker inside a WSL2
+   distribution on **Add a machine**, and a guide page. Not verified on real Windows hardware yet.
+3. ✅ **A hung CI test run leaves its stacks in the log** (#290, for #286).
+4. ✅ **ROADMAP: single sign-on and two-factor sign-in (1.6.0) in the community edition** (#293).
+
+No migration. The agents need no update: no agent code changed.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
