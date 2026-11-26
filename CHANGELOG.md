@@ -91,6 +91,9 @@ version until 1.0.
 - New server dependency (the `server` extra): **Authlib 1.9.10** (BSD-3) for the token request and its client
   authentication, with **joserfc 1.8.0** (BSD-3, installed with it) for the ID token's signature. Without them the
   console says single sign-on is unavailable; the agent does not carry them.
+- `scripts/accept_sso.py` (#39, 1.6.0 PR 4): the acceptance of single sign-on against a real OpenID Connect provider
+  in a real browser: approval and automatic accounts, the role mapping, disabled accounts, linking, the two-factor
+  exemption, the key backup's fresh sign-in, API keys and refused callbacks; everything it changes is put back.
 
 ### Fixed
 

@@ -157,5 +157,6 @@ hook 和直譯器結束；留下來的非 daemon 執行緒會讓 Python 停在�
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
 | `images/vision/` | `vision` 配方執行的 vision server（偵測、分割、深度、圖片分類），1.5.4 起也是 `transformers` 配方的（圖片嵌入、文字分類）：Dockerfile、固定版本的模型與相依套件、smoke test 和它的迷你測試模型（`tinymodels.py`） |
 | `scripts/accept_scale.py` | 閒置時休眠、喚醒和自動副本數在真實硬體上的驗收（也是 `accept_all.py` 的 `scale` 群組；[做法](guide/zh-TW/how-to.md#檢查休眠喚醒和自動副本數)） |
+| `scripts/accept_sso.py` | 在瀏覽器裡對真實的 OpenID Connect 身分提供者（Keycloak 等）驗收單一登入；它單獨執行，不是 `accept_all.py` 的群組，因為它會改動伺服器的登入設定幾分鐘 |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

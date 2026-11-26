@@ -187,5 +187,6 @@ keeps this wrapper. To try it locally, run the same command with a short limit (
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
 | `images/vision/` | the vision server the `vision` recipe runs (detection, segmentation, depth, image classification) and, 1.5.4, the `transformers` recipe (image embeddings, text classification): its Dockerfile, pinned models and dependencies, smoke test and its tiny test models (`tinymodels.py`) |
 | `scripts/accept_scale.py` | the real-hardware acceptance of sleep when idle, waking and automatic replicas (also the `scale` group of `accept_all.py`; [how](guide/how-to.md#check-sleep-waking-and-automatic-replicas)) |
+| `scripts/accept_sso.py` | the acceptance of single sign-on against a real OpenID Connect provider (Keycloak, …) in a browser; it runs alone, not as a group of `accept_all.py`, because it changes the server's sign-in setup for a few minutes |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |
