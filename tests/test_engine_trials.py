@@ -710,7 +710,7 @@ def test_fy_trial_027_the_policy_seam_can_refuse_a_switch(lab):
 
     c, node = lab
     dep = deploy(c, "chatty", MODEL, "llama-cpp", params=CPU)["deployment"]
-    assert not extensions.registry.switch_policies
+    extensions.registry.switch_policies.clear()   # none, whatever this environment has installed
     r = c.patch(f"/api/deployments/{dep['id']}", json={"recipe": COPY, "dry_run": True})
     assert r.status_code == 200, r.text
     extensions.registry.switch_policy(lambda db, d, r: ("not_tried", f"{r.name} has not passed a trial."))

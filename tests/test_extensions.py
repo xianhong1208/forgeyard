@@ -44,6 +44,13 @@ def sample(monkeypatch):
 
 
 @pytest.fixture()
+def no_extension(monkeypatch):
+    """Nothing installed, whatever this environment has (an extension's own CI runs this suite with it installed;
+    list it before the client fixtures)."""
+    monkeypatch.setattr(extensions, "discover", lambda: [])
+
+
+@pytest.fixture()
 def cpus(owner):
     """Two CPU machines; cpu-a has much more free RAM, so binpack prefers cpu-b."""
     seed_catalog()
@@ -64,7 +71,7 @@ def events(c, dep_id: int) -> list[str]:
 
 
 # ------------------------------------------------------------------ without an extension
-def test_fy_ext_001_without_an_extension_the_community_edition(owner):
+def test_fy_ext_001_without_an_extension_the_community_edition(no_extension, owner):
     """FY-EXT-001: nothing installed: /api/info says community with no features (signed in only), Setup health lists
     no extension, no extension route, one migration head (the community's)."""
     assert owner.get("/api/info").json() == {"version": __version__, "edition": "community", "features": [],
