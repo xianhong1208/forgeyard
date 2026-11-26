@@ -500,6 +500,26 @@ the CPU process engines of the built-in `llama-cpp` and `sd-cpp` recipes exit wi
 
 No migration. The agents need no update: no agent code changed.
 
+## Shipped: 1.6.0 (2026-11-26), single sign-on and two-factor sign-in
+
+1. ✅ **Two-factor sign-in with an authenticator app** (#297, for #39): TOTP codes and 10 single-use recovery codes,
+   added by each person in **My account**; admins reset it for someone who lost both, and the secret-key backup
+   asks for a code too.
+2. ✅ **Required two-factor sign-in** (#300, for #39): admins require it of admins or of everyone, with a grace
+   period, after which people can only add it. API keys are not affected. `forgeyard users reset-mfa` on the server
+   host is the owner's way back in.
+3. ✅ **Single sign-on through one OpenID Connect provider** (#301, for #39): Keycloak, Authentik, Entra ID, Google
+   or any provider with a discovery document, next to the password. New accounts wait for an admin by default, or
+   come at once from allowed e-mail domains; one claim can set the role; an existing account is linked by its owner,
+   never by e-mail. Sessions through the provider are exempt from required two-factor sign-in.
+4. ✅ **Accepted against a real Keycloak** (#302, `accept_sso.py`). Not tried with Entra ID or Google yet.
+5. ✅ **Failed tries without an account are counted per client address** (#303): failed single sign-on finishes,
+   agent join tokens, setup tokens, set-password links and sign-ups no longer make everybody wait.
+
+Two migrations (`0020_two_factor`, `0021_single_sign_on`) add tables and session columns. A server run from source needs
+`uv sync --extra server` (Authlib). The agents need no update: no agent code changed. Passkeys follow in a later
+1.6.x release; SAML, SCIM, group sync, SSO-only sign-in and several identity providers are in the enterprise edition.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -529,7 +549,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.6.0: single sign-on and two-factor sign-in** | Sign-in through one OIDC identity provider (Keycloak, Authentik, Entra ID, Google), with new accounts waiting for an admin by default and one claim mapped to a role; two-factor sign-in with TOTP and recovery codes, which an admin can require (#39). Passkeys follow in a later 1.6.x release. SAML, SCIM, group sync, SSO-only sign-in and several identity providers are in the enterprise edition. |
 | **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
 | **1.6.2: request log and audit export** *(enterprise edition)* | **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log and the request log can be sent out (syslog, OpenTelemetry), with tamper evidence (#40). |
 | **1.6.3: notifications and alerts** | Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**. Each kind of event goes to the channels chosen for it (#191). |

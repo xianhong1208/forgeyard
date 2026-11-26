@@ -85,6 +85,17 @@ them where they fit, and every program calls them at `/v1` with an API key.
   prefers machines that already have the model and engine, avoids one that could not reach Hugging
   Face, GitHub or a registry, and moves a replica stuck on such a download to a machine that can.
 
+## What's new in 1.6
+
+1.6.0 adds **two-factor sign-in** and **single sign-on**. Anyone can add an authenticator app in **My account**;
+signing in then asks for its 6-digit code too, and 10 recovery codes cover a lost phone. Admins can require it of
+admins or of everyone, with a grace period; API keys are not affected
+([how](docs/guide/how-to.md#turn-on-two-factor-sign-in)). People can also sign in through one OpenID Connect
+identity provider (Keycloak, Authentik, Entra ID, Google) next to their password: someone new waits for an admin's
+approval by default, an existing account is linked by its owner, and one claim can set the role
+([how](docs/guide/how-to.md#sign-in-with-single-sign-on-oidc)). Two migrations run on start; a server run from source
+needs `uv sync --extra server`, and the agents need no update ([release notes](CHANGELOG.md#160--2026-11-26)).
+
 ## What's new in 1.5
 
 1.5.0 uses GPUs only while they are needed. A deployment can **sleep when idle** and give its memory back; the
@@ -170,7 +181,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.6
+  docker.io/tonyhuang1101/forgeyard:1.6.0
 sudo docker logs forgeyard
 ```
 
@@ -216,7 +227,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 The join token works once, within 15 minutes. AMD, CPU-only and Windows machines:
