@@ -1,5 +1,5 @@
 """Budgets (1.2): what cloud requests may cost per UTC calendar month, per API key, person and
-provider, in micro-USD.
+provider, in micro-USD; and per team (1.6.1, #190: a team key's requests count to its team's budget, not to a person's).
 
 - A budget applies to requests that go to a provider outside your network. Local replicas and
   providers inside your network cost nothing and are never limited by a budget.
@@ -51,7 +51,7 @@ from forgeyard.gateway.quirks import Usage
 
 log = logging.getLogger("forgeyard.gateway")
 
-SCOPES = ("key", "person", "provider")
+SCOPES = ("key", "person", "provider", "team")
 THRESHOLDS = (80, 100)
 PICOS = pricing.PICOS_PER_MICRO           # pico-USD per micro-USD
 BYTES_PER_TOKEN = 3
@@ -88,7 +88,7 @@ def usd(micros: Optional[int]) -> str:
 # ------------------------------------------------------------------ what applies
 @dataclass(frozen=True)
 class Limit:
-    scope: str                # key | person | provider
+    scope: str                # key | person | provider | team (1.6.1)
     id: int
     micros: int               # the budget
     name: str                 # for messages, alerts and the header
@@ -99,12 +99,12 @@ class Limit:
 
     @property
     def token(self) -> str:
-        """What X-Forgeyard-Budget-Exhausted says: key, person or provider:<name>."""
+        """What X-Forgeyard-Budget-Exhausted says: key, person, team or provider:<name>."""
         return f"provider:{self.name}" if self.scope == "provider" else self.scope
 
     def what(self) -> str:
         return {"key": f"this API key ({self.name})", "person": f"the person {self.name}",
-                "provider": f"the provider {self.name}"}[self.scope]
+                "provider": f"the provider {self.name}", "team": f"the team {self.name}"}[self.scope]
 
 
 def limits_for(caller: Any, provider_id: int, provider: str, provider_budget: Optional[int]) -> list[Limit]:
@@ -114,6 +114,9 @@ def limits_for(caller: Any, provider_id: int, provider: str, provider_budget: Op
         out.append(Limit("key", caller.key_id, int(caller.budget_micros), caller.key_name or f"key #{caller.key_id}"))
     if caller.user_id and caller.user_budget_micros is not None:
         out.append(Limit("person", caller.user_id, int(caller.user_budget_micros), caller.username))
+    # 1.6.1 (#190): a team key's team.
+    if getattr(caller, "team_id", 0) and caller.team_budget_micros is not None:
+        out.append(Limit("team", caller.team_id, int(caller.team_budget_micros), caller.team_name or f"team #{caller.team_id}"))
     if provider_budget is not None:
         out.append(Limit("provider", provider_id, int(provider_budget), provider))
     return out
@@ -272,22 +275,25 @@ class Ledger:
 
     @staticmethod
     def _read(db: DbSession, month: str) -> dict[tuple[str, int], int]:
-        rows = db.execute(select(UsageDaily.source, UsageDaily.key_id, UsageDaily.user_id, UsageDaily.target,
-                                 func.sum(UsageDaily.cost_micros))
+        rows = db.execute(select(UsageDaily.source, UsageDaily.key_id, UsageDaily.user_id, UsageDaily.team_id,
+                                 UsageDaily.target, func.sum(UsageDaily.cost_micros))
                           .where(UsageDaily.day >= f"{month}-01", UsageDaily.day < f"{next_month(month)}-01",
                                  UsageDaily.cost_micros > 0)
-                          .group_by(UsageDaily.source, UsageDaily.key_id, UsageDaily.user_id, UsageDaily.target)).all()
+                          .group_by(UsageDaily.source, UsageDaily.key_id, UsageDaily.user_id, UsageDaily.team_id,
+                                    UsageDaily.target)).all()
         pm_ids = {int(t[3:]) for *_, t, _ in rows if t and t.startswith("pm:") and t[3:].isdigit()}
         provider_of = dict(db.execute(select(ProviderModel.id, ProviderModel.provider_id)
                                       .where(ProviderModel.id.in_(pm_ids))).all()) if pm_ids else {}
         out: dict[tuple[str, int], int] = {}
-        for source, key_id, user_id, target, micros in rows:
+        for source, key_id, user_id, team_id, target, micros in rows:
             picos = int(micros or 0) * PICOS
             slots = []
             if source == "api" and key_id:
                 slots.append(("key", int(key_id)))
             if user_id:
                 slots.append(("person", int(user_id)))
+            if team_id:
+                slots.append(("team", int(team_id)))
             pid = provider_of.get(int(target[3:])) if target and target.startswith("pm:") and target[3:].isdigit() else None
             if pid is not None:
                 slots.append(("provider", int(pid)))
@@ -330,7 +336,8 @@ class Ledger:
             self._free(hold)
 
     def settle(self, hold: Optional[Hold], *, key_id: int, user_id: int, provider_id: Optional[int],
-               picos: int, then: Optional[Callable[[], None]] = None, estimated: bool = False) -> None:
+               picos: int, then: Optional[Callable[[], None]] = None, estimated: bool = False,
+               team_id: int = 0) -> None:
         """A finished cloud request: free its reservation, add what it cost, and (under the same lock)
         count its usage with `then`, so seeding sees it exactly once. `estimated`: its cost is unknown and
         `picos` is its reservation, which no usage row holds; it is kept for ESTIMATED_SETTING."""
@@ -341,7 +348,7 @@ class Ledger:
             # Not read yet: the reading will find this request in the usage counted below. (After the
             # turn of a month, the next reading starts the new month from the usage rows.)
             if picos > 0 and self._month is not None:
-                for slot in (("key", key_id), ("person", user_id), ("provider", provider_id)):
+                for slot in (("key", key_id), ("person", user_id), ("provider", provider_id), ("team", team_id)):
                     if slot[1]:
                         self._spent[slot] = self._spent.get(slot, 0) + picos
                         if estimated:

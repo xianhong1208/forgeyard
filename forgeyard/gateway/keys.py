@@ -15,6 +15,9 @@ tier) or on (cloud-only models too). Admins set the value a new key gets and the
 give their own key; as with limits, a value an admin sets on someone else's key is locked for its
 owner. The console's playground uses the most a user may give a key (admins: on).
 
+A team key (1.6.1, #190) belongs to its team: it has no person, keeps working when the person who made it is disabled
+or deleted, and stops when it is revoked. Its requests count to its team, and its person budget is none.
+
 A key's `workloads` setting (1.3: which apps exposed at /x/<name> it could call) was removed with apps in 1.5.3
 (#89); the upgrade recorded every key that had one in the audit log (forgeyard/removed.py).
 """
@@ -32,7 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.config import get_settings
-from forgeyard.db import ApiKey, ServerSetting, User, as_utc, utcnow
+from forgeyard.db import ApiKey, ServerSetting, Team, User, as_utc, utcnow
 from forgeyard.gateway.errors import GatewayError
 
 KEY_PREFIX = "fyk_"
@@ -165,6 +168,10 @@ class KeyCaller:
     cloud: str = "off"                # off | fallback | on
     budget_micros: Optional[int] = None       # the key's monthly cloud budget (None: none)
     user_budget_micros: Optional[int] = None  # its person's
+    # 1.6.1 (#190): a team key's team (0: none; the Playground and personal keys count to no team), and its budget.
+    team_id: int = 0
+    team_name: Optional[str] = None
+    team_budget_micros: Optional[int] = None
 
 
 def bearer(header: Optional[str]) -> Optional[str]:
@@ -194,16 +201,23 @@ def authenticate(db: DbSession, authorization: Optional[str], *, now: Optional[d
     expires = as_utc(key.expires_at)
     if expires is not None and expires <= now:
         raise GatewayError(401, "expired_api_key", "This API key has expired.")
-    user: Optional[User] = key.user
-    if user is None or user.status != "active":
+    # 1.6.1 (#190): a team key belongs to its team, not to a person: whether the person who made it is still active
+    # does not matter. It stops when it is revoked (above); a team is deleted only once none of its keys works, and its
+    # keys go with it.
+    team: Optional[Team] = key.team if key.team_id is not None else None
+    user: Optional[User] = key.user if team is None else None
+    if team is None and (user is None or user.status != "active"):
         raise GatewayError(401, "account_disabled", "The account this API key belongs to is not active.")
     last = as_utc(key.last_used_at)
     if last is None or now - last >= LAST_USED_EVERY:
         key.last_used_at = now
     limits = get_limits(db)
-    return KeyCaller(source="api", user_id=user.id, username=user.username, key_id=key.id, key_name=key.name,
+    return KeyCaller(source="api", user_id=user.id if user else 0, username=user.username if user else "",
+                     key_id=key.id, key_name=key.name,
                      models=list(key.models) if key.models is not None else None,
                      rpm=effective(key.rpm, limits["default_rpm"], limits["max_rpm"]),
                      tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]),
                      cloud=effective_cloud(key, user, get_cloud(db)["max"]),
-                     budget_micros=key.budget_micros, user_budget_micros=user.budget_micros)
+                     budget_micros=key.budget_micros, user_budget_micros=user.budget_micros if user else None,
+                     team_id=team.id if team else 0, team_name=team.name if team else None,
+                     team_budget_micros=team.budget_micros if team else None)

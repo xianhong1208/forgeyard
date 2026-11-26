@@ -8,6 +8,7 @@
 import type { ReactNode } from "react";
 
 import type { Translator } from "../i18n/react";
+import type { Team } from "../lib/types";
 
 /** A page of its own, under the signed-in frame. */
 export type ExtRoute = { path: string; feature: string; admin?: boolean; element: ReactNode };
@@ -15,10 +16,13 @@ export type ExtRoute = { path: string; feature: string; admin?: boolean; element
 export type ExtNavItem = { to: string; feature: string; admin?: boolean; label: (t: Translator) => string };
 /** A tab on the Usage page, after Requests and Cost. */
 export type ExtUsageTab = { id: string; feature: string; admin?: boolean; label: (t: Translator) => string; render: () => ReactNode };
+/** A section at the end of a team's page (1.6.1: added with the Teams page), given the team as the page shows it. */
+export type ExtTeamPageTab = { id: string; feature: string; admin?: boolean; label: (t: Translator) => string; render: (team: Team) => ReactNode };
 /** A card at the end of Setup health (admins). */
 export type ExtSetupHealthCard = { id: string; feature: string; render: () => ReactNode };
 
 export const routes: ExtRoute[] = [];
 export const navItems: ExtNavItem[] = [];
 export const usageTabs: ExtUsageTab[] = [];
+export const teamPageTabs: ExtTeamPageTab[] = [];
 export const setupHealthCards: ExtSetupHealthCard[] = [];

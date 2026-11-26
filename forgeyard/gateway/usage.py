@@ -33,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import extensions
-from forgeyard.db import ApiKey, Provider, ProviderModel, UsageDaily, new_session
+from forgeyard.db import ApiKey, Provider, ProviderModel, Team, UsageDaily, new_session
 from forgeyard.gateway import pricing
 
 log = logging.getLogger("forgeyard")
@@ -117,12 +117,22 @@ def day_of(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
 
 
-def _written(slot: tuple, c: _Count) -> dict:
+def _written(slot: tuple, c: _Count, team_id: int = 0) -> dict:
     """One row's increment as an extension's usage observer gets it: where it was counted and what was added (cost in
     pico-USD, as counted)."""
     day, source, key_id, user_id, username, model, target = slot
     return {"day": day, "source": source, "key_id": key_id, "user_id": user_id, "username": username, "model": model,
-            "target": target, "deployment_id": c.deployment_id, **{name: getattr(c, name) for name in COUNTS}}
+            "target": target, "deployment_id": c.deployment_id, "team_id": team_id,
+            **{name: getattr(c, name) for name in COUNTS}}
+
+
+def teams_of_keys(db: DbSession, key_ids: set) -> dict[int, int]:
+    """key id -> its team's id, for team keys (1.6.1, #190). A key's team is fixed when it is made, so the key decides
+    the team of its usage rows; keys without a team (and keys that are gone) are not in the answer."""
+    if not key_ids:
+        return {}
+    return {k: t for k, t in db.execute(select(ApiKey.id, ApiKey.team_id).where(
+        ApiKey.id.in_(key_ids), ApiKey.team_id.is_not(None))).all()}
 
 
 class Recorder:
@@ -185,6 +195,8 @@ class Recorder:
             db = db or new_session()
             carry: dict[tuple, int] = {}
             try:
+                # 1.6.1 (#190): an API key's requests count to its team (none for the Playground and personal keys).
+                teams = teams_of_keys(db, {slot[2] for slot in pending if slot[1] == "api" and slot[2]})
                 for slot, c in pending.items():
                     day, source, key_id, user_id, username, model, target = slot
                     picos = c.cost_picos + self._carry.get(slot, 0)
@@ -196,7 +208,8 @@ class Recorder:
                         UsageDaily.user_id == user_id, UsageDaily.model == model, UsageDaily.target == target))
                     if row is None:
                         row = UsageDaily(day=day, source=source, key_id=key_id, user_id=user_id, username=username,
-                                         model=model, target=target, requests=0, errors=0, limited=0, prompt_tokens=0,
+                                         model=model, target=target,
+                                         team_id=teams.get(key_id, 0) if source == "api" else 0, requests=0, errors=0, limited=0, prompt_tokens=0,
                                          completion_tokens=0, cached_tokens=0, reasoning_tokens=0, spilled=0,
                                          cost_micros=0, unpriced=0, cost_reported=0, cost_estimated=0,
                                          **{name: 0 for name in UNITS}, latency_ms_sum=0,
@@ -231,7 +244,8 @@ class Recorder:
                     today = day_of(self.clock())
                     self._carry = {k: v for k, v in self._carry.items() if k[0] >= today}
                 if extensions.registry.usage_observers:   # 1.6.1 (#190): what this write added, to an extension
-                    extensions.registry.usage_written([_written(slot, c) for slot, c in pending.items()])
+                    extensions.registry.usage_written([
+                        _written(slot, c, teams.get(slot[2], 0) if slot[1] == "api" else 0) for slot, c in pending.items()])
             except Exception:
                 db.rollback()
                 with self._lock:  # keep the counts for the next try
@@ -256,7 +270,7 @@ recorder = Recorder()
 
 
 # ------------------------------------------------------------------ reading
-GROUPS = ("day", "model", "key", "user", "source", "target", "provider")
+GROUPS = ("day", "model", "key", "user", "source", "target", "provider", "team")
 
 
 @dataclass
@@ -268,7 +282,7 @@ class TargetInfo:
 
 
 def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, deployment_id: Optional[int] = None,
-            group_by: str = "model", today: Optional[str] = None) -> dict:
+            group_by: str = "model", today: Optional[str] = None, team_id: Optional[int] = None) -> dict:
     """Totals and one row per group over the last `days` days (today included), with cost; the
     totals also split local (replicas and providers inside your network) from cloud."""
     end = datetime.fromisoformat(today).date() if today else datetime.now(timezone.utc).date()
@@ -278,6 +292,8 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
         q = q.where(UsageDaily.user_id == user_id)
     if deployment_id is not None:
         q = q.where(UsageDaily.deployment_id == deployment_id)
+    if team_id is not None:
+        q = q.where(UsageDaily.team_id == team_id)
     rows = db.scalars(q).all()
     label, targets = labeler(db, rows, group_by)
 
@@ -304,7 +320,7 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
 
 # ------------------------------------------------------------------ over time (1.4)
 STEPS = ("day", "week", "month")
-SPLITS = ("none", "key", "model", "provider", "user")
+SPLITS = ("none", "key", "model", "provider", "user", "team")
 SERIES_METRICS = ("requests", "errors", "prompt_tokens", "completion_tokens", "tokens", "cost_micros") + UNITS
 # How far back each view may reach: a year of days, two years of weeks, three years of months.
 MAX_PERIODS = {"day": 366, "week": 104, "month": 36}
@@ -357,7 +373,8 @@ def _metric(r: UsageDaily, metric: str) -> int:
 
 
 def series(db: DbSession, *, step: str = "day", periods: int = 30, split: str = "none", metric: str = "requests",
-           user_id: Optional[int] = None, today: Optional[str] = None, top: int = SERIES_TOP) -> dict:
+           user_id: Optional[int] = None, today: Optional[str] = None, top: int = SERIES_TOP,
+           team_id: Optional[int] = None) -> dict:
     """One value of `metric` per period (day, week or month, UTC) over the last `periods` periods, for
     the total or per key, model, provider or person: the Usage page's charts. Summed from the daily
     rows, so every view comes from the same numbers as the tables. Groups whose metric is 0 over the
@@ -369,6 +386,8 @@ def series(db: DbSession, *, step: str = "day", periods: int = 30, split: str = 
     q = select(UsageDaily).where(UsageDaily.day >= first.isoformat(), UsageDaily.day <= end.isoformat())
     if user_id is not None:
         q = q.where(UsageDaily.user_id == user_id)
+    if team_id is not None:
+        q = q.where(UsageDaily.team_id == team_id)
     rows = db.scalars(q).all()
     label, targets = labeler(db, rows, split)
     index = {s.isoformat(): i for i, (s, _) in enumerate(spans)}
@@ -409,6 +428,8 @@ def labeler(db: DbSession, rows, group_by: str) -> tuple[Callable[[UsageDaily], 
     target is."""
     keys = {k.id: k for k in db.scalars(select(ApiKey).where(ApiKey.id.in_({r.key_id for r in rows if r.key_id}))).all()}
     targets = target_info(db, {r.target or "local" for r in rows})
+    teams = {t.id: t for t in db.scalars(select(Team).where(Team.id.in_({r.team_id for r in rows if r.team_id}))).all()} \
+        if group_by in ("team", "user") else {}
 
     def label(r: UsageDaily) -> tuple[str, str]:
         if group_by == "none":
@@ -421,7 +442,15 @@ def labeler(db: DbSession, rows, group_by: str) -> tuple[Callable[[UsageDaily], 
             k = keys.get(r.key_id)
             return str(r.key_id), f"{k.name} ({k.prefix}…)" if k else f"deleted key #{r.key_id}"
         if group_by == "user":
+            if not r.user_id and r.team_id:   # 1.6.1: a team key's requests are no person's
+                return f"team:{r.team_id}", f"team key ({teams[r.team_id].title})" if r.team_id in teams \
+                    else f"team key (deleted team #{r.team_id})"
             return str(r.user_id), r.username or f"user #{r.user_id}"
+        if group_by == "team":   # 1.6.1 (#190): the team of the key; personal keys and the Playground: none
+            if not r.team_id:
+                return "none", "No team"
+            t = teams.get(r.team_id)
+            return str(r.team_id), t.title if t else f"deleted team #{r.team_id}"
         if group_by == "source":
             return r.source, "API keys" if r.source == "api" else "Console playground"
         if group_by == "target":

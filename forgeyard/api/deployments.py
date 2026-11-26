@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import audit, extensions
+from forgeyard import audit, extensions, teams as tm
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_operator
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
@@ -67,6 +67,24 @@ class DeploymentIn(BaseModel):
     hf_token: Optional[str] = Field(default=None, max_length=512)
     # Create it even though nothing fits right now; it waits as pending.
     wait: bool = False
+    # 1.6.1 (#190): the team it belongs to (its name): that team's managers may stop, start and change it. None: none.
+    team: Optional[str] = Field(default=None, max_length=64)
+
+
+def _team(db: DbSession, name: Optional[str]):
+    """1.6.1 (#190): the team a deploy or a change names (None: no team)."""
+    if name is None or not name.strip():
+        return None
+    team = tm.by_name(db, name)
+    if team is None:
+        raise fail(404, "team_not_found", f"No team named {name.strip()}.")
+    return team
+
+
+def _may_manage(db: DbSession, caller: Caller, d: Deployment) -> None:
+    """Admins and operators manage every deployment; a team's managers its team's (1.6.1, #190)."""
+    if not tm.can_manage_deployment(db, caller.user, d):
+        raise fail(403, "forbidden", "Only admins, operators and the managers of its team can do this.")
 
 
 def _model(db: DbSession, ref: str) -> CatalogModel:
@@ -350,6 +368,9 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
                   # English-only classifier or CLIP.
                   **({"languages": _languages(d.model.meta or {})} if d.model.task in ("embed", textcls.TASK) else {})},
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
+        # 1.6.1 (#190): its team (null: none), and whether the caller may stop, start and change it.
+        "team": tm.brief(d.team) if d.team_id is not None else None,
+        "can_manage": tm.can_manage_deployment(db, caller.user, d),
         "route": {"served_name": route.served_name, "api": route.api,
                   "upstream_model": own.upstream_model if own else d.served_name}
         if route else None,
@@ -419,6 +440,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
     served = _served_name(body)
     if db.scalar(select(GatewayRoute.id).where(GatewayRoute.served_name == served)) is not None:
         raise fail(409, "served_name_taken", f"Another deployment or route already serves the model name {served}.")
+    team = _team(db, body.team)
     ctx, recipe, m = build_context(db, body)
     if autoscale.setting(ctx.params).on:
         # 1.5.0 (#37): automatic replicas start with their minimum (at least 1); the autoscaler adds the rest.
@@ -448,7 +470,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
         w.replicas.append(Replica(ordinal=i, generation=1, state="pending", gpus=[], ports=[]))
     d = Deployment(name=name, model_id=m.id, recipe=recipe.name, params=ctx.params, served_name=served,
                    workload_id=w.id, estimate=ctx.estimate.as_dict(), hf_token=(body.hf_token or "").strip() or None,
-                   created_by=caller.user.username)
+                   created_by=caller.user.username, team_id=team.id if team else None)
     db.add(d)
     db.flush()
     upstream = (m.meta or {}).get("repo") or served if recipe.upstream_model == "repo" else served
@@ -463,7 +485,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
     audit.record(db, "deployment.created", actor=caller.user, target=name, ip=caller.ip, deployment_id=d.id,
                  workload_id=w.id, model=m.name, recipe=recipe.name, served_name=served, replicas=body.replicas,
                  machine_id=body.machine_id, gpus=ctx.gpus, share=ctx.share, estimate=ctx.estimate.amount,
-                 token=bool(d.hf_token) or None)
+                 token=bool(d.hf_token) or None, team=team.name if team else None)
     db.commit()
     sleep.idle.forget(d.id)   # 1.5.0: a removed deployment's id may come back (SQLite): start from nothing
     waking.forget(d.id)
@@ -494,10 +516,11 @@ def get_deployment(dep_id: int, caller: Caller = Depends(current), db: DbSession
 
 
 @router.post("/deployments/{dep_id}/stop")
-def stop_deployment(dep_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+def stop_deployment(dep_id: int, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     from forgeyard.api.workloads import stop_workload
 
     d = _get(db, dep_id)
+    _may_manage(db, caller, d)
     stop_workload(d.workload_id, caller, db)
     audit.record(db, "deployment.stopped", actor=caller.user, target=d.name, ip=caller.ip, deployment_id=d.id)
     db.commit()
@@ -506,10 +529,11 @@ def stop_deployment(dep_id: int, caller: Caller = Depends(require_operator), db:
 
 
 @router.post("/deployments/{dep_id}/start")
-def start_deployment(dep_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+def start_deployment(dep_id: int, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     from forgeyard.api.workloads import start_workload
 
     d = _get(db, dep_id)
+    _may_manage(db, caller, d)
     start_workload(d.workload_id, caller, db)
     audit.record(db, "deployment.started", actor=caller.user, target=d.name, ip=caller.ip, deployment_id=d.id)
     db.commit()
@@ -538,6 +562,13 @@ class DeploymentEdit(BaseModel):
     wait: bool = False
     # Only check: the estimate, where it would go and what would restart. Nothing is saved.
     dry_run: bool = False
+    # 1.6.1 (#190): move it to this team (its name), or to none with null. Admins and operators only.
+    team: Optional[str] = Field(default=None, max_length=64)
+
+
+# 1.6.1 (#190): what a team's manager who is not an admin or operator may not change: these decide what runs on a
+# machine (another engine image, or arguments passed to the engine), which stays with the roles trusted with that.
+OPERATOR_PARAMS = ("extra_args",)
 
 
 # ------------------------------------------------------------------ another version of the engine (1.5.2, #95)
@@ -681,11 +712,26 @@ RESTART_TEXT = {
 
 
 @router.patch("/deployments/{dep_id}")
-def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(require_operator),
+def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(current),
                     db: DbSession = Depends(get_db)):
     """Change GPU sharing, context, concurrency and the other recipe parameters, the number of
-    replicas and the machine (pinned or automatic). Checked like a deploy before anything is saved."""
+    replicas and the machine (pinned or automatic). Checked like a deploy before anything is saved.
+    1.6.1 (#190): a team's managers change the team's deployments too, except the engine, its extra arguments and
+    the team."""
     d = _get(db, dep_id)
+    _may_manage(db, caller, d)
+    if not can_run_workloads(caller.user):
+        # Sent unchanged is fine (the edit form sends every setting back).
+        asked = [name for name in OPERATOR_PARAMS
+                 if name in body.params and (body.params[name] or None) != ((d.params or {}).get(name) or None)]
+        if body.recipe is not None and body.recipe != d.recipe:
+            asked.append("recipe")
+        if "team" in body.model_fields_set:
+            asked.append("team")
+        if asked:
+            raise fail(403, "operators_only", f"Only admins and operators change {', '.join(asked)}.", fields=asked)
+    team_changed = "team" in body.model_fields_set and (_team(db, body.team).id if body.team else None) != d.team_id
+    new_team = _team(db, body.team) if team_changed else None
     w = d.workload
     current = catalog.get_recipe(db, d.recipe)
     if current is None:
@@ -748,6 +794,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
         changes["replicas"] = {"before": len(w.replicas), "after": replicas}
     if machine_id != spec.get("machine_id"):
         changes["machine_id"] = {"before": spec.get("machine_id"), "after": machine_id}
+    if team_changed:
+        changes["team"] = {"before": d.team.name if d.team else None, "after": new_team.name if new_team else None}
     with placement._lock:
         plan = scheduler.preview(db, ctx, release={r.id for r in w.replicas},
                                  prefer={r.ordinal: r.node_id for r in w.replicas if r.node_id is not None})
@@ -774,6 +822,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
         spec["health"] = {**(spec.get("health") or {}), "path": recipe.health.path, "interval": recipe.health.interval,
                           "timeout": recipe.health.timeout, "failure_threshold": recipe.health.failure_threshold,
                           "start_period": recipe.health.start_period}
+    if team_changed:
+        d.team_id = new_team.id if new_team else None   # nothing restarts for it
     spec["replicas"], spec["machine_id"] = replicas, machine_id
     w.spec = spec
     w.updated_at = utcnow()
@@ -796,6 +846,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
         if k == "machine_id":
             node = db.get(Node, value) if value is not None else None
             return "automatic" if value is None else (node.name if node is not None else f"machine {value}")
+        if k == "team":
+            return value or "no team"
         return str(value)
 
     said = ", ".join(f"{'machine' if k == 'machine_id' else 'engine' if k == 'recipe' else k} "

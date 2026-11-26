@@ -6,6 +6,8 @@ and setting the budgets of people and providers.
   own keys and yourself; admins with ?everyone=true: every key and person with a budget or spend
   this month, and every provider outside your network. Revoked keys are left out (1.4): what they
   spent stays in their person's and provider's totals.
+- 1.6.1 (#190): `teams`: the teams you manage (admins with ?everyone=true: every team), each with its budget. A
+  team's budget is set with `PATCH /api/teams/{name}` (admins).
 - `PUT /api/budgets/people/{id}` and `PUT /api/budgets/providers/{id}`: admins only. A key's budget is
   set with `PATCH /api/keys/{id}` (its owner may set it too, unless an admin locked it).
 
@@ -21,10 +23,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import audit
+from forgeyard import audit, teams as tm
 from forgeyard.api.deps import Caller, current, fail, require_admin
 from forgeyard.api.keys import MAX_BUDGET, budget_out, key_status
-from forgeyard.db import ApiKey, Provider, User, get_db, utcnow
+from forgeyard.db import ApiKey, Provider, Team, User, get_db, utcnow
 from forgeyard.gateway import budgets as gbudgets
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
@@ -58,6 +60,7 @@ def get_budgets(everyone: bool = Query(default=False), caller: Caller = Depends(
             continue  # 1.4: a revoked key is never listed; its spend stays in its person's and provider's
         keys.append({"id": k.public_id, "name": k.name, "prefix": k.prefix, "status": status,
                      "user": {"id": k.user_id, "username": k.user.username if k.user else None},
+                     "team": tm.brief(k.team) if k.team_id is not None else None,
                      "locked_by": k.budget_locked_by, **b})
     people_q = select(User).order_by(User.username)
     if not everyone:
@@ -69,8 +72,12 @@ def get_budgets(everyone: bool = Query(default=False), caller: Caller = Depends(
         for p in db.scalars(select(Provider).where(Provider.external.is_(True)).order_by(Provider.name)).all():
             providers.append({"id": p.id, "name": p.name, "kind": p.kind, "enabled": p.enabled,
                               **_of(spend, "provider", p.id, p.budget_micros)})
+    teams_q = select(Team).order_by(Team.title, Team.name)
+    if not everyone:
+        teams_q = teams_q.where(Team.id.in_(tm.managed_ids(db, caller.user)))
+    teams = [{**tm.brief(t), **_of(spend, "team", t.id, t.budget_micros)} for t in db.scalars(teams_q).all()]
     return {"month": spend.month, "resets_at": gbudgets.resets_at(spend.month), "is_admin": admin,
-            "everyone": everyone, "keys": keys, "people": people, "providers": providers}
+            "everyone": everyone, "keys": keys, "people": people, "providers": providers, "teams": teams}
 
 
 @router.put("/people/{user_id}")

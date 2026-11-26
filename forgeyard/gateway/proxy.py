@@ -243,7 +243,7 @@ class Job(ReplicaSending, CloudSending, Answering):
         picos = self.cost.picos if self.cost.picos is not None else (hold.picos if hold and served else 0)
         budgets.ledger.settle(hold, key_id=self.caller.key_id if self.caller.source == "api" else 0,
                               user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count,
-                              estimated=self.cost.picos is None)
+                              estimated=self.cost.picos is None, team_id=getattr(self.caller, "team_id", 0))
 
     def units(self, served: bool = True) -> Optional[dict]:
         """The request's 1.3 usage units: the media items it carried; for speech that was answered, the

@@ -345,11 +345,12 @@ cost nothing and are never limited. Without a budget, nothing changes.
 | **An API key** | its owner, on **API keys** (**Limits**, *Monthly budget (USD)*); an admin on any key, which locks it for the owner | that key's requests no longer spill or go to the cloud |
 | **A person** | admins, on **Usage → Cost** (*Budgets this month*) | none of that person's keys, nor their Playground, can |
 | **A provider** | admins, on the provider's page | that provider is skipped; other providers in the tier, or local replicas, still serve |
+| **A team** (1.6.1) | admins, on the team's page (**Change team**) | none of the team's keys can; a team key counts to its team, never to a person |
 
 ### Reserved before sending
 
 Before a request is sent to a cloud provider, Forgeyard **reserves its estimated cost** against
-every budget that applies (the key's, the person's and the provider's):
+every budget that applies (the key's, the person's or the team's, and the provider's):
 
 ```
 prompt size (about 3 bytes a token, on the high side) × input price
@@ -372,7 +373,7 @@ The route becomes **local-only for that scope**; nothing fails if something else
   where the engine queues it;
 - another provider in the cloud tier has room: that provider serves it;
 - the answer carries `X-Forgeyard-Budget-Exhausted`, naming the budget that kept the request from a
-  provider: `key`, `person` or `provider:<name>`.
+  provider: `key`, `person`, `team` or `provider:<name>`.
 
 Only when **nothing else can serve** the request (the local replicas are down, or the model is
 cloud-only) does it fail, with **402**:

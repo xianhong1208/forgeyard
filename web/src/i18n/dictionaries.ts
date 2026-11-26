@@ -27,6 +27,7 @@ import enServer from "./en/server";
 import enServing from "./en/serving";
 import enShell from "./en/shell";
 import enSso from "./en/sso";
+import enTeams from "./en/teams";
 import enStart from "./en/start";
 import enUsage from "./en/usage";
 import zhAddmodel from "./zh-TW/addmodel";
@@ -54,6 +55,7 @@ import zhServer from "./zh-TW/server";
 import zhServing from "./zh-TW/serving";
 import zhShell from "./zh-TW/shell";
 import zhSso from "./zh-TW/sso";
+import zhTeams from "./zh-TW/teams";
 import zhStart from "./zh-TW/start";
 import zhUsage from "./zh-TW/usage";
 
@@ -66,6 +68,8 @@ export const EN_MODULES = {
   playground: enPlayground, usage: enUsage,
   // Two-factor sign-in and single sign-on (1.6.0, #39)
   mfa: enMfa, sso: enSso,
+  // Teams (1.6.1, #190)
+  teams: enTeams,
 };
 export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, string>> = {
   admin: zhAdmin, cloud: zhCloud, keys: zhKeys,
@@ -74,6 +78,7 @@ export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, strin
   deploy: zhDeploy, deployment: zhDeployment, machine: zhMachine,
   playground: zhPlayground, usage: zhUsage,
   mfa: zhMfa, sso: zhSso,
+  teams: zhTeams,
 };
 
 export const en = {
@@ -82,6 +87,7 @@ export const en = {
   ...enDeploy, ...enDeployment, ...enMachine,
   ...enPlayground, ...enUsage,
   ...enMfa, ...enSso,
+  ...enTeams,
 };
 export type Key = keyof typeof en;
 
@@ -92,4 +98,5 @@ export const zhTW: Record<Key, string> = {
   ...zhDeploy, ...zhDeployment, ...zhMachine,
   ...zhPlayground, ...zhUsage,
   ...zhMfa, ...zhSso,
+  ...zhTeams,
 };

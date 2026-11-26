@@ -2032,3 +2032,19 @@ a.chip-update:hover { border-color: var(--heat-ink); }
   .sso-issuer { grid-template-columns: minmax(0, 1fr); }
   .sso-issuer > .btn { margin-top: 0; justify-self: start; }
 }
+
+/* ---------------------------------------------------------------- teams (1.6.1, #190) */
+.teams-empty { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--ink-2); }
+.teams-empty p { margin: 0; flex: 1 1 320px; }
+.teams-table td, .team-members td, .team-keys td { vertical-align: top; }
+.team-list { margin: 0 0 8px; padding-left: 18px; }
+.team-list li { margin: 4px 0; }
+.team-list code { margin-left: 6px; }
+.team-add { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 14px; align-items: start; margin-top: 14px; }
+.team-add-button { align-self: end; padding-bottom: 22px; }
+.team-add .field { margin: 0; }
+@media (max-width: 760px) {
+  .team-add { grid-template-columns: minmax(0, 1fr); }
+  .team-add-button { padding-bottom: 0; }
+  .team-members .cell-actions:empty, .team-keys .cell-actions:empty { display: none !important; }
+}

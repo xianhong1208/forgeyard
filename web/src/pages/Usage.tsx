@@ -25,14 +25,14 @@ import { usePoll } from "../lib/poll";
 const DAYS = [1, 7, 30];
 // The words are read when shown, so they follow the language (#189).
 const GROUP_LABEL = labels({ model: "usage.group.model", key: "usage.group.key", user: "usage.group.user", day: "usage.group.day",
-  source: "usage.group.source", target: "usage.group.target", provider: "usage.group.provider" });
+  source: "usage.group.source", target: "usage.group.target", provider: "usage.group.provider", team: "usage.group.team" });
 type GroupId = keyof typeof GROUP_LABEL;
 const group = (id: GroupId, admin?: boolean) => ({ id, ...(admin ? { admin } : {}), get label() { return GROUP_LABEL[id]; } });
 const GROUPS: { id: string; label: string; admin?: boolean }[] = [
-  group("model"), group("key"), group("user", true), group("day"), group("source"), group("target"),
+  group("model"), group("key"), group("user", true), group("team", true), group("day"), group("source"), group("target"),
 ];
 const COST_GROUPS: { id: string; label: string; admin?: boolean }[] = [
-  group("day"), group("key"), group("user", true), group("model"), group("provider"),
+  group("day"), group("key"), group("user", true), group("team", true), group("model"), group("provider"),
 ];
 
 // The rows with the names the server gives a few groups in the reader's language.
@@ -55,8 +55,11 @@ export function UsagePage() {
   const [group, setGroup] = useState("model");
   const [costGroup, setCostGroup] = useState("day");
   const [everyone, setEveryone] = useState(false);
+  // 1.6.1 (#190): a team's usage (its keys' requests), for admins and the team's managers.
+  const [team, setTeam] = useState<string | null>(null);
   const by = tab === "cost" ? costGroup : group;
-  const { data, error, reload } = useApi<UsageResponse>(`/usage?days=${days}&group=${by}${everyone ? "&everyone=true" : ""}`);
+  const whose = team ? `&team=${encodeURIComponent(team)}` : everyone ? "&everyone=true" : "";
+  const { data, error, reload } = useApi<UsageResponse>(`/usage?days=${days}&group=${by}${whose}`);
   usePoll(reload, 10000);
   const sum = data?.total;
   // 1.3: the media column shows once there are images, audio or video in the period.
@@ -73,11 +76,22 @@ export function UsagePage() {
   const lengthLabel = speech && video ? t("usage.col.audioVideo") : video ? t("usage.video") : t("usage.col.audio");
   const busy = images || traffic || video;
   const nameLabel = GROUPS.find((g) => g.id === data?.group_by)?.label ?? t("usage.name");
-  const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
+  const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone && !team));
+  const teams = data?.teams ?? [];
+  // Back from a view that had the person or team grouping: to a grouping every view has.
+  const plainGroups = () => {
+    if (group === "user" || group === "team") setGroup("model");
+    if (costGroup === "user" || costGroup === "team") setCostGroup("day");
+  };
+  const pickWhose = (all: boolean, name: string | null) => {
+    setEveryone(all);
+    setTeam(name);
+    if (!all || name) plainGroups();
+  };
   const setBy = tab === "cost" ? setCostGroup : setGroup;
   // The chart's view stays when switching tabs.
   const [chartView, setChartView] = useState<ChartView>({ step: "day", split: "none", metric: "requests" });
-  const chart = <UsageChart cost={tab === "cost"} everyone={everyone} admin={!!data?.is_admin} view={chartView} onChange={setChartView} />;
+  const chart = <UsageChart cost={tab === "cost"} everyone={everyone && !team} team={team} admin={!!data?.is_admin} view={chartView} onChange={setChartView} />;
   // The last step of the users' Get started list is opening this page.
   useEffect(() => {
     api("/onboarding/seen", { method: "POST", body: { step: "usage" } }).catch(() => undefined);
@@ -86,7 +100,7 @@ export function UsagePage() {
   return (
     <>
       <PageHeader index={t("usage.index")} title={t("usage.title")}
-        lead={data?.everyone ? t("usage.lead.everyone") : t("usage.lead.mine")} />
+        lead={data?.team ? t("usage.lead.team", { name: data.team.title }) : data?.everyone ? t("usage.lead.everyone") : t("usage.lead.mine")} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="tabs" role="tablist" aria-label={t("usage.tabs")}>
         {(["requests", "cost"] as const).map((id) => (
@@ -120,9 +134,17 @@ export function UsagePage() {
         </div>
         {data?.is_admin && (
           <div className="segmented" role="group" aria-label={t("usage.whose")}>
-            <button type="button" className={everyone ? "" : "on"} aria-pressed={!everyone} onClick={() => { setEveryone(false); if (group === "user") setGroup("model"); if (costGroup === "user") setCostGroup("day"); }}>{t("usage.mine")}</button>
-            <button type="button" className={everyone ? "on" : ""} aria-pressed={everyone} onClick={() => setEveryone(true)}>{t("usage.everyone")}</button>
+            <button type="button" className={everyone || team ? "" : "on"} aria-pressed={!everyone && !team} onClick={() => pickWhose(false, null)}>{t("usage.mine")}</button>
+            <button type="button" className={everyone && !team ? "on" : ""} aria-pressed={everyone && !team} onClick={() => pickWhose(true, null)}>{t("usage.everyone")}</button>
           </div>
+        )}
+        {teams.length > 0 && (
+          <label className="field-inline small">{t("usage.team")}
+            <select value={team ?? ""} aria-label={t("usage.team")} onChange={(e) => pickWhose(false, e.target.value || null)}>
+              <option value="">{t("usage.teamNone")}</option>
+              {teams.map((x) => <option key={x.id} value={x.name}>{x.title}</option>)}
+            </select>
+          </label>
         )}
       </div>
       <div id="usage-panel" role="tabpanel" aria-labelledby={`usage-tab-${tab}`}>
@@ -272,17 +294,18 @@ export function addUp(rows: UsageRow[]): UsageRow {
 // or person (admins, Everyone). The Cost tab charts cost; the Requests tab chooses what to chart.
 type ChartView = { step: Step; split: Split; metric: string };
 
-function UsageChart({ cost, everyone, admin, view: { step, split, metric: chosen }, onChange }: {
-  cost: boolean; everyone: boolean; admin: boolean; view: ChartView; onChange: (v: ChartView) => void;
+function UsageChart({ cost, everyone, team, admin, view: { step, split, metric: chosen }, onChange }: {
+  cost: boolean; everyone: boolean; team: string | null; admin: boolean; view: ChartView; onChange: (v: ChartView) => void;
 }) {
   const t = useT();
   const set = (v: Partial<ChartView>) => onChange({ step, split, metric: chosen, ...v });
   const metric = cost ? "cost_micros" : chosen;
   const span = VIEWS.find((v) => v.step === step)!;
   const people = admin && everyone;
-  const by = split === "user" && !people ? "none" : split;
+  const by = (split === "user" || split === "team") && !people ? "none" : split;
+  const whose = team ? `&team=${encodeURIComponent(team)}` : everyone ? "&everyone=true" : "";
   const { data: raw, error, reload } = useApi<SeriesResponse>(
-    `/usage/series?step=${step}&periods=${span.periods}&split=${by}&metric=${metric}${everyone ? "&everyone=true" : ""}`);
+    `/usage/series?step=${step}&periods=${span.periods}&split=${by}&metric=${metric}${whose}`);
   usePoll(reload, 10000);
   const data = isSeries(raw) ? raw : null;
   // Colours follow each line while it stays on the chart (another metric or view re-ranks them): worked out
@@ -363,14 +386,18 @@ function Budgets({ everyone }: { everyone: boolean }) {
   // 1.4: a revoked key leaves the budget lists and warnings; its spend stays in its person's and provider's.
   const keys = data.keys.filter((k) => k.budget_micros !== null && k.status !== "revoked");
   const providers = data.providers;
+  // 1.6.1 (#190): the teams you manage (admins with Everyone: every team), with a budget or spend this month.
+  const teams = (data.teams ?? []).filter((x) => x.budget_micros !== null || x.spent_micros > 0);
   const warn = [
     ...alerting(data.people).map((p) => ({ id: `p${p.id}`, text: data.everyone ? t("usage.budgets.person", { name: p.username }) : t("usage.budgets.yours"), level: p.level })),
     ...alerting(keys).map((k) => ({ id: `k${k.id}`, level: k.level,
       text: data.everyone && k.user.username ? t("usage.budgets.keyOf", { name: k.name, user: k.user.username }) : t("usage.budgets.key", { name: k.name }) })),
     ...alerting(providers).map((p) => ({ id: `v${p.id}`, text: t("usage.budgets.provider", { name: p.name }), level: p.level })),
+    ...alerting(teams).map((x) => ({ id: `t${x.id}`, text: t("usage.budgets.team", { name: x.title }), level: x.level })),
   ];
   const reset = resetText(data.resets_at);
-  const any = people.some((p) => p.budget_micros !== null) || keys.length > 0 || providers.some((p) => p.budget_micros !== null);
+  const any = people.some((p) => p.budget_micros !== null) || keys.length > 0 || providers.some((p) => p.budget_micros !== null)
+    || teams.length > 0;
   return (
     <section className="panel budget-panel" aria-labelledby="budgets-title">
       <h2 id="budgets-title">{t("usage.budgets.title")}</h2>
@@ -400,6 +427,19 @@ function Budgets({ everyone }: { everyone: boolean }) {
                 <div className="budget-who"><span className="strong">{k.name}</span><span className="mono small muted">{k.prefix}…</span>
                   {data.everyone && k.user.username && <span className="small muted">{k.user.username}</span>}</div>
                 <BudgetMeter b={k} label={t("usage.budgets.ofKey", { name: k.name })} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {teams.length > 0 && (
+        <div className="budget-group">
+          <h3>{t("usage.budgets.teams")}</h3>
+          <div className="budget-grid">
+            {teams.map((x) => (
+              <div key={x.id} className="budget-item">
+                <div className="budget-who"><Link className="strong" to={`/teams/${x.name}`}>{x.title}</Link></div>
+                <BudgetMeter b={x} label={t("usage.budgets.ofTeam", { name: x.title })} />
               </div>
             ))}
           </div>

@@ -7,6 +7,8 @@ import { navItems as extNav } from "../ext";
 import { LANG_NAME, LANGS, setLang } from "../i18n/lang";
 import { useT } from "../i18n/react";
 import { shown, useInfo } from "../lib/info";
+import type { TeamsResponse } from "../lib/types";
+import { useApi } from "../lib/useApi";
 import { AdvisorProvider, HealthBadge } from "./Advisor";
 import { Mark } from "./Mark";
 import { EnrolmentRequiredPage, MfaBanner, setupOverdue } from "./MfaRequired";
@@ -43,6 +45,9 @@ export function Layout() {
   const overdue = setupOverdue(user);
   const admin = user?.role === "admin" && !overdue;
   const info = useInfo(extNav.length > 0 && !overdue);
+  // 1.6.1 (#190): Teams is in the menu for admins, and for everyone else once there is a team they can see.
+  const teams = useApi<TeamsResponse>(user && !admin && !overdue ? "/teams" : null);
+  const showTeams = admin || (teams.data?.teams.length ?? 0) > 0;
   const links = overdue ? [] : [
     { to: "/machines", label: t("shell.nav.machines") },
     { to: "/serving", label: t("shell.nav.serving") },
@@ -51,6 +56,7 @@ export function Layout() {
     { to: "/playground", label: t("shell.nav.playground") },
     { to: "/keys", label: t("shell.nav.keys") },
     { to: "/usage", label: t("shell.nav.usage") },
+    ...(showTeams ? [{ to: "/teams", label: t("shell.nav.teams") }] : []),
     ...(admin
       ? [
           { to: "/users", label: t("shell.nav.users") },

@@ -1,5 +1,6 @@
 import { IconChevronDown, IconChevronUp, IconKey, IconLock, IconPlus } from "@tabler/icons-react";
 import { useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { useAuth } from "../auth";
@@ -65,7 +66,10 @@ export function ApiKeysPage() {
   const t = useT();
   const [everyone, setEveryone] = useState(false);
   const { data, error, reload } = useApi<KeysResponse>(`/keys${everyone ? "?all=true" : ""}`);
-  const [creating, setCreating] = useState(false);
+  // 1.6.1 (#190): "Make a team key" on a team's page opens the form with that team chosen.
+  const [search] = useSearchParams();
+  const forTeam = search.get("team");
+  const [creating, setCreating] = useState(forTeam !== null);
   const [issued, setIssued] = useState<NewKeyResponse | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -77,8 +81,9 @@ export function ApiKeysPage() {
   };
 
   const revoke = async (k: ApiKey) => {
-    const question = everyone && k.user.username
-      ? t("keys.revoke.confirmOf", { name: k.name, prefix: k.prefix, owner: k.user.username })
+    const owner = k.team ? t("teams.field.keyTeam", { name: k.team.title }) : everyone ? k.user.username : null;
+    const question = owner
+      ? t("keys.revoke.confirmOf", { name: k.name, prefix: k.prefix, owner })
       : t("keys.revoke.confirm", { name: k.name, prefix: k.prefix });
     if (!window.confirm(question)) return;
     try {
@@ -120,7 +125,7 @@ export function ApiKeysPage() {
 
       {creating && data && (
         issued ? <IssuedKey issued={issued} models={data.models} onDone={close} />
-          : <CreateKey data={data} onCancel={close} onCreated={(r) => { setIssued(r); reload(); }} />
+          : <CreateKey data={data} team={forTeam} onCancel={close} onCreated={(r) => { setIssued(r); reload(); }} />
       )}
 
       {data && (
@@ -242,8 +247,9 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
   const [cloudLevel, setCloudLevel] = useState<CloudLevel>(level);
   const [budget, setBudget] = useState(budgetInput(k.budget?.budget_micros));
   const budgetLock = k.budget_locked_by ?? null;
-  const own = user?.id === k.user.id;
-  const owner = k.user.username ?? t("keys.theOwner");
+  // 1.6.1 (#190): a team key's managers act on it as its owner would; an admin's value on it is locked for them.
+  const own = k.team ? !isAdmin : user?.id === k.user.id;
+  const owner = k.team ? t("teams.field.keyTeam", { name: k.team.title }) : k.user.username ?? t("keys.theOwner");
   const lockedBy: Record<LimitName, string | null> = { rpm: k.rpm_locked_by ?? null, tpm: k.tpm_locked_by ?? null };
   const cloudLock = k.cloud_locked_by ?? null;
   // Only what changed is sent: an unchanged locked value is not "changed" by its owner saving the other one.
@@ -295,9 +301,10 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
           <div>
             <div className="strong">{k.name}</div>
             <div className="mono small muted">{k.prefix}…</div>
+            {k.team && !everyone && <TeamChip name={k.team.title} />}
           </div>
         </td>
-        {everyone && <td data-label={t("keys.col.owner")} className="mono small"><div>{k.user.username ?? "—"}</div></td>}
+        {everyone && <td data-label={t("keys.col.owner")} className="mono small"><div>{k.team ? <TeamChip name={k.team.title} /> : k.user.username ?? "—"}</div></td>}
         <td data-label={t("keys.col.models")} className="small"><div>{keyModels(k)}</div></td>
         <td data-label={t("keys.col.limits")} className="small">
           <div className="key-limits" title={limitsTitle(t, k)}>
@@ -397,8 +404,17 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
   );
 }
 
-function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel: () => void; onCreated: (r: NewKeyResponse) => void }) {
+// 1.6.1 (#190): a key that belongs to a team.
+function TeamChip({ name }: { name: string }) {
   const t = useT();
+  return <span className="chip chip-tone-run" title={t("teams.chipTitle", { name })}>{t("teams.chip", { name })}</span>;
+}
+
+function CreateKey({ data, team: forTeam, onCancel, onCreated }: { data: KeysResponse; team?: string | null; onCancel: () => void; onCreated: (r: NewKeyResponse) => void }) {
+  const t = useT();
+  const teams = data.teams ?? [];
+  // "" is a personal key; a team's name makes the key the team's (1.6.1).
+  const [team, setTeam] = useState(forTeam && teams.some((x) => x.name === forTeam) ? forTeam : "");
   const [name, setName] = useState("");
   const [all, setAll] = useState(true);
   const [picked, setPicked] = useState<string[]>([]);
@@ -427,6 +443,7 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
         body: {
           name: name.trim(), models: all ? null : picked, rpm: rpm ? Number(rpm) : null, tpm: tpm ? Number(tpm) : null,
           expires_in_days: expiry ? Number(expiry) : null, cloud, budget_micros: budgetMicros,
+          ...(team ? { team } : {}),
         },
       }));
     } catch (err) {
@@ -441,6 +458,18 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
     <section className="panel panel-link" aria-labelledby="new-key-title">
       <h2 id="new-key-title">{t("keys.create.title")}</h2>
       <form onSubmit={submit} className="key-form">
+        {teams.length > 0 && (
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="key-team">{t("teams.field.keyOwner")}</label>
+              <select id="key-team" value={team} onChange={(e) => setTeam(e.target.value)}>
+                <option value="">{t("teams.field.keyYou")}</option>
+                {teams.map((x) => <option key={x.id} value={x.name}>{t("teams.field.keyTeam", { name: x.title })}</option>)}
+              </select>
+              <p className="field-hint">{t("teams.field.keyHint")}</p>
+            </div>
+          </div>
+        )}
         <div className="grid-2">
           <Field label={t("keys.create.name")} name="key-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required
             placeholder={t("keys.create.namePlaceholder")} hint={t("keys.create.nameHint")} />

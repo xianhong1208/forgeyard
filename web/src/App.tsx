@@ -31,6 +31,7 @@ import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
 import { OldDeploy, OldDeployment, ServingPage } from "./pages/Serving";
 import { SetupPage } from "./pages/Setup";
+import { TeamPage, TeamsPage } from "./pages/Teams";
 import { SsoCallbackPage } from "./pages/SsoCallback";
 import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
@@ -108,6 +109,9 @@ export default function App() {
         <Route path="/playground" element={<PlaygroundPage />} />
         <Route path="/keys" element={<ApiKeysPage />} />
         <Route path="/usage" element={<UsagePage />} />
+        {/* 1.6.1 (#190): teams; the API answers each person with what they may see. */}
+        <Route path="/teams" element={<TeamsPage />} />
+        <Route path="/teams/:name" element={<TeamPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="/audit" element={<AdminOnly><AuditPage /></AdminOnly>} />

@@ -8,6 +8,7 @@ export default {
   "shell.nav.playground": "Playground",
   "shell.nav.keys": "API keys",
   "shell.nav.usage": "Usage",
+  "shell.nav.teams": "Teams",
   "shell.nav.users": "Users",
   "shell.nav.audit": "Audit log",
   "shell.nav.start": "Get started",

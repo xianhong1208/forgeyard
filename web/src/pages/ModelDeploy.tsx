@@ -14,7 +14,7 @@ import { inputParamApplies } from "../lib/imageEdit";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
 import { sameModelStart } from "../lib/sleep";
-import type { CatalogModel, CatalogResponse, ContextHint, DeploymentsResponse, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
+import type { CatalogModel, CatalogResponse, ContextHint, DeploymentsResponse, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint, TeamsResponse } from "../lib/types";
 import { canAutoscale, emptyScale, scaleDeployParams, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
 import { SleepSetting, WakeWaitField } from "../components/Sleep";
@@ -31,6 +31,9 @@ export function ModelDeployPage() {
   const { data: machines } = useApi<MachinesResponse>("/machines");
   // 1.5.0: another deployment of the same model and engine tells how long a start takes.
   const { data: deps } = useApi<DeploymentsResponse>("/deployments");
+  // 1.6.1 (#190): the team it may belong to (operators and admins see every team).
+  const { data: teamList } = useApi<TeamsResponse>("/teams");
+  const [team, setTeam] = useState("");
   // ?model=…&recipe=…&device=… from "Deploy it" after adding a model (its suggested recipe and device).
   const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "", recipe: search.get("recipe") ?? "",
     machine: search.get("machine") ?? "",
@@ -56,6 +59,7 @@ export function ModelDeployPage() {
   };
 
   const body = deployBody(view, recipe);
+  if (team) body.team = team;
   const auto = canAutoscale(recipe) && scale.mode === "auto";
   if (auto) {
     const chosen = scaleDeployParams(scale);
@@ -151,6 +155,16 @@ export function ModelDeployPage() {
                 <input id="d-served" className="mono" value={f.servedName} onChange={(e) => set("servedName", e.target.value)} placeholder={view.name || t("deploy.servedPlaceholder")} />
                 <p className="field-hint">{t.rich("deploy.servedHint", { model: <code>model</code> })}</p></div>
             </div>
+            {(teamList?.teams.length ?? 0) > 0 && (
+              <div className="grid-2">
+                <div className="field"><label htmlFor="d-team">{t("teams.field.label")}</label>
+                  <select id="d-team" value={team} onChange={(e) => setTeam(e.target.value)}>
+                    <option value="">{t("teams.field.none")}</option>
+                    {teamList!.teams.map((x) => <option key={x.id} value={x.name}>{x.title}</option>)}
+                  </select>
+                  <p className="field-hint">{t("teams.field.deployHint")}</p></div>
+              </div>
+            )}
           </section>
 
           {recipe && (

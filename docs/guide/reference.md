@@ -806,7 +806,7 @@ The label names are on the catalog entry (`GET /api/models/<name>`, `classify.la
 | `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
 | `X-Forgeyard-Voice` | answer | Text to speech: the voice the gateway chose because the request named none, or an OpenAI voice the model does not have; `default` when the model has only its own voice |
 | `X-Forgeyard-Dropped-Params` | answer | The request parameters Forgeyard left out on the way to the provider that answered (engine-only ones such as `top_k`, `chat_template_kwargs`; a model's own drop list), comma-separated. Also on that provider's error. Missing when nothing was left out ([structured output](cloud-providers.md#when-a-request-spills) is never left out: such a request skips that provider) |
-| `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
+| `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person`, `team` (1.6.1) or `provider:<name>`. Also on a successful answer that another target served |
 | `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, on 503 `local_busy` (1), and on a replica's or provider's own 429 or 503 passed on as it was |
 
 ### Errors
@@ -874,7 +874,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
 | 401 | `revoked_api_key` | The key was revoked | Create a new key |
 | 401 | `expired_api_key` | The key is past its expiry | Create a new key |
-| 401 | `account_disabled` | The key's owner is disabled or waiting for approval | Ask an admin |
+| 401 | `account_disabled` | The key's owner is disabled or waiting for approval (never for a team key: it belongs to its team) | Ask an admin |
 | 402 | `budget_exhausted` | A monthly budget kept the request from every provider that could serve it, and nothing local could. The `budget` object says which and when it resets | Wait for the month to end, raise the budget, or use a local model. Do not retry |
 | 402 | `budget_unpriced` | A budget applies, and the provider's model has no price, so its cost cannot be reserved | An admin sets its prices |
 | 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
@@ -1289,6 +1289,41 @@ M: …* (once while it does not fit), *Draining replica N: …*, *Kept replica N
 draining for … s*, *Asleep with N replicas (its minimum)*. They are not audited. The load samples, drains and
 decisions live in the server's memory: after a restart the windows start again and no replica is removed by a
 drain that was under way.
+
+## Teams through the API
+
+Teams (1.6.1; [Teams](concepts.md#teams)). A team's `name` follows the username rule (2-64 characters: `a-z`, `0-9`,
+`.`, `_`, `-`); `title` is what pages show.
+
+| Request | Who | What |
+|---|---|---|
+| `GET /api/teams` | everyone | Admins and operators: every team; others: the teams they are in. Each has `my_role` (`member`, `manager` or `null`), `can_manage`, counts of `members`, `managers`, working `keys` and `deployments`, and `budget` (this month's spend) |
+| `POST /api/teams` | admins | `{"name", "title", "budget_micros"}`; 201. `422 bad_team_name`, `409 team_name_taken` |
+| `GET /api/teams/{name}` | admins and members | The above with `member_list`, `deployment_list`, and for admins and managers `key_list`. Someone outside the team gets `404 not_found` |
+| `PATCH /api/teams/{name}` | admins | `name`, `title`, `budget_micros` (micro-USD a month; `null`: none). A field left out keeps its value |
+| `DELETE /api/teams/{name}` | admins | `409 team_has_keys` (with `keys`) while one of its keys works; `409 team_has_deployments` (with `deployments`) while a deployment belongs to it. Its revoked and expired keys go with it |
+| `PUT /api/teams/{name}/members/{username}` | admins; managers | `{"role": "member"}` or `{"role": "manager"}`. Managers add people as members only: anything else is `403 admins_only`. `404 no_such_user`; a member who is not a manager gets `403 not_team_manager` |
+| `DELETE /api/teams/{name}/members/{username}` | admins; managers | Managers remove members, not managers (`403 admins_only`). `404 not_a_member` |
+
+Elsewhere:
+
+- `POST /api/keys` with `"team": "<name>"` makes a team key (the team's managers and admins; `403 not_team_manager`
+  for a member, `404 team_not_found` outside the team). Every key answer has the key's `team` (`{id, name, title}` or
+  `null`) and `created_by`; a team key's `user` is `{"id": null, "username": null}`. `GET /api/keys` also lists the
+  keys of the teams you manage, and `teams`: the teams you may make keys for.
+- `POST /api/deployments` and `PATCH /api/deployments/{id}` take `team` (a name; `null` on a change: none); only admins
+  and operators set it (`404 team_not_found`). A deployment answers `team` and `can_manage`. A team's managers who are
+  not operators may stop, start and change it, but not `recipe`, `params.extra_args` or `team` (`403 operators_only`,
+  with `fields`); others get `403 forbidden`.
+- `GET /api/usage` and `GET /api/usage/series` take `team=<name>` (admins and the team's managers; else `403
+  not_team_manager` or `404 team_not_found`), and `group=team` / `split=team`. `GET /api/usage` answers `team` and
+  `teams` (the teams whose usage you may see).
+- `GET /api/budgets` lists `teams` with their budgets: the ones you manage, or every team for admins with
+  `?everyone=true`.
+
+Audit actions: `team.created`, `team.changed` (with `changes`), `team.deleted`, `team.member_added`,
+`team.member_changed`, `team.member_removed`. `api_key.created`, `api_key.changed`, `api_key.revoked`,
+`deployment.created` and `deployment.changed` name the `team`. A team's budget alerts have `scope: team`.
 
 ## A machine's model cache through the API
 

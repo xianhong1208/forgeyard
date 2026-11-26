@@ -50,6 +50,9 @@ reader plainly with 你, never 您.
 | routing and fallback / spill | 分流與備援 / 溢出 | A deployment's own route (its section on the deployment's page): later tiers hold other local deployments or cloud models. Before 1.5.4 it was "cloud fallback / 雲端備援"; say 雲端 only when a cloud provider is meant. |
 | budget | 預算 | |
 | API key | API 金鑰 | |
+| team | 團隊 | 1.6.1: people who share keys, deployments and a budget. |
+| team member / manager | 成員 / 管理者 | Team roles. 管理者 (a team's manager) is never 管理員 (an admin of the install). |
+| team key / personal key | 團隊金鑰 / 個人金鑰 | |
 | usage | 用量 | |
 | audit log | 稽核紀錄 | |
 | setup health | 設定健康檢查 | The advisor's panel. |

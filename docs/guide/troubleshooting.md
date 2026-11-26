@@ -557,12 +557,12 @@ The `code` says what happened.
 
 `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`, `account_disabled`: the
 key is missing (send `Authorization: Bearer fyk_…`), wrong, expired or revoked, or its owner's
-account is disabled. Check the key on **API keys**; create a new one if needed.
+account is disabled (a team key has no owner: it works until it is revoked). Check the key on **API keys**; create a new one if needed.
 
 ### 402
 
 **You see:** `402` with `budget_exhausted` or `budget_unpriced`, and the header
-`X-Forgeyard-Budget-Exhausted: key` (or `person`, or `provider:<name>`).
+`X-Forgeyard-Budget-Exhausted: key` (or `person`, `team`, or `provider:<name>`).
 
 **Why:** the request could only be served by a cloud provider, and a monthly budget kept it from
 every provider that could serve it:

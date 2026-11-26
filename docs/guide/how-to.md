@@ -1525,6 +1525,32 @@ To let people ask for an account themselves, start the server with `REGISTRATION
 sign-in page then offers to request an account, and requests wait on **Users** until an admin chooses
 **Approve** or **Reject**.
 
+## Share models with a team
+
+A team (1.6.1) lets a group of people share API keys, deployments and a cloud budget, and keeps a shared key working
+when the person who made it leaves. See [Teams](concepts.md#teams).
+
+1. **Make the team** (admins): **Teams** → **New team**, a **Name** (like a username, used in links and the API) and
+   a **Display name**.
+2. **Add its people**: on the team's page, **Username** and **Add**. Admins choose **Manager** or **Member**; a
+   team's managers add people as members.
+3. **Make a key for the team** (its managers, or an admin): **Make a team key** on the team's page, or **API keys** →
+   **New key** with **Belongs to** set to the team. The key's requests count to the team, and it keeps working when
+   its maker is disabled or deleted. Revoke it on **API keys**.
+4. **Give it deployments** (admins and operators): choose the **Team** when deploying, or on a deployment's
+   **Change** page. The team's managers can then stop, start and change those deployments (not the engine, its extra
+   arguments or the team) without being operators.
+5. **Set a cloud budget** (admins): **Change team** → **Monthly cloud budget**. Requests with the team's keys are
+   reserved against it like a key's budget.
+6. **Watch its usage**: **Usage** → **Team** (the team's managers and admins). Admins with **Everyone** can split by
+   **Team**.
+
+Through the API: `POST /api/teams`, `PUT /api/teams/{name}/members/{username}` with `{"role": "member"}`, and
+`POST /api/keys` with `"team": "<name>"` ([Teams through the API](reference.md#teams-through-the-api)).
+
+To delete a team, revoke its working keys and move or delete its deployments first: until then **Delete team**
+answers `team_has_keys` or `team_has_deployments`.
+
 ## Turn on two-factor sign-in
 
 With two-factor sign-in (1.6.0), signing in asks for your password and a 6-digit code from an authenticator app on
