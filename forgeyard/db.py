@@ -741,6 +741,36 @@ class BudgetAlert(Base):
     __table_args__ = (Index("ix_budget_alerts_once", "scope", "scope_id", "month", "threshold", unique=True),)
 
 
+class GpuUsageDaily(Base):
+    """GPU time per UTC day, deployment, team, machine and GPU model (1.6.1, #190; forgeyard/workloads/gpu_hours.py):
+    what the replicas held, counted by the usage recorder from the moment an engine starts until its reservation is
+    freed (not while it downloads, not while its deployment is asleep). Rows outlive deployments, teams and machines (no
+    foreign keys), so history stays readable; a deployment that moves to another team starts new rows.
+
+    - gpu_ms: GPU-milliseconds, weighted by the replica's share of each card: an exclusive card counts 1, a shared one
+      its reservation ÷ the card's memory (20 GiB of an 80 GiB card: 0.25).
+    - ram_mib_ms: a CPU replica's reserved RAM (MiB) × milliseconds (its gpu_ms is 0).
+    - busy_ms: of that time, the part with at least one request in flight through this server, weighted like the
+      allocation: GPU-milliseconds on GPU rows (busy share = busy_ms ÷ gpu_ms), plain milliseconds on CPU rows."""
+
+    __tablename__ = "gpu_usage_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[str] = mapped_column(String(10))                          # YYYY-MM-DD, UTC
+    deployment_id: Mapped[int] = mapped_column(Integer)
+    team_id: Mapped[int] = mapped_column(Integer, default=0)              # 0: no team
+    node_id: Mapped[int] = mapped_column(Integer)
+    vendor: Mapped[str] = mapped_column(String(16))                       # nvidia | amd | cpu
+    gpu_model: Mapped[str] = mapped_column(String(160))                   # the card's model; the CPU's on CPU rows
+    gpu_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    ram_mib_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    busy_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+
+    __table_args__ = (
+        Index("ix_gpu_usage_daily_slot", "day", "deployment_id", "team_id", "node_id", "gpu_model", unique=True),
+    )
+
+
 class ServerSetting(Base):
     """Settings admins change at run time (model source allowlists, API key limits)."""
 

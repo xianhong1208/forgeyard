@@ -37,13 +37,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit, removed, teams as tm
-from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
+from forgeyard.api.deps import Caller, can_run_workloads, current, fail, public_base, require_admin
 from forgeyard.api.tls import trust_page
 from forgeyard.config import get_settings
 from forgeyard.db import ApiKey, Deployment, GatewayRoute, Team, as_utc, get_db, utcnow
 from forgeyard.models import routes as mroutes
 from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
+from forgeyard.workloads import gpu_hours
 
 router = APIRouter(prefix="/api", tags=["keys"])
 
@@ -446,7 +447,39 @@ def get_usage_series(step: str = Query(default="day"), periods: int = Query(defa
     return out
 
 
+@router.get("/usage/gpu")
+def get_gpu_usage(days: int = Query(default=7, ge=1, le=366), group: str = Query(default="deployment"),
+                  team: Optional[str] = Query(default=None, max_length=64),
+                  caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+    """GPU hours (1.6.1, #190): the GPU time model replicas held over the last `days` UTC days, in total and per
+    deployment, team, machine or GPU model. Admins and operators see every deployment's (or one team's with
+    ?team=<name>); a team's managers see their team's with ?team=<name>."""
+    if group not in gpu_hours.GROUPS:
+        raise fail(422, "bad_group", f"group: one of {', '.join(gpu_hours.GROUPS)}")
+    everything = can_run_workloads(caller.user)
+    the_team = None
+    if team is not None:
+        the_team = tm.by_name(db, team)
+        if the_team is None or not (everything or tm.role_in(db, caller.user, the_team.id)):
+            raise fail(404, "team_not_found", "No such team.")
+        if not (everything or tm.manages(db, caller.user, the_team.id)):
+            raise fail(403, "not_team_manager", "Only admins, operators and the team's managers see its GPU hours.")
+    elif not everything:
+        raise fail(403, "forbidden", "Only admins and operators see every deployment's GPU hours; a team's managers see "
+                                     "their team's.")
+    gusage.recorder.flush()
+    out = gpu_hours.summary(db, days=days, group_by=group, team_id=the_team.id if the_team is not None else None)
+    out["team"] = tm.brief(the_team)
+    q = select(Team) if everything else select(Team).where(Team.id.in_(tm.managed_ids(db, caller.user)))
+    out["teams"] = [tm.brief(t) for t in db.scalars(q.order_by(Team.title, Team.name)).all()]
+    out["everything"] = everything
+    out["counting_since"] = gpu_hours.since(gusage.recorder.gpu)
+    return out
+
+
 def deployment_usage(db: DbSession, d: Deployment, days: int = 7) -> dict:
     gusage.recorder.flush()
     out = gusage.summary(db, days=days, deployment_id=d.id, group_by="day")
-    return {"days": days, "total": out["total"], "by_day": out["rows"]}
+    # 1.6.1 (#190): its GPU hours and busy share this UTC month.
+    return {"days": days, "total": out["total"], "by_day": out["rows"],
+            "gpu": {**gpu_hours.month_total(db, deployment_id=d.id), "counting_since": gpu_hours.since(gusage.recorder.gpu)}}
