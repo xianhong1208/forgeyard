@@ -839,6 +839,20 @@ class Sso:
                    f"reasons since the run began: {sorted(set(r for r in reasons if r))}")
 
 
+def preflight(run: "A.Run") -> None:
+    """Before anything changes (exit code 2): the server's provider may be replaced, and --user is the owner."""
+    a = run.args
+    current = run.admin.ok("GET", "/api/identity-provider").get("provider")
+    if current and not a.replace_provider:
+        raise A.Refused(f"the server already has an identity provider ({current['name']}): run with "
+                        "--replace-provider to replace it for the run (it is put back at the end)")
+    if current and current.get("has_client_secret") and not a.previous_client_secret_file:
+        raise A.Refused(f"{current['name']} has a client secret the server never shows: give it with "
+                        "--previous-client-secret-file so that it can be put back")
+    if not run.admin.ok("GET", "/api/auth/me")["user"].get("is_owner"):
+        raise A.Refused(f"{a.user} is not the server's owner (step 6 links the owner's account)")
+
+
 def restore_provider(run: "A.Run", previous: Optional[dict], secret: Optional[str]) -> None:
     if previous is None:
         r = run.admin.request("DELETE", "/api/identity-provider")
@@ -855,15 +869,6 @@ def exercise(run: "A.Run") -> None:
     except ImportError:
         raise A.Fail("Playwright for Python is not installed (run with --install-playwright)") from None
     current = run.admin.ok("GET", "/api/identity-provider").get("provider")
-    if current and not a.replace_provider:
-        raise A.Fail(f"the server already has an identity provider ({current['name']}): run with --replace-provider "
-                     "to replace it for the run (it is put back at the end)")
-    if current and current.get("has_client_secret") and not a.previous_client_secret_file:
-        raise A.Fail(f"{current['name']} has a client secret the server never shows: give it with "
-                     "--previous-client-secret-file so that it can be put back")
-    me = run.admin.ok("GET", "/api/auth/me")["user"]
-    if not me.get("is_owner"):
-        raise A.Fail(f"{a.user} is not the server's owner (step 6 links the owner's account)")
     previous_secret = (Path(a.previous_client_secret_file).read_text().strip()
                        if a.previous_client_secret_file else None)
     with sync_playwright() as pw:
@@ -940,7 +945,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"refused: {e}", file=sys.stderr)
         return 2
     A.GROUPS["sso"] = A.Group("sso", TITLE, exercise)
-    return A.run_plan(args)
+    sign_in = A.start
+
+    def start(run: "A.Run", password: str) -> None:  # accept_all's sign-in, then this script's own refusals
+        sign_in(run, password)
+        preflight(run)
+
+    A.start = start
+    try:
+        return A.run_plan(args)
+    finally:
+        A.start = sign_in
 
 
 if __name__ == "__main__":

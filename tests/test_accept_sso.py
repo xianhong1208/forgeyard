@@ -9,6 +9,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -183,3 +184,32 @@ def test_fy_asso_006_main_runs_the_group(mods, files, monkeypatch):
     monkeypatch.setattr(iu, "find_spec", lambda name, *a: None if name == "playwright" else real(name, *a))
     monkeypatch.delenv(acc.REEXEC, raising=False)
     assert s.main(base(files)) == 2 and "sso" not in acc.GROUPS
+
+
+def test_fy_asso_007_refusals_before_anything_changes(mods, files):
+    """FY-ASSO-007: before the run changes anything it refuses (accept_all's Refused: exit code 2) a server that already
+    has an identity provider unless --replace-provider, a replaced provider with a client secret unless that secret is
+    given to put back, and a --user who is not the owner; a server without a provider and the owner go ahead."""
+    acc, s = mods
+
+    class Admin:
+        def __init__(self, provider, owner=True):
+            self.answers = {"/api/identity-provider": {"provider": provider},
+                            "/api/auth/me": {"user": {"username": "o", "is_owner": owner}}}
+
+        def ok(self, method, path, body=None):
+            return self.answers[path]
+
+    def run(provider, owner=True, *extra):
+        return SimpleNamespace(args=s.parse_args(base(files, *extra)), admin=Admin(provider, owner))
+
+    s.preflight(run(None))
+    secretless = {"name": "Old", "has_client_secret": False}
+    with_secret = {"name": "Old", "has_client_secret": True}
+    s.preflight(run(secretless, True, "--replace-provider"))
+    s.preflight(run(with_secret, True, "--replace-provider", "--previous-client-secret-file", files["secret"]))
+    for r, want in ((run(secretless), "--replace-provider"),
+                    (run(with_secret, True, "--replace-provider"), "--previous-client-secret-file"),
+                    (run(None, False), "not the server's owner")):
+        with pytest.raises(acc.Refused, match=want):
+            s.preflight(r)
