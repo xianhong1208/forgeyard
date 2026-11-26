@@ -75,7 +75,7 @@ describe("the Playground's helpers", () => {
     expect(parseLabels("").error).toBe("請至少指定一樣要找的東西，例如 cat, remote control。");
     expect(parseLabels(Array.from({ length: 33 }, (_, i) => `x${i}`).join(",")).error).toBe("一次最多 32 個。");
     expect(checkImage(file("a.gif", "image/gif", 10), 20)).toBe("a.gif 不是 PNG、JPEG 或 WebP 圖片。");
-    expect(checkImage(file("", "image/png", 30 * 1024 * 1024), 20)).toBe("這張圖片 有 30.0 MiB：最多只能 20 MiB。");
+    expect(checkImage(file("", "image/png", 30 * 1024 * 1024), 20)).toBe("這張圖片有 30.0 MiB：最多只能 20 MiB。");
     expect(targets(opts)[0].call).toBe("POST /v1/vision/detect（參數 model=det）");
     expect(targets(opts)[0].link?.label).toBe("部署");
     expect(TASK_HELP.depth).toBe("估計每個像素的遠近，並在照片旁顯示成深度圖。");
