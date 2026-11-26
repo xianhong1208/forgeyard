@@ -112,14 +112,14 @@ describe("people it is required of", () => {
     localStorage.setItem(LANG_KEY, "zh-TW");
     server(() => undefined, { ...OWNER, mfa_enrolment: { by: inDays(2.5), due: false } });
     mount("/machines");
-    expect(await screen.findByText(/你的帳號必須開啟雙重驗證。請在 .* 之前加入驗證器 App（還剩 3 天），過了之後，這裡就只能做這件事。/)).toBeTruthy();
+    expect(await screen.findByText(/你的帳號必須開啟雙重驗證。請在 \d{4}年\d{1,2}月\d{1,2}日之前加入驗證器 App（還剩 3 天），過了之後，這裡就只能做這件事。/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "現在就加入" })).toBeTruthy();
     cleanup();
     server((url) => (url === "/api/auth/mfa/factors" ? { status: 200, body: { factors: [], recovery_codes_left: 0, max_factors: 5 } } : undefined),
       { ...OWNER, mfa_enrolment: { by: "2026-11-20T12:00:00Z", due: true } });
     mount("/users");
     expect(await screen.findByRole("heading", { level: 1, name: "請先開啟雙重驗證" })).toBeTruthy();
-    expect(screen.getByText(`你的帳號必須開啟雙重驗證，寬限期已在 ${formatDate("2026-11-20T12:00:00Z", "zh-TW")} 結束。請在這裡加入驗證器 App，加入之後，其他功能就會立刻恢復。`)).toBeTruthy();
+    expect(screen.getByText(`你的帳號必須開啟雙重驗證，寬限期已在 ${formatDate("2026-11-20T12:00:00Z", "zh-TW")}結束。請在這裡加入驗證器 App，加入之後，其他功能就會立刻恢復。`)).toBeTruthy();
     const { serverMessage } = await import("../i18n/server");
     expect(serverMessage("mfa_enrolment_required", "x")).toBe("請先到「我的帳號」加入驗證器 App：你的帳號必須開啟雙重驗證。");
   });
@@ -247,7 +247,7 @@ it("FY-WEB-1028 Setup health's people-waiting-for-approval finding in Traditiona
       : url === "/api/users/mfa-policy" ? { status: 200, body: { mfa_required: "off", mfa_grace_days: 7, max_grace_days: 90, in_grace_period: 0, setup_overdue: 0 } }
         : undefined), { ...OWNER, has_mfa: true });
   mount("/users");
-  expect(await screen.findByText("ann、bob、cy 和另外 2 人 申請了帳號。請在「使用者」頁面核准或移除。")).toBeTruthy();
+  expect(await screen.findByText("ann、bob、cy 和另外 2 人申請了帳號。請在「使用者」頁面核准或移除。")).toBeTruthy();
   expect(screen.getByText("zed 申請了帳號。請在「使用者」頁面核准或移除。")).toBeTruthy();
   expect(screen.queryByText(/asked for an account/)).toBeNull();
 });

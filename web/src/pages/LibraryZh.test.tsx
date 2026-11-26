@@ -387,7 +387,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(licenceTerms("mit")).toBeNull();
     expect(visionProblem({ license: "apache-2.0" }, "segment")).toBe("這個儲存庫不是視覺伺服器能執行的影像分割模型。");
     expect(visionProblem({ vision: { task: "detect", architecture: "x" } as CatalogModel["vision"], license: null }, "detect")).toBe(
-      "視覺模型只能以寬鬆授權加入（Apache-2.0、MIT、BSD）；這個模型的授權是 未註明。");
+      "視覺模型只能以寬鬆授權加入（Apache-2.0、MIT、BSD）；這個模型的授權是未註明。");
     expect(searchLicenceProblem({ task: "depth", license: "cc-by-nc-4.0" } as SearchResult)).toBe("授權 cc-by-nc-4.0：視覺模型需要寬鬆授權");
     expect(fitsLine(SUGGESTION)).toBe("gpu-01 的 GPU #4、#5、cpu-01 的 CPU");
     expect(presenceText("program", false)).toBe("程式不在這裡：部署時下載");

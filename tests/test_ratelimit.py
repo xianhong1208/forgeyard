@@ -3,11 +3,13 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 
 from forgeyard.config import get_settings
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import RateLimiter, limiter
-from tests.conftest import OWNER, make_client
+from tests.conftest import OWNER, SETUP_TOKEN, link_token, make_client
+from tests.machines_helpers import new_token
 
 
 class Clock:
@@ -111,3 +113,63 @@ def test_fy_rl_008_setup_token_guessing_is_limited(client, clock):
     codes = [client.post("/api/auth/setup", json={"setup_token": f"guess{i}", "username": "m",
                                                   "password": OWNER[1]}).status_code for i in range(7)]
     assert codes[:5] == [403] * 5 and 429 in codes[5:]
+
+
+# The doors with no account to count against. Each: (needs an owner, a wrong try, a right try), both from `c`.
+def _setup_bad(c, admin):
+    return c.post("/api/auth/setup", json={"setup_token": "guess", "username": "mona", "password": OWNER[1]})
+
+
+def _setup_good(c, admin):
+    return c.post("/api/auth/setup", json={"setup_token": SETUP_TOKEN, "username": "mona", "password": OWNER[1]})
+
+
+def _join_bad(c, admin):
+    return c.post("/agent/v1/join", json={"join_token": "fyj_guess", "protocol": 1, "name": "x"})
+
+
+def _join_good(c, admin):
+    return c.post("/agent/v1/join", json={"join_token": new_token(admin)["token"], "protocol": 1, "name": "box"})
+
+
+def _link_bad(c, admin):
+    return c.post("/api/auth/password-link", json={"token": "guess", "password": "maple-signal-9034"})
+
+
+def _link_good(c, admin):
+    r = admin.post("/api/users", json={"username": "carol", "role": "user"})
+    return c.post("/api/auth/password-link", json={"token": link_token(r.json()["set_password_url"]),
+                                                    "password": "maple-signal-9034"})
+
+
+def _register_bad(c, admin):
+    return c.post("/api/auth/register", json={"username": OWNER[0], "password": "violet-harbor-3317"})
+
+
+def _register_good(c, admin):
+    return c.post("/api/auth/register", json={"username": "dana", "password": "violet-harbor-3317"})
+
+
+@pytest.mark.parametrize("door", ["setup", "join", "link", "register"])
+def test_fy_rl_009_doors_without_an_account_back_off_per_address(door, client, clock, monkeypatch):
+    """FY-RL-009: the setup token, an agent's join token, a set-password link and self-registration count failed
+    tries per client address: one address is slowed after 5 (429), while another address's wrong try is a plain
+    refusal and its right one goes through at once."""
+    monkeypatch.setenv("TRUSTED_PROXIES", "testclient")
+    monkeypatch.setenv("REGISTRATION", "approval")
+    get_settings.cache_clear()
+    bad, good = {"setup": (_setup_bad, _setup_good), "join": (_join_bad, _join_good),
+                 "link": (_link_bad, _link_good), "register": (_register_bad, _register_good)}[door]
+    admin = client
+    if door != "setup":
+        assert admin.post("/api/auth/setup", json={"setup_token": SETUP_TOKEN, "username": OWNER[0],
+                                                   "password": OWNER[1]}).status_code == 200
+    a, b = (TestClient(client.app, base_url="http://localhost", headers={"X-Forgeyard": "1", "X-Forwarded-For": ip})
+            for ip in ("203.0.113.10", "198.51.100.20"))
+    first = bad(a, admin).status_code
+    assert first in (403, 404, 409)
+    assert [bad(a, admin).status_code for _ in range(4)] == [first] * 4
+    assert bad(a, admin).status_code == 429
+    assert bad(b, admin).status_code == first
+    r = good(b, admin)
+    assert r.status_code == 200, r.text

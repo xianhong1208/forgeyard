@@ -122,14 +122,14 @@ def state(request: Request, db: DbSession = Depends(get_db)):
 @router.post("/setup")
 def setup(body: SetupIn, request: Request, response: Response, db: DbSession = Depends(get_db)):
     ip = client_ip(request)
-    wait = limiter.login_wait("__setup__", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
+    wait = limiter.attempt_wait("setup", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     with _setup_lock:
         if has_users(db):
             raise fail(409, "already_set_up", "Forgeyard already has an owner. Sign in instead.")
         if not secrets_store.setup_token_matches(body.setup_token):
-            limiter.login_failed("__setup__", ip)
+            limiter.attempt_failed("setup", ip)
             audit.record(db, "setup.token_rejected", ip=ip)
             db.commit()
             raise fail(403, "bad_setup_token",
@@ -253,11 +253,11 @@ def register(body: RegisterIn, request: Request, db: DbSession = Depends(get_db)
     username = normalise_username(body.username)
     _check_password(body.password, username)
     ip = client_ip(request)
-    wait = limiter.login_wait("__register__", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
+    wait = limiter.attempt_wait("register", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     if db.scalar(select(User).where(User.username == username)):
-        limiter.login_failed("__register__", ip)
+        limiter.attempt_failed("register", ip)
         raise fail(409, "username_taken", "That username is taken.")
     user = User(username=username, email=body.email or None, role="user", status="pending",
                 password_hash=passwords.hash_password(body.password))
@@ -330,12 +330,12 @@ def check_link(body: LinkCheckIn, db: DbSession = Depends(get_db)):
 @router.post("/password-link")
 def use_link(body: LinkUseIn, request: Request, db: DbSession = Depends(get_db)):
     ip = client_ip(request)
-    wait = limiter.login_wait("__link__", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
+    wait = limiter.attempt_wait("link", ip, get_settings().login_free_failures, get_settings().login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many tries. Wait a moment.", retry_after=retry_after(wait))
     link = links.find(db, body.token)
     if link is None:
-        limiter.login_failed("__link__", ip)
+        limiter.attempt_failed("link", ip)
         raise fail(404, "link_invalid", "This link has expired or was already used. Ask an admin for a new one.")
     user = db.get(User, link.user_id)
     _check_password(body.password, user.username)

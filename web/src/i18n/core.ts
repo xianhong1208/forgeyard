@@ -29,14 +29,34 @@ export function hasKey(key: string): key is Key {
 
 // {name} -> its value; numbers in the reader's digits. A name with no value stays as it is, so a mistake
 // shows on screen instead of an empty gap.
+// Chinese spacing the Taiwan way: a space between a Latin letter or digit and a Chinese character, none between
+// two Chinese characters. A zh-TW string keeps its space next to a {name} for Latin values ("bob 申請了帳號"); when
+// the value's own edge there is Chinese ("…和另外 2 人"), that space goes ("…和另外 2 人申請了帳號").
 export function interpolate(s: string, vars: Record<string, unknown> | undefined, lang: Lang): string {
   if (!vars) return s;
-  const out = s.replace(/\{(\w+)\}/g, (whole, name: string) => {
-    const v = vars[name];
-    if (v === undefined || v === null) return whole;
-    return typeof v === "number" ? formatNumber(v, lang) : String(v);
+  const zh = lang === "zh-TW";
+  let out = "";
+  let afterValue = false;
+  s.split(/(\{\w+\})/).forEach((part, i) => {
+    if (i % 2 === 0) {
+      // Text: drop its leading space when the value just before it ends in Chinese and the text goes on in Chinese.
+      out += zh && afterValue && part[0] === " " && isCjk(out.at(-1)) && isCjk(part[1]) ? part.slice(1) : part;
+      afterValue = false;
+      return;
+    }
+    const v = vars[part.slice(1, -1)];
+    const value = v === undefined || v === null ? part : typeof v === "number" ? formatNumber(v, lang) : String(v);
+    // A value that starts in Chinese right after Chinese text and a space: the space goes.
+    if (zh && out.endsWith(" ") && isCjk(out.at(-2)) && isCjk(value[0])) out = out.slice(0, -1);
+    out += value;
+    afterValue = true;
   });
-  return lang === "zh-TW" ? spaceCjkNumbers(out) : out;
+  return zh ? spaceCjkNumbers(out) : out;
+}
+
+// Chinese characters and the full-width punctuation that goes with them (、，。（）「」…).
+function isCjk(c: string | undefined): boolean {
+  return c !== undefined && /[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]/.test(c);
 }
 
 // The raw string for a key: the language's, else the English one (never expected: the parity test and the

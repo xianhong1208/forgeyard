@@ -479,7 +479,7 @@ describe("admin pages in zh-TW", () => {
     expect(await screen.findByRole("heading", { name: "帳號" })).toBeTruthy();
     expect(screen.getByText("擁有者")).toBeTruthy();
     expect(screen.getAllByText("管理員").length).toBeGreaterThan(0);
-    expect(await screen.findByText("工作階段閒置 2 小時 後結束，最長 30 天。")).toBeTruthy();
+    expect(await screen.findByText("工作階段閒置 2 小時後結束，最長 30 天。")).toBeTruthy();
     expect(screen.getByText("Linux 上的 Chrome")).toBeTruthy();
     expect(screen.getByText("iOS 上的 Safari")).toBeTruthy();
     expect(screen.getByText("這個瀏覽器")).toBeTruthy();

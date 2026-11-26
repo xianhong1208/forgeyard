@@ -95,6 +95,21 @@ version until 1.0.
   in a real browser: approval and automatic accounts, the role mapping, disabled accounts, linking, the two-factor
   exemption, the key backup's fresh sign-in, API keys and refused callbacks; everything it changes is put back.
 
+### Fixed
+
+- **Failed tries at the doors without an account no longer make everybody wait.** Failed single sign-on finishes,
+  agent join tokens, setup tokens, set-password links and self-registrations were counted under one name for the
+  whole server, so failures from any address could delay every person's (or every agent's) next try, up to 5
+  minutes. A password sign-in whose username was that name added to it too. They are now counted per door and per
+  client address, apart from password sign-ins: after 5 failures from one address, that address waits (2 s,
+  doubling, up to 5 minutes); other addresses are not affected. The cap of 30 failures per address in 15 minutes
+  still covers every door. A single sign-on finish whose state, browser and ID token check out clears its
+  address's count. Audit lines are unchanged.
+- **Traditional Chinese spacing next to names and values**: a space stays only between a Latin letter or digit and
+  a Chinese character, never between two Chinese characters ("ann、bob、cy 和另外 2 人申請了帳號", "這個模型的授權是未註明",
+  "閒置 2 小時後結束"). Fixed once where the console fills in `{…}` values, so Setup health's people findings and
+  every other sentence follow it.
+
 ## [1.5.6] — 2026-11-26
 
 Clearer machine and model pages, and Windows machines (#282). The deploy page, a model's page and an engine's page

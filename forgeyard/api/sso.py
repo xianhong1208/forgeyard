@@ -42,7 +42,7 @@ router = APIRouter(prefix="/api/auth/sso", tags=["auth"])
 admin = APIRouter(prefix="/api/identity-provider", tags=["users"])
 
 CALLBACK_PATH = "/sso/callback"
-LIMIT_KEY = "__sso__"
+LIMIT_KIND = "sso"  # failed finishes back off per client address (ratelimit.attempt_*)
 
 
 def redirect_uri(request: Request) -> str:
@@ -131,7 +131,7 @@ def _fresh_until(claims: dict) -> Optional[datetime]:
 def finish(body: FinishIn, request: Request, response: Response, db: DbSession = Depends(get_db)):
     settings = get_settings()
     ip = client_ip(request)
-    wait = limiter.login_wait(LIMIT_KEY, ip, settings.login_free_failures, settings.login_ip_failures)
+    wait = limiter.attempt_wait(LIMIT_KIND, ip, settings.login_free_failures, settings.login_ip_failures)
     if wait:
         raise fail(429, "rate_limited", "Too many failed sign-ins. Wait before trying again.",
                    retry_after=retry_after(wait))
@@ -164,13 +164,15 @@ def finish(body: FinishIn, request: Request, response: Response, db: DbSession =
             status = 400 if e.code == "sso_token_invalid" else 502
             raise _Refused(status, e.code, e.message, e.reason if e.code != "sso_token_invalid"
                            else f"token_invalid:{e.reason}", extra={"reason": e.reason}) from None
+        # State, browser and ID token all held: the kinds of failure counted below are behind this address.
+        limiter.attempt_succeeded(LIMIT_KIND, ip)
         fresh = _fresh_until(claims)
         if item.purpose == "login":
             return _login(db, request, response, p, claims, fresh, item, ip)
         return _for_session(db, request, p, claims, fresh, item, ip)
     except _Refused as r:
         if r.reason in ("state_invalid", "browser_mismatch") or r.reason.startswith("token_invalid"):
-            limiter.login_failed(LIMIT_KEY, ip)
+            limiter.attempt_failed(LIMIT_KIND, ip)
         db.rollback()
         audit.record(db, "auth.sso_login_failed", actor=r.user, ip=ip, reason=r.reason,
                      purpose=item.purpose if item else None)
