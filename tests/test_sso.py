@@ -766,7 +766,8 @@ def test_fy_sso_025_the_migration_adds_two_tables_and_two_session_columns_and_go
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, "0020_two_factor")
     down_tables, down_cols = shape()
-    assert down_tables == tables - {"identity_providers", "user_identities"}
+    # teams and team_members (0022, 1.6.1) come with a later migration, so going down to 0020 drops them too.
+    assert down_tables == tables - {"identity_providers", "user_identities", "teams", "team_members"}
     assert down_cols == cols - {"auth_method", "fresh_until"}
     with get_engine().connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM users")).scalar() == users

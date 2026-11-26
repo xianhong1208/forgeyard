@@ -27,12 +27,15 @@ GONE_API = [("POST", "/api/workloads"), ("GET", "/api/workloads/templates"), ("P
             ("POST", "/api/playground/vision/detector/detect")]
 
 
-# Columns of later migrations that this code reads on every signed-in request (1.6.0, 0020: sessions.mfa_at; 0021:
-# sessions.auth_method and fresh_until). These
+# Columns of later migrations that this code reads (1.6.0, 0020: sessions.mfa_at; 0021: sessions.auth_method and
+# fresh_until; 1.6.1, 0022: the team columns). These
 # tests drive the 1.5.2 database through today's API, so the column stays while the database is at 0018, and goes again
 # just before the upgrade adds it.
 LATER_COLUMNS = (("sessions", "mfa_at", "TIMESTAMP"), ("sessions", "auth_method", "VARCHAR(16) NOT NULL DEFAULT 'password'"),
-                 ("sessions", "fresh_until", "TIMESTAMP"))
+                 ("sessions", "fresh_until", "TIMESTAMP"),
+                 # 1.6.1, 0022: teams (no foreign keys here: the teams table is not there at 0018).
+                 ("api_keys", "team_id", "INTEGER"), ("api_keys", "created_by", "VARCHAR(64)"),
+                 ("deployments", "team_id", "INTEGER"), ("usage_daily", "team_id", "INTEGER NOT NULL DEFAULT 0"))
 
 
 def down_to_1_5_2() -> None:
