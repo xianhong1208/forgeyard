@@ -50,6 +50,25 @@ cd web && npm audit --omit=dev
   （同一個映像檔）的兩個 tag 改成新版本，再執行 `pin_images.py --write`（FY-VIS-001、FY-VIS-019 與 FY-TFM-001 寫著固定的
   reference；FY-TFM-004 在固定的映像檔到 1.5.4 之前預期會被舊映像檔拒絕）。沒改到它的 release 就保留原本的固定：單是升級伺服器，視覺模型執行的映像檔永遠不會變。
 
+## 擴充功能
+
+從 1.6.1（#190）起，伺服器與主控台有一套小型的擴充介面，供另外發行的套件（企業版的套件）使用：不必 fork，就能加上頁面、API
+路由、資料表和檢查。**它是內部介面，不是公開的外掛 API**：它跟著確切的版本走，任何一個版本都可能改變其中的 hook。擴充功能會註明它是為哪一個
+Forgeyard 版本建置的，伺服器遇到其他版本就拒絕啟動。
+
+- **伺服器**（`forgeyard/extensions.py`，裡面列出每個 hook 以及呼叫它的地方）：啟動時載入 `forgeyard.extensions` 群組裡的每個
+  entry point；它的物件有 `name`、`version`、`requires`（確切的 Forgeyard 版本）、可選的 `edition`，以及 `register(reg)`。這些 hook
+  可以加上 API router（排在社群版的之後）、一個 Alembic 遷移分支（啟動時執行 `upgrade heads`）、放置前的機器篩選與檢查、對每個閘道請求的檢查
+  （只看記憶體裡的資料，在速率限制之前）、用量紀錄器寫入後的觀察者、設定健檢的項目、`GET /api/info` 列出的功能與稽核動作前綴，以及切換推論引擎版本的規則。
+  沒有擴充功能時，每個 hook 都回傳社群版的預設值，`GET /api/info` 回答 `"edition": "community"`，其他一切照舊。hook 拋出例外時會記錄下來並放行：
+  擴充功能的錯誤絕不會讓模型停止服務。
+- **主控台**（`web/src/ext/index.ts`）：頁面、選單連結、用量分頁與設定健檢卡片的空清單，由社群版的頁面顯示。擴充功能的建置會換掉這個檔案；
+  每一項都註明它需要的功能，只有在 `GET /api/info` 列出該功能時才會顯示。
+- **測試**：`tests/fixtures/ext_sample` 是用到每個 hook 的範例擴充功能，`tests/test_extensions.py`（FY-EXT-*）透過真正的 entry point
+  物件載入它：一條路由、一個遷移、一次被拒絕的放置、一個被拒絕的閘道請求、一個健檢項目。移動 hook 的呼叫位置時要讓它繼續通過：公開的 CI
+  就是靠它發現壞掉的 hook。`web/src/pages/Extensions.test.tsx` 用同樣的方式填入主控台的插槽。
+- 社群版的程式碼從不檢查授權，只詢問這份登錄表。
+
 ## 發布之前
 
 發布步驟寫在 [CONTRIBUTING.md](../CONTRIBUTING.md#releasing)（英文）。其中一步是守住映像檔的發布：

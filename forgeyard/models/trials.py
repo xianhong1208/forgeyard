@@ -30,8 +30,8 @@ trial that was running when the server stopped, when the server starts again (`s
 
 Every trial is a row of `engine_trials` (forgeyard/db.py: EngineTrial), kept after the copy, the model or the machine
 is gone: the engine page's history. The enterprise edition's exportable upgrade validation reports and "only tried
-versions" policies build on this table later; `switch_policy` is the seam such a policy plugs into, and it allows
-every switch in the community edition.
+versions" policies build on this table later; such a policy plugs into the extension registry's `switch_policy`
+(forgeyard/extensions.py, 1.6.1), and without one every switch is allowed (the community edition).
 """
 
 from __future__ import annotations
@@ -101,14 +101,6 @@ def is_trial(db: DbSession, dep_id: Optional[int]) -> bool:
 
 def trial_of_deployment(db: DbSession, dep_id: int) -> Optional[EngineTrial]:
     return db.scalar(select(EngineTrial).where(EngineTrial.deployment_id == dep_id).limit(1))
-
-
-# ------------------------------------------------------------------ the policy seam (enterprise later)
-def switch_policy(db: DbSession, d: Deployment, recipe: Recipe) -> Optional[tuple[str, str]]:
-    """Whether a deployment may move to `recipe` (another version of its engine), as far as trials go: None to allow,
-    or (code, text) to refuse. The community edition lets people choose freely, tried or not (Tony, 2026-11-23); an
-    enterprise policy such as "only versions that passed a trial on this kind of machine" replaces this function."""
-    return None
 
 
 # ------------------------------------------------------------------ what a trial starts from
@@ -197,7 +189,8 @@ def start(db: DbSession, *, recipe: Recipe, m: CatalogModel, node: Node, raw: Op
     with placement._lock:
         pv = scheduler.preview(db, ctx)
     if not pv["fits"]:
-        raise TrialError(409, "does_not_fit", pv["summary"], machines=pv["machines"], estimate=ctx.estimate.as_dict())
+        raise TrialError(409, scheduler.refusal_code(pv), pv["summary"], machines=pv["machines"],
+                         estimate=ctx.estimate.as_dict())
     now = utcnow()
     t = EngineTrial(recipe=recipe.name, builtin=builtin_of(recipe), engine=recipe.engine, engine_version=recipe.version,
                     model_id=m.id, model_name=m.name, task=m.task, node_id=node.id, machine_name=node.name, gpus=[],

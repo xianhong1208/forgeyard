@@ -28,4 +28,7 @@ export default {
   "shell.adminsOnly.title": "Admins only",
   "shell.adminsOnly.lead": "Your role cannot open this page. Ask an admin if you need it.",
   "shell.goToMachines": "Go to Machines",
+  // 1.6.1 (#190): an extension's page whose server part this server does not have, or has switched off.
+  "shell.unavailable.title": "Not available here",
+  "shell.unavailable.lead": "This page belongs to an extension this server does not offer.",
 } as const;

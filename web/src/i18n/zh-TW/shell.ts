@@ -29,4 +29,6 @@ export default {
   "shell.adminsOnly.title": "限管理員",
   "shell.adminsOnly.lead": "你的角色不能開啟這個頁面。如果需要，請洽管理員。",
   "shell.goToMachines": "前往機器",
+  "shell.unavailable.title": "這裡無法使用",
+  "shell.unavailable.lead": "這個頁面屬於擴充功能，而這部伺服器沒有提供。",
 } satisfies Record<keyof typeof en, string>;

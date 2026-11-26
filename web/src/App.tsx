@@ -3,7 +3,9 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 
 import { useAuth } from "./auth";
 import { Layout } from "./components/Layout";
+import { ExtPage } from "./components/ExtPage";
 import { Splash } from "./components/Splash";
+import { routes as extRoutes } from "./ext";
 import { HtmlLang } from "./i18n/react";
 import { loginPath } from "./lib/nav";
 import { AccountPage } from "./pages/Account";
@@ -109,6 +111,8 @@ export default function App() {
         <Route path="/account" element={<AccountPage />} />
         <Route path="/users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="/audit" element={<AdminOnly><AuditPage /></AdminOnly>} />
+        {/* 1.6.1 (#190): an extension's pages (web/src/ext; none in the community edition). */}
+        {extRoutes.map((r) => <Route key={r.path} path={r.path} element={<ExtPage route={r}>{r.element}</ExtPage>} />)}
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

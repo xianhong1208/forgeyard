@@ -703,21 +703,31 @@ def test_fy_trial_026_the_switch_form_names_each_engine_s_last_trial_and_the_pol
     assert r.status_code == 200, r.text
 
 
-def test_fy_trial_027_the_policy_seam_can_refuse_a_switch(lab, monkeypatch):
-    """FY-TRIAL-027: one function decides (an enterprise policy replaces it); today it allows every switch."""
+def test_fy_trial_027_the_policy_seam_can_refuse_a_switch(lab):
+    """FY-TRIAL-027: an extension's switch policy decides (forgeyard/extensions.py, 1.6.1); without one every switch
+    is allowed."""
+    from forgeyard import extensions
+
     c, node = lab
     dep = deploy(c, "chatty", MODEL, "llama-cpp", params=CPU)["deployment"]
-    db = new_session()
-    try:
-        d = db.get(Deployment, dep["id"])
-        from forgeyard.models import catalog
-
-        assert trials.switch_policy(db, d, catalog.get_recipe(db, COPY)) is None
-    finally:
-        db.close()
-    monkeypatch.setattr(trials, "switch_policy", lambda db, d, r: ("not_tried", f"{r.name} has not passed a trial."))
+    extensions.registry.switch_policies.clear()   # none, whatever this environment has installed
+    r = c.patch(f"/api/deployments/{dep['id']}", json={"recipe": COPY, "dry_run": True})
+    assert r.status_code == 200, r.text
+    extensions.registry.switch_policy(lambda db, d, r: ("not_tried", f"{r.name} has not passed a trial."))
     r = c.patch(f"/api/deployments/{dep['id']}", json={"recipe": COPY, "dry_run": True})
     assert r.status_code == 409 and r.json()["detail"]["code"] == "not_tried"
+
+
+def test_fy_trial_036_an_extension_refusing_the_placement_refuses_the_trial(lab):
+    """FY-TRIAL-036: a trial takes GPUs or memory like a deployment: when an extension's placement check refuses it
+    (a quota, 1.6.1), the trial is refused with that code and text, and nothing is made."""
+    from forgeyard import extensions
+
+    c, node = lab
+    extensions.registry.placement_check(lambda db, ctx: ("sample_quota", "No more replicas for this team."))
+    r = start(c, node, status=409)
+    assert r["detail"]["code"] == "sample_quota" and r["detail"]["message"] == "No more replicas for this team."
+    assert c.get(f"/api/recipes/{COPY}/trials").json()["trials"] == []
 
 
 def test_fy_trial_028_the_engine_and_the_model_cannot_be_deleted_while_a_trial_runs(lab):

@@ -5,6 +5,7 @@ export default {
   "advisor.title": "Setup health",
   "advisor.lead":
     "Settings and combinations that are broken, risky or useless, checked from this server's settings, its machines, models, keys and providers. Only admins see this. Warnings and notes can be snoozed for you alone; errors stay until they are fixed.",
+  "advisor.extensions": "Extensions loaded: {list}.",
   "advisor.checking": "Checking…",
   "advisor.nothing": "Nothing to look at.",
   "advisor.nothingShort": "Nothing to look at",

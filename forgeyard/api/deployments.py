@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import audit
+from forgeyard import audit, extensions
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_operator
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
@@ -431,7 +431,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
     with placement._lock:
         plan = scheduler.preview(db, ctx)
     if not plan["fits"] and not body.wait:
-        raise fail(409, "does_not_fit", plan["summary"], machines=plan["machines"], estimate=ctx.estimate.as_dict())
+        raise fail(409, scheduler.refusal_code(plan), plan["summary"], machines=plan["machines"], estimate=ctx.estimate.as_dict())
     spec = WorkloadSpec.model_validate({
         "name": name, "kind": "service", "runtime": {"type": "model", "recipe": recipe.name, "model": m.name},
         "ports": [{"name": "http"}],
@@ -699,8 +699,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
             raise fail(404, "recipe_not_found", f"No engine {body.recipe!r}.")
         if why := switch_problem(current, recipe, d.model):
             raise fail(422, *why)
-        if why := trials.switch_policy(db, d, recipe):
-            # 1.5.2 (#95, PR 4): the seam for a policy on trials (enterprise later); it allows every switch today.
+        if why := extensions.registry.switch_refused(db, d, recipe):
+            # 1.5.2 (#95, PR 4): the seam for a policy on trials; 1.6.1 (#190): an extension's (none: every switch).
             raise fail(409, *why)
     switched = recipe.name != d.recipe
     known = set(recipe.params) | set(COMMON_PARAMS)
@@ -758,7 +758,7 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     if body.dry_run:
         return out
     if running and (restart or replicas > len(w.replicas)) and not plan["fits"] and not body.wait:
-        raise fail(409, "does_not_fit", plan["summary"], machines=plan["machines"], estimate=ctx.estimate.as_dict())
+        raise fail(409, scheduler.refusal_code(plan), plan["summary"], machines=plan["machines"], estimate=ctx.estimate.as_dict())
     if not changes:
         return {**out, "deployment": deployment_out(db, d, caller)}
     nodes: set[int] = set()

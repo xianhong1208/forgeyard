@@ -1,13 +1,19 @@
-"""Run Alembic migrations from code (startup runs `upgrade head`)."""
+"""Run Alembic migrations from code (startup runs `upgrade heads`).
+
+1.6.1 (#190): an extension's migrations are a branch of their own in another directory (forgeyard/extensions.py:
+`reg.migrations(path)`); they join the version locations, and `heads` upgrades every branch. Without an extension
+there is one branch, and `heads` is `head`."""
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 
+from forgeyard import extensions
 from forgeyard.db import get_engine
 from forgeyard.security import crypto
 
@@ -16,7 +22,12 @@ log = logging.getLogger("forgeyard")
 
 def alembic_config() -> Config:
     cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).with_name("migrations")))
+    here = Path(__file__).with_name("migrations")
+    cfg.set_main_option("script_location", str(here))
+    if extensions.registry.migration_paths:
+        cfg.set_main_option("path_separator", "os")
+        cfg.set_main_option("version_locations", os.pathsep.join([str(here / "versions"),
+                                                                  *extensions.registry.migration_paths]))
     return cfg
 
 
@@ -24,7 +35,7 @@ def upgrade() -> None:
     cfg = alembic_config()
     with get_engine().begin() as connection:
         cfg.attributes["connection"] = connection
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "heads")
     if crypto.scrub_after_migration:
         scrub()
 

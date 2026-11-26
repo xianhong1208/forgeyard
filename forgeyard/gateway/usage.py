@@ -32,6 +32,7 @@ from typing import Callable, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from forgeyard import extensions
 from forgeyard.db import ApiKey, Provider, ProviderModel, UsageDaily, new_session
 from forgeyard.gateway import pricing
 
@@ -114,6 +115,14 @@ COUNTS = ("requests", "errors", "limited", "prompt_tokens", "completion_tokens",
 
 def day_of(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+
+
+def _written(slot: tuple, c: _Count) -> dict:
+    """One row's increment as an extension's usage observer gets it: where it was counted and what was added (cost in
+    pico-USD, as counted)."""
+    day, source, key_id, user_id, username, model, target = slot
+    return {"day": day, "source": source, "key_id": key_id, "user_id": user_id, "username": username, "model": model,
+            "target": target, "deployment_id": c.deployment_id, **{name: getattr(c, name) for name in COUNTS}}
 
 
 class Recorder:
@@ -221,6 +230,8 @@ class Recorder:
                     self._carry.update(carry)
                     today = day_of(self.clock())
                     self._carry = {k: v for k, v in self._carry.items() if k[0] >= today}
+                if extensions.registry.usage_observers:   # 1.6.1 (#190): what this write added, to an extension
+                    extensions.registry.usage_written([_written(slot, c) for slot, c in pending.items()])
             except Exception:
                 db.rollback()
                 with self._lock:  # keep the counts for the next try
