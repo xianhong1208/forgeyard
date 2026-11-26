@@ -1491,7 +1491,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.5.5`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.5.6`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**加入機器** 會說明怎麼建置。

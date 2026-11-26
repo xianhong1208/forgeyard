@@ -127,6 +127,13 @@ model card before you open such a deployment to others. No migration. Update the
 image with the machine page's command: with the 1.5.4 image, the CPU process engines of the built-in `llama-cpp` and
 `sd-cpp` recipes exit with code 127 ([release notes](CHANGELOG.md#155--2026-11-25)).
 
+1.5.6 makes machine and model pages clearer. The deploy page and a model's page say whether a machine has the
+engine's image now and, when not, how it comes and how big it is. A machine whose GPU the engine cannot use, such as
+an APU for faster-whisper, is judged on its CPU, and every machine command says where to run it. **Add a machine**
+gains a command for an NVIDIA machine that runs Windows with WSL2
+([how](docs/guide/how-to.md#add-a-windows-machine-wsl2)); it is not verified on real Windows hardware yet. No
+migration, and the agents need no update ([release notes](CHANGELOG.md#156--2026-11-26)).
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
@@ -158,7 +165,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.5
+  docker.io/tonyhuang1101/forgeyard:1.5.6
 sudo docker logs forgeyard
 ```
 
@@ -204,7 +211,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
 ```
 
 The join token works once, within 15 minutes. AMD, CPU-only and Windows machines:
