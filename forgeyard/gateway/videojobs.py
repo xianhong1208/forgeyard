@@ -348,7 +348,8 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
             code = min((c for c in why.values() if c), key=videogen.ORDER.index)
             raise videogen.refusal(route.served_name, code, ask, [g.films for g in groups])
         if why := extensions.registry.gateway_refused(caller, route):
-            raise GatewayError(*why)   # 1.6.1 (#190): an extension refuses it (a quota), before the rate limits
+            # 1.6.1 (#190): an extension refuses it (a quota), before the rate limits; 1.6.2: with its extra fields
+            raise GatewayError(*why[:3], extra=why[3])
         if caller.source == "api":
             verdict = key_limiter.admit(caller.key_id, caller.rpm, caller.tpm, None)
             if isinstance(verdict, Refusal):

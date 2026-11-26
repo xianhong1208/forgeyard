@@ -83,6 +83,9 @@ class Context:
     gpus: int
     machine_id: Optional[int]
     replicas: int = 1
+    # 1.6.2 (#190): the team it belongs to, or would (a deploy, an estimate, an edit that moves it): what an extension's
+    # machine filter and placement check see (forgeyard/extensions.py).
+    team_id: Optional[int] = None
 
     @property
     def amount(self) -> int:
@@ -157,7 +160,7 @@ def context_for(db: DbSession, dep: Deployment) -> Optional[Context]:
     params = dict(dep.params or {})
     spec = dep.workload.spec or {}
     return Context(dep, dep.model, recipe, params, est, est.device, params.get("share") or recipe.share,
-                   est.gpus, spec.get("machine_id"), int(spec.get("replicas") or 1))
+                   est.gpus, spec.get("machine_id"), int(spec.get("replicas") or 1), dep.team_id)
 
 
 def deployment_of(db: DbSession, workload_id: int) -> Optional[Deployment]:

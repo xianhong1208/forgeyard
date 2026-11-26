@@ -51,6 +51,7 @@ from typing import Callable, Optional, Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
+from forgeyard import extensions
 from forgeyard.db import Deployment, GatewayRoute, Replica, RouteTarget, Workload, as_utc, new_session, utcnow
 
 log = logging.getLogger("forgeyard.workloads")
@@ -493,7 +494,7 @@ class Autoscaler:
         ctx = context_for(db, d)
         if ctx is None:
             return "its recipe is gone"
-        if why := scheduler.refused(db, ctx):   # 1.6.1 (#190): an extension refuses more (a quota)
+        if why := scheduler.refused(db, ctx, extensions.Ask(adding=1)):   # 1.6.1 (#190): an extension refuses more
             return why[1]
         verdicts = scheduler.evaluate(db, ctx)
         siblings = {r.node_id for r in live if r.node_id is not None}

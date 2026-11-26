@@ -445,9 +445,10 @@ def evaluate(db: DbSession, ctx: Context, *, exclude: Optional[int] = None,
             for n in nodes]
 
 
-def refused(db: DbSession, ctx: Context) -> Optional[tuple[str, str]]:
-    """(code, text) when an extension refuses this placement whatever the machines (1.6.1, #190), else None."""
-    return extensions.registry.placement_refused(db, ctx)
+def refused(db: DbSession, ctx: Context, ask: extensions.Ask) -> Optional[tuple[str, str]]:
+    """(code, text) when an extension refuses this placement whatever the machines (1.6.1, #190), else None. `ask`
+    (1.6.2): what the placement adds (the table in forgeyard/extensions.py)."""
+    return extensions.registry.placement_refused(db, ctx, ask)
 
 
 def refusal_code(plan: dict) -> str:
@@ -496,7 +497,11 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
     """Where the deployment's replicas would go now, one after the other, without placing them.
     `release` and `prefer` (an edit, 1.3.1): the deployment's own replicas restart, so they hold
     nothing, and replica i goes back to machine prefer[i] when that machine still takes it."""
-    if why := refused(db, ctx):   # 1.6.1 (#190): an extension refuses it (a quota), whatever the machines
+    # 1.6.1 (#190): an extension refuses it (a quota), whatever the machines. 1.6.2: an edit's preview places the
+    # deployment's own replicas again (`release`): it adds only the replicas beyond them.
+    ask = extensions.Ask(adding=max(0, ctx.replicas - len(release)), release=frozenset(release),
+                         replacing=bool(release))
+    if why := refused(db, ctx, ask):
         return {"fits": False, "placed": [], "failed_replica": 0, "machines": [], "summary": why[1],
                 "refused": {"code": why[0], "message": why[1]}, "share_hint": None}
     extra: dict[int, dict[str, list[Hold]]] = {}
@@ -556,6 +561,7 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
     """Place one pending replica of a model deployment. Returns the machine id, or None (the
     reason is on the replica). Called with placement's lock held; does not commit. `credit`: the
     replica is restarting right now, and this is its machine and the memory it still uses there."""
+    from forgeyard.workloads import state as wstate
     from forgeyard.workloads.state import event
 
     dep = deployment_of(db, r.workload_id)
@@ -565,7 +571,10 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
         if reason != r.reason:
             r.reason, r.updated_at = reason, utcnow()
         return None
-    if why := refused(db, ctx):   # 1.6.1 (#190): an extension refuses it (a quota)
+    # 1.6.1 (#190): an extension refuses it (a quota). 1.6.2: a replica placed again (a rolling restart, a move) adds
+    # nothing to what the deployment holds, so a quota lets a running model keep serving.
+    replacing = wstate.replacing(r)
+    if why := refused(db, ctx, extensions.Ask(adding=0 if replacing else 1, replacing=replacing)):
         reach.note(r.id, None)
         reason = f"Cannot be placed: {why[1]}"[:400]
         if reason != r.reason:
@@ -603,6 +612,7 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
     r.reason = None if opt.node.status == "online" else f"waiting for {opt.node.name} to come online"
     r.updated_at = utcnow()
     placement.forget(r.id)
+    wstate.forget_replacing(r)
     why = placement_note(verdicts, opt, ctx.machine_id, siblings, before)
     reach.note(r.id, why)
     where = f" with GPU {', '.join(f'#{a.index}' for a in opt.cards)}" if opt.cards else " on the CPU"
@@ -675,7 +685,7 @@ def fetch_failed(db: DbSession, r: Replica, node: Node) -> bool:
     event(db, r.workload, "unplaced", f"Replica {r.ordinal}: {who}: {f.detail}; placing it on another machine.",
           r.ordinal)
     reach.note(r.id, None)
-    reset_replica(r, r.generation)
+    reset_replica(r, r.generation, replacing=True)
     r.reason = f"{who}; placing it on another machine"
     db.flush()
     return True

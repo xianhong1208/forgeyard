@@ -9,20 +9,25 @@ built for another version stops the start; a hook that raises allows (FY-EXT-*).
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from importlib.metadata import EntryPoint
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import inspect, text
 
 from forgeyard import __version__, extensions
-from forgeyard.db import get_engine
+from forgeyard.db import get_engine, new_session, utcnow
 from forgeyard.gateway.usage import recorder
+from forgeyard.machines.hub import hub
+from forgeyard.workloads import placement
 from tests.conftest import SETUP_TOKEN, OWNER, make_client
 from tests.fixtures import ext_sample
 from tests.gateway_helpers import api_client, new_key
 from tests.test_autoscale import Run, auto, no_background_scaler  # noqa: F401  (the fixture)
-from tests.test_deploy_edit import CPU_BODY, cpu_row, rows, set_replica
+from tests.test_deploy_edit import CPU_BODY, cpu_row, ready, rows, set_replica, sweep
 from tests.test_gateway import chat, err, gw  # noqa: F401  (the fixture)
+from tests.test_placement_fetch import DNS, report, set_node
 from tests.test_scheduler import MODELS, deploy, seed_catalog
 from tests.test_video_generation import make, vid  # noqa: F401  (the fixture)
 from tests.test_wake import _api, sleepy
@@ -248,6 +253,7 @@ def test_fy_ext_009_a_refused_request_gets_its_status_and_code(sample, gw):  # n
     assert chat(gw.api).status_code == 200
     sample.REFUSE_KEYS.clear()
     assert chat(api).status_code == 200   # its one request this minute is still free
+    assert set(err(r)) == {"message", "type", "param", "code"}   # three elements: no extra fields
     recorder.flush()
     assert sum(r["requests"] for r in sample.OBSERVED) == 4
     assert sum(r["errors"] for r in sample.OBSERVED) == 2
@@ -277,3 +283,243 @@ def test_fy_ext_011_a_hook_that_raises_allows(sample, gw, caplog):  # noqa: F811
     text_ = "\n".join(caplog.messages)
     assert "Extension gateway check tests.fixtures.ext_sample.gateway_check failed; allowing" in text_
     assert "Extension placement check tests.fixtures.ext_sample.placement_check failed; allowing" in text_
+
+
+# ------------------------------------------------------------------ what a placement check is asked (1.6.2)
+@pytest.fixture()
+def teams(sample, cpus, monkeypatch):
+    """The two CPU machines, teams red and blue; agents are not told anything (no connection)."""
+    c, a, b = cpus
+    monkeypatch.setattr(hub, "poke", lambda node_id: False)
+    ids = {}
+    for name in ("red", "blue"):
+        r = c.post("/api/teams", json={"name": name, "title": name.title()})
+        assert r.status_code == 201, r.text
+        ids[name] = r.json()["team"]["id"]
+    return SimpleNamespace(c=c, a=a, b=b, red=ids["red"], blue=ids["blue"])
+
+
+def asked(served: str) -> list[dict]:
+    """What the sample's placement check was asked for that deployment, each distinct ask once, in order."""
+    out: list[dict] = []
+    for x in ext_sample.ASKED:
+        if x["served"] == served and x not in out:
+            out.append(x)
+    return out
+
+
+def ask(served: str, team_id, replicas: int, adding: int, release=(), replacing: bool = False) -> dict:
+    return {"served": served, "team_id": team_id, "replicas": replicas, "adding": adding, "release": list(release),
+            "replacing": replacing}
+
+
+def test_fy_ext_012_estimate_and_deploy_ask_with_the_team_and_what_they_add(teams):
+    """FY-EXT-012: the estimate and the deploy's preview are asked with the team the request names and every replica
+    as added; the machine filter sees the team too; each replica placed after the deploy is asked as one added. No
+    team, or a name no team has (the estimate does not refuse it, as before): no team."""
+    c = teams.c
+    r = c.post("/api/deployments/estimate", json={"name": "chat", **CPU_BODY, "team": "red", "replicas": 2})
+    assert r.status_code == 200 and r.json()["placement"]["fits"] is True, r.text
+    assert asked("chat") == [ask("chat", teams.red, 2, 2)]
+    assert {f["team_id"] for f in ext_sample.FILTERED if f["served"] == "chat"} == {teams.red}
+    for team in (None, "nobody"):
+        ext_sample.ASKED.clear()
+        assert c.post("/api/deployments/estimate", json={"name": "chat", **CPU_BODY, "team": team}).status_code == 200
+        assert asked("chat") == [ask("chat", None, 1, 1)]
+    ext_sample.ASKED.clear()
+    ext_sample.FILTERED.clear()
+    deploy(c, "chat", **CPU_BODY, team="red", replicas=2)
+    assert asked("chat") == [ask("chat", teams.red, 2, 2), ask("chat", teams.red, 2, 1)]
+    assert sum(1 for x in ext_sample.ASKED if x["served"] == "chat") == 3   # the preview, then each replica
+    assert all(r.node_id is not None for r in rows("chat"))
+    assert {f["team_id"] for f in ext_sample.FILTERED if f["served"] == "chat"} == {teams.red}
+
+
+def test_fy_ext_013_an_edit_preview_asks_for_the_new_team_and_the_replicas_it_adds(teams):
+    """FY-EXT-013: an edit's preview releases the deployment's replicas and places them again: it adds only replicas
+    beyond them (1 → 2: one), none when the number stays or shrinks; the team is the one the edit moves it to (another
+    team, or none), else its own. A quota that refuses only added replicas refuses 1 → 2, not a change of settings."""
+    c = teams.c
+    d = deploy(c, "chat", **CPU_BODY, team="red")["deployment"]
+    rid = rows("chat")[0].id
+    path = f"/api/deployments/{d['id']}"
+    for change, expected in (
+            ({"team": "blue", "replicas": 2}, ask("chat", teams.blue, 2, 1, [rid], True)),
+            ({"params": {"context": 2048}}, ask("chat", teams.red, 1, 0, [rid], True)),
+            ({"team": None}, ask("chat", None, 1, 0, [rid], True)),
+            ({"team": "red", "replicas": 2}, ask("chat", teams.red, 2, 1, [rid], True))):
+        ext_sample.ASKED.clear()
+        r = c.patch(path, json={**change, "dry_run": True})
+        assert r.status_code == 200, r.text
+        assert asked("chat") == [expected], change
+    ext_sample.REFUSE_ADDING.add("chat")
+    r = c.patch(path, json={"replicas": 2})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "sample_quota", r.text
+    assert len(rows("chat")) == 1
+    assert c.patch(path, json={"params": {"context": 2048}, "team": "blue"}).status_code == 200
+
+
+def test_fy_ext_014_a_rolling_restart_is_asked_as_replacing_and_keeps_serving(teams):
+    """FY-EXT-014: a change that restarts the replicas of a running deployment at a quota that refuses added replicas:
+    the edit is allowed; the replica that had ended for good starts again at once and the healthy one restarts after
+    it (the rolling restart); each is asked as replacing (adds nothing), with the deployment's team, and is placed."""
+    c = teams.c
+    d = deploy(c, "chat", **CPU_BODY, team="red", replicas=2)["deployment"]
+    ready("chat", 0)
+    set_replica("chat", 1, state="failed", final=True)
+    ext_sample.REFUSE_ADDING.add("chat")
+    ext_sample.ASKED.clear()
+    r = c.patch(f"/api/deployments/{d['id']}", json={"params": {"context": 2048}})
+    assert r.status_code == 200 and r.json()["restart"] == "rolling", r.text
+    ids = sorted(x.id for x in rows("chat"))
+    assert asked("chat") == [ask("chat", teams.red, 2, 0, ids, True), ask("chat", teams.red, 2, 0, (), True)]
+    one = rows("chat")[1]
+    assert one.generation == 2 and one.node_id is not None and one.reason is None
+    assert rows("chat")[0].generation == 1   # waits for the one before it
+    ready("chat", 1)
+    ext_sample.ASKED.clear()
+    sweep()
+    zero = rows("chat")[0]
+    assert zero.generation == 2 and zero.node_id is not None and zero.reason is None
+    assert asked("chat") == [ask("chat", teams.red, 2, 0, (), True)]
+
+
+def test_fy_ext_015_start_and_wake_are_asked_as_new_replicas(teams):
+    """FY-EXT-015: a person's Start and a request that wakes an asleep deployment start replicas: each is asked as
+    one added (not replacing), with the deployment's team; a quota that refuses added replicas refuses them."""
+    c = teams.c
+    d = deploy(c, "chat", **CPU_BODY, team="red")["deployment"]
+    assert c.post(f"/api/deployments/{d['id']}/stop").status_code == 200
+    set_replica("chat", 0, state="stopped")
+    ext_sample.ASKED.clear()
+    assert c.post(f"/api/deployments/{d['id']}/start").status_code == 200
+    assert asked("chat") == [ask("chat", teams.red, 1, 1)] and rows("chat")[0].node_id is not None
+    assert c.post(f"/api/deployments/{d['id']}/stop").status_code == 200
+    set_replica("chat", 0, state="stopped")
+    ext_sample.REFUSE_ADDING.add("chat")
+    assert c.post(f"/api/deployments/{d['id']}/start").status_code == 200
+    assert rows("chat")[0].node_id is None and "quota" in rows("chat")[0].reason
+    ext_sample.REFUSE_ADDING.clear()
+    sleepy(c, "nap", team="blue")
+    ext_sample.ASKED.clear()
+    ext_sample.REFUSE_ADDING.add("nap")
+    r = _api(c).post("/v1/chat/completions", json={"model": "nap", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 503 and err(r)["code"] == "cannot_wake", r.text
+    assert asked("nap") == [ask("nap", teams.blue, 1, 1)]
+
+
+def _offline(node_id: int) -> None:
+    from forgeyard.workloads import offline
+
+    offline.server_started(utcnow() - timedelta(days=3))
+    set_node(node_id, status="offline", last_heartbeat_at=utcnow() - timedelta(minutes=11))
+
+
+def test_fy_ext_016_replicas_placed_again_are_asked_as_replacing(teams):
+    """FY-EXT-016: a replica moved off a machine offline too long, one placed again after its download could not reach
+    the source, and one whose machine was removed are each asked as replacing (adding nothing), with the deployment's
+    team, so a quota that refuses added replicas lets them run elsewhere. Stopped and started again afterwards, a
+    replica is a new one again."""
+    from forgeyard.workloads import offline
+
+    c, a, b = teams.c, teams.a, teams.b
+    for name in ("moved", "fetched"):
+        deploy(c, name, **CPU_BODY, team="red")
+        assert rows(name)[0].node_id == b   # binpack
+    ext_sample.REFUSE_ADDING.update({"moved", "fetched", "removed"})
+    ext_sample.ASKED.clear()
+    assert report(b, rows("fetched")[0], "backoff", DNS) is True
+    assert rows("fetched")[0].node_id == a
+    assert asked("fetched") == [ask("fetched", teams.red, 1, 0, (), True)]
+    try:
+        _offline(b)
+        db = new_session()
+        try:
+            assert offline.move_off(db) == ["moved"]
+            placement.place_pending(db)
+        finally:
+            db.close()
+    finally:
+        offline.server_started()
+    assert rows("moved")[0].node_id == a and asked("moved") == [ask("moved", teams.red, 1, 0, (), True)]
+    small = make_node("cpu-c", features=MODELS)
+    cpu_row(small, vram_free=10 * GIB)
+    ext_sample.REFUSE_ADDING.discard("removed")
+    deploy(c, "removed", **CPU_BODY, team="blue")
+    ext_sample.REFUSE_ADDING.add("removed")
+    assert rows("removed")[0].node_id == small
+    ext_sample.ASKED.clear()
+    assert c.delete(f"/api/machines/{small}").status_code == 200
+    assert rows("removed")[0].node_id == a and asked("removed") == [ask("removed", teams.blue, 1, 0, (), True)]
+    dep = next(x["id"] for x in c.get("/api/deployments").json()["deployments"] if x["name"] == "moved")
+    assert c.post(f"/api/deployments/{dep}/stop").status_code == 200
+    set_replica("moved", 0, state="stopped")
+    ext_sample.ASKED.clear()
+    assert c.post(f"/api/deployments/{dep}/start").status_code == 200
+    assert asked("moved") == [ask("moved", teams.red, 1, 1)] and rows("moved")[0].node_id is None
+
+
+def test_fy_ext_017_a_replica_out_of_ports_is_asked_as_replacing(sample, owner, monkeypatch):
+    """FY-EXT-017: a replica its agent could not give a port, taken off the machine because the count agrees, is
+    asked as replacing (adding nothing) when it is placed again; a quota that refuses added replicas does not refuse
+    it (it waits for a port, saying so)."""
+    from tests.test_placement_ports import GUARDED, LLAMA, ranged, set_range
+    from tests.test_placement_ports import report as port_report
+
+    monkeypatch.setattr(hub, "poke", lambda node_id: False)
+    seed_catalog()
+    nid = make_node("tunnel", features=GUARDED, runtime_info=ranged(33000, 33003))
+    r = owner.post("/api/teams", json={"name": "red", "title": "Red"})
+    red = r.json()["team"]["id"]
+    deploy(owner, "pair", **LLAMA, team="red", replicas=2)
+    assert all(x.node_id == nid for x in rows("pair"))
+    set_range(nid, 33000, 33001)
+    sample.REFUSE_ADDING.add("pair")
+    sample.ASKED.clear()
+    second = rows("pair")[1]
+    assert port_report(nid, second, "backoff", "no free host port left in 33000-33001; restarting in 2 s") is True
+    sweep()
+    assert asked("pair") == [ask("pair", red, 2, 0, (), True)]
+    left = rows("pair")[1]
+    assert left.node_id is None and "no free port" in left.reason and "quota" not in left.reason
+    # Stopped while it waits, then started: it starts as a new replica (the quota refuses it now).
+    dep = next(x["id"] for x in owner.get("/api/deployments").json()["deployments"] if x["name"] == "pair")
+    assert owner.post(f"/api/deployments/{dep}/stop").status_code == 200
+    set_replica("pair", 0, state="stopped")
+    sample.ASKED.clear()
+    assert owner.post(f"/api/deployments/{dep}/start").status_code == 200
+    assert asked("pair") == [ask("pair", red, 2, 1)]
+    assert all(x.node_id is None and "quota" in x.reason for x in rows("pair"))
+
+
+def test_fy_ext_018_autoscale_asks_for_one_more_replica(sample, cpus, monkeypatch):
+    """FY-EXT-018: the autoscaler's room check is asked for one added replica, with the deployment's team."""
+    c, a, b = cpus
+    run = Run(monkeypatch)
+    d = auto(c)
+    assert c.post("/api/teams", json={"name": "red", "title": "Red"}).status_code == 201
+    red = c.get("/api/teams").json()["teams"][0]["id"]
+    assert c.patch(f"/api/deployments/{d['id']}", json={"team": "red"}).status_code == 200
+    sample.REFUSE_ADDING.add("chat")
+    sample.ASKED.clear()
+    run.load("chat", 2)
+    assert run.run(20) == ["Wants 2 replicas, room for 1: The sample extension's quota allows no more replicas of "
+                           "chat."]
+    assert asked("chat") == [ask("chat", red, 1, 1)]
+
+
+def test_fy_ext_019_a_gateway_refusal_carries_its_extra_fields(sample, gw, vid):  # noqa: F811
+    """FY-EXT-019: a gateway check that answers a 4th element (a dict) puts its fields into the error body next to the
+    four of every error, for chat and for video jobs; it cannot replace those four (code, message, type, param)."""
+    sample.EXTRA_FIELDS.update({"resets_at": "2026-12-01T00:00:00Z", "limit_tokens": 1000, "code": "other",
+                                "message": "other", "type": "other", "param": "other"})
+    blocked = new_key(gw.owner, "blocked")["key"]
+    sample.REFUSE_KEYS.update({"blocked", "laptop"})
+    r = chat(api_client(gw.owner, blocked))
+    assert r.status_code == 402, r.text
+    assert err(r) == {"message": "The sample extension's token quota for blocked is used up.",
+                      "type": "insufficient_quota", "param": None, "code": "sample_quota_exhausted",
+                      "resets_at": "2026-12-01T00:00:00Z", "limit_tokens": 1000}
+    r = make(vid.api)
+    assert r.status_code == 402 and err(r)["code"] == "sample_quota_exhausted", r.text
+    assert err(r)["resets_at"] == "2026-12-01T00:00:00Z" and err(r)["limit_tokens"] == 1000
