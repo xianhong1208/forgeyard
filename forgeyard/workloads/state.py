@@ -255,7 +255,31 @@ def is_ready(r: Replica) -> bool:
 
 
 # ------------------------------------------------------------------ changes from people
-def reset_replica(r: Replica, generation: int) -> None:
+# 1.6.2 (#190): replicas taken off their machine to be placed again (an edit's rolling restart, an offline move, a
+# failed download, no free port, the machine removed), by uid (never reused): an extension's placement check is told
+# that such a placement adds nothing (forgeyard/extensions.py). Kept in memory, like placement's "where it ran before":
+# after a server restart a replica still waiting is asked as a new one.
+_replacing: set[str] = set()
+
+
+def replacing(r: Replica) -> bool:
+    """Whether the replica waits to be placed again (True) or to start (False)."""
+    return r.uid in _replacing
+
+
+def forget_replacing(r: Replica) -> None:
+    _replacing.discard(r.uid)
+
+
+def reset_replica(r: Replica, generation: int, *, replacing: bool = False) -> None:
+    """Take the replica off its machine, to be placed afresh. `replacing` (1.6.2): it is placed again while its
+    deployment keeps running (see _replacing); False (a start, a wake) clears that."""
+    if replacing:
+        if len(_replacing) > 10_000:
+            _replacing.clear()
+        _replacing.add(r.uid)
+    else:
+        _replacing.discard(r.uid)
     r.generation = generation
     r.node_id = None
     r.gpus = []
@@ -307,7 +331,7 @@ def unplace_node(db: DbSession, node_id: int, why: str) -> list[Workload]:
         if r.final:
             continue
         w = r.workload
-        reset_replica(r, r.generation)
+        reset_replica(r, r.generation, replacing=w.desired_state == "running")
         if w.desired_state != "running":
             r.state = "stopped"
         r.reason = why

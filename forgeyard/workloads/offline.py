@@ -178,10 +178,10 @@ def move_off(db: DbSession, now: Optional[datetime] = None) -> list[str]:
                 log.info("Replica %s of %r moved off %r: offline for %s.", r.ordinal, w.name, node.name,
                          _minutes(gone))
                 placement.forget(r.id)  # never "back where it ran before": that machine is offline
-                reset_replica(r, r.generation)
                 # A new id: the machine, back, finds the old one missing from its work list and stops it. (With the
                 # same id, a later move back there could meet an engine still holding the old internal key.)
                 r.uid = uuid.uuid4().hex
+                reset_replica(r, r.generation, replacing=True)   # (after the new id: it is what is remembered)
                 r.reason = f"moved: {node.name} offline; being placed again"
                 moved.append(w.name)
         db.commit()  # (cheap when nothing changed; a stored estimate that changed is kept too)

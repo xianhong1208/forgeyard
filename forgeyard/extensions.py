@@ -16,7 +16,7 @@ and `register(reg)`, which calls the registration methods below. The server logs
 | `router(APIRouter)` | create_app, after the community routers | no route |
 | `migrations(path)` | migrate.upgrade(): the path joins Alembic's version locations; `upgrade heads` | `heads` = `head` |
 | `placement_filter(fn(db, ctx, nodes) -> nodes)` | scheduler.evaluate(): machines left out are refused with a reason | every machine |
-| `placement_check(fn(db, ctx) -> None or (code, text))` | scheduler.preview() (deploy, edit, trials, model pages), scheduler.place_replica() (start, wake, restart, move, new replicas), autoscale's room check | allowed |
+| `placement_check(fn(db, ctx, ask) -> None or (code, text))` | scheduler.preview() (deploy, edit, trials, model pages), scheduler.place_replica() (start, wake, restart, move, new replicas), autoscale's room check | allowed |
 | `gateway_check(fn(caller, route) -> None or (status, code, text))` | the gateway, before the key's rate limits and before routing (forward(), video jobs) | allowed |
 | `usage_observer(fn(rows))` | the usage recorder, after each write: the counts it added | — |
 | `findings(fn(advisor_ctx) -> findings)` | the setup advisor | none |
@@ -27,6 +27,25 @@ and `register(reg)`, which calls the registration methods below. The server logs
 A gateway check runs on the event loop for every request: it must answer from memory and never block (no database,
 no network). A hook that raises is logged and treated as allowing (a placement or request goes on): an extension's
 bug must not stop models from serving.
+
+**What a placement check is asked** (1.6.2, #190). `ctx` (forgeyard.models.catalog.Context) is the deployment as it
+would run: `ctx.team_id` is its team (the one a deploy or an estimate names; in an edit's preview the new team when
+the edit changes it), `ctx.replicas` how many replicas it would have, `ctx.deployment` the row (before it exists, an
+object with `served_name` only). `ask` (`Ask` below) is what this placement adds:
+
+| Call | `ask.adding` | `ask.release` | `ask.replacing` |
+|---|---|---|---|
+| preview of a deploy, an estimate, a trial, a model page | ctx.replicas | empty | False |
+| preview of an edit | ctx.replicas minus the replicas it releases (at least 0) | the deployment's replica ids | True |
+| place_replica, a new replica (deploy, start, wake, a replica an edit or autoscale added) | 1 | empty | False |
+| place_replica, a replica placed again (an edit's rolling restart, offline move, failed download, out of ports, its machine removed) | 0 | empty | True |
+| autoscale's room check for one more replica | 1 | empty | False |
+
+So "refuse when `ask.adding` > 0" never stops a running replica from serving: a replica placed again adds nothing.
+Which replicas are placed again is kept in memory (like the machine a restarted replica ran on): after a server
+restart, a replica still waiting to be placed again is asked as a new one.
+
+The machine filter gets the same `ctx` (with `team_id`).
 
 **GPU hours** (1.6.1) are read, not observed: the usage observer gets the request rows only. An extension that
 enforces GPU-hour quotas (at placement, through `placement_check`) reads this month's GPU time of a team with
@@ -49,6 +68,16 @@ log = logging.getLogger("forgeyard")
 
 GROUP = "forgeyard.extensions"
 COMMUNITY = "community"
+
+
+@dataclass(frozen=True)
+class Ask:
+    """What a placement check is asked (1.6.2, #190): how many replicas this placement adds to what the deployment
+    holds now, which of its replicas stop holding for it (an edit's preview), and whether existing replicas are placed
+    again rather than started. See the table in this module's docstring."""
+    adding: int
+    release: frozenset[int] = frozenset()
+    replacing: bool = False
 
 
 class ExtensionError(RuntimeError):
@@ -119,8 +148,8 @@ class Registry:
                 log.exception("Extension placement filter %s failed; every machine stays", _name(fn))
         return nodes
 
-    def placement_refused(self, db, ctx) -> Optional[tuple[str, str]]:
-        return self._first(self.placement_checks, "placement check", db, ctx)
+    def placement_refused(self, db, ctx, ask: Ask) -> Optional[tuple[str, str]]:
+        return self._first(self.placement_checks, "placement check", db, ctx, ask)
 
     def gateway_refused(self, caller, route) -> Optional[tuple[int, str, str]]:
         if not self.gateway_checks:

@@ -195,7 +195,10 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
         raise fail(422, "cannot_estimate", str(e)) from None
     if body.machine_id is not None and db.get(Node, body.machine_id) is None:
         raise fail(404, "machine_not_found", "No such machine.")
-    ctx = Context(None, m, recipe, params, est, device, params["share"], params["gpus"], body.machine_id, body.replicas)
+    # 1.6.2 (#190): the team it names, for an extension's placement check (an unknown name: create answers 404 itself).
+    team = tm.by_name(db, body.team) if body.team and body.team.strip() else None
+    ctx = Context(None, m, recipe, params, est, device, params["share"], params["gpus"], body.machine_id, body.replicas,
+                  team.id if team else None)
     return ctx, recipe, m
 
 
@@ -764,6 +767,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     ctx, _, m = build_context(db, DeploymentIn(name=d.name, model=d.model.name, recipe=recipe.name, params=params,
                                                replicas=replicas, machine_id=machine_id))
     ctx.deployment = d
+    # 1.6.2 (#190): the preview asks for the team it would belong to: the new one when the edit moves it.
+    ctx.team_id = (new_team.id if new_team else None) if team_changed else d.team_id
     auto = autoscale.setting(ctx.params)
     if auto.on:
         # 1.5.0 (#37): the autoscaler sets the number; a change keeps the current one within the new bounds.
@@ -832,7 +837,7 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
         for r in w.replicas:
             if r.final:  # ended for good: nothing to wait for, it starts again on the new settings now
                 placement.remember(r)
-                wstate.reset_replica(r, w.generation)
+                wstate.reset_replica(r, w.generation, replacing=True)   # (a replica it has: 1.6.2's placement ask)
     ordered = sorted(w.replicas, key=lambda r: r.ordinal)
     for r in ordered[replicas:]:
         if r.node_id is not None and not r.final:

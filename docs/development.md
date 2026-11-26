@@ -87,6 +87,14 @@ names the one Forgeyard version it was built for, and the server refuses to star
   object by `tests/test_extensions.py` (FY-EXT-*): a route, a migration, a refused placement and a refused gateway
   request, a finding. Keep it working when a hook's call site moves: it is how public CI notices a broken hook.
   `web/src/pages/Extensions.test.tsx` fills the console's slots the same way.
+- **What a placement check is asked** (1.6.2): `fn(db, ctx, ask)`. `ctx.team_id` is the deployment's team: the one
+  a deploy or an estimate names, and in an edit's preview the new team when the edit moves it. `ask.adding` is how many
+  replicas the placement adds to what the deployment holds now: every replica for a deploy or an estimate, the
+  replicas beyond the ones it releases for an edit's preview (`ask.release`, their ids), 1 for a replica started
+  (deploy, start, wake, scale-up), and 0 for a replica placed again (`ask.replacing`: an edit's rolling restart, an
+  offline move, a failed download, no free port, a removed machine). A quota that refuses only when `ask.adding` is
+  above 0 never stops a running model. The table is in `forgeyard/extensions.py`; FY-EXT-012 to FY-EXT-018 check it
+  at every call site.
 - **GPU hours** are read, not observed: an extension that enforces GPU-hour quotas calls
   `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)` from its placement check (this UTC month's `gpu_ms`, from
   the database, at most 5 seconds behind). The usage observer gets request rows only.

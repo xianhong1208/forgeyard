@@ -2,8 +2,10 @@
 public CI: tests/test_extensions.py loads it through a real entry point object and asserts what callers see.
 
 What it refuses is driven by the module's sets below, which the tests fill: a deployment whose served name is in
-REFUSE_PLACEMENT is refused (code `sample_quota`), machines named in HIDDEN are left out of placement, and a request
-with an API key named in REFUSE_KEYS gets 402 `sample_quota_exhausted`."""
+REFUSE_PLACEMENT is refused (code `sample_quota`), one in REFUSE_ADDING only when the placement adds replicas (as a
+quota would: running replicas placed again keep serving), machines named in HIDDEN are left out of placement, and a
+request with an API key named in REFUSE_KEYS gets 402 `sample_quota_exhausted`. ASKED and FILTERED record what the
+placement check and the machine filter were given (1.6.2)."""
 
 from __future__ import annotations
 
@@ -15,10 +17,13 @@ from forgeyard import __version__
 from forgeyard.advisor import Finding
 
 REFUSE_PLACEMENT: set[str] = set()
+REFUSE_ADDING: set[str] = set()
 HIDDEN: set[str] = set()
 REFUSE_KEYS: set[str] = set()
 RAISE: set[str] = set()            # hooks that raise, to check that a broken extension does not stop serving
 OBSERVED: list[dict] = []          # what the usage observer was given
+ASKED: list[dict] = []             # what each placement check was asked: the deployment's team and the Ask
+FILTERED: list[dict] = []          # what the machine filter was given
 
 router = APIRouter(prefix="/api/ext/sample", tags=["sample extension"])
 
@@ -32,15 +37,18 @@ def _served(ctx) -> str:
     return getattr(ctx.deployment, "served_name", "") or ""
 
 
-def placement_check(db, ctx):
+def placement_check(db, ctx, ask):
+    ASKED.append({"served": _served(ctx), "team_id": ctx.team_id, "replicas": ctx.replicas, "adding": ask.adding,
+                  "release": sorted(ask.release), "replacing": ask.replacing})
     if "placement_check" in RAISE:
         raise RuntimeError("sample placement check is broken")
-    if _served(ctx) in REFUSE_PLACEMENT:
+    if _served(ctx) in REFUSE_PLACEMENT or (_served(ctx) in REFUSE_ADDING and ask.adding > 0):
         return "sample_quota", f"The sample extension's quota allows no more replicas of {_served(ctx)}."
     return None
 
 
 def placement_filter(db, ctx, nodes):
+    FILTERED.append({"served": _served(ctx), "team_id": ctx.team_id})
     return [n for n in nodes if n.name not in HIDDEN]
 
 
@@ -92,6 +100,7 @@ def extension() -> SampleExtension:
 
 
 def reset() -> None:
-    for s in (REFUSE_PLACEMENT, HIDDEN, REFUSE_KEYS, RAISE):
+    for s in (REFUSE_PLACEMENT, REFUSE_ADDING, HIDDEN, REFUSE_KEYS, RAISE):
         s.clear()
-    OBSERVED.clear()
+    for x in (OBSERVED, ASKED, FILTERED):
+        x.clear()

@@ -251,7 +251,7 @@ def out_of_ports(db: DbSession, r: Replica, node: Node) -> bool:
     if problem is None:
         return False
     event(db, r.workload, "unplaced", f"Replica {r.ordinal}: {node.name} has {problem}; placing it again.", r.ordinal)
-    reset_replica(r, r.generation)
+    reset_replica(r, r.generation, replacing=True)
     db.flush()
     return True
 
@@ -457,11 +457,11 @@ def roll(db: DbSession) -> tuple[dict[int, tuple[int, dict[str, int]]], set[int]
             credits[r.id] = (node_id, usage(db, node_id, release={r.id}).credit)
             changed.add(node_id)
         remember(r)
-        reset_replica(r, w.generation)
         # A new id, so the agent sees a new replica: it stops the old one and starts this one with its
         # new internal key. With the same id and a new generation, an agent (1.3.0) takes the new key,
         # then drops it when it removes the old generation, and the new one waits for a key forever.
         r.uid = uuid.uuid4().hex
+        reset_replica(r, w.generation, replacing=True)   # (after the new id: it is what is remembered)
         left = len(old) - 1
         event(db, w, "restarting", f"Replica {r.ordinal} restarts with the new settings"
                                    + (f"; {left} more after it, one at a time." if left else "."), r.ordinal)

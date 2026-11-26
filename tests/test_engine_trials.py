@@ -724,7 +724,7 @@ def test_fy_trial_036_an_extension_refusing_the_placement_refuses_the_trial(lab)
     from forgeyard import extensions
 
     c, node = lab
-    extensions.registry.placement_check(lambda db, ctx: ("sample_quota", "No more replicas for this team."))
+    extensions.registry.placement_check(lambda db, ctx, ask: ("sample_quota", "No more replicas for this team."))
     r = start(c, node, status=409)
     assert r["detail"]["code"] == "sample_quota" and r["detail"]["message"] == "No more replicas for this team."
     assert c.get(f"/api/recipes/{COPY}/trials").json()["trials"] == []

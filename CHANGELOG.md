@@ -6,6 +6,19 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **What an extension's placement check is asked** (#190; the internal extension interface, so an extension built
+  for 1.6.1 must be rebuilt). The check is now `fn(db, ctx, ask)`: `ctx.team_id` is the deployment's team (the one a
+  deploy or an estimate names, and the new one in an edit's preview when the edit moves it; the machine filter gets it
+  too), and `ask` says what the placement adds: `adding` (every replica for a deploy or an estimate, the replicas
+  beyond the ones an edit releases, 1 for a replica started, 0 for one placed again), `release` (the replica ids an
+  edit's preview releases) and `replacing` (an edit's rolling restart, an offline move, a failed download, no free
+  port, a removed machine). Before, an estimate and a deploy's preview had no team, an edit's preview had the old
+  team, and a replica placed again looked like a new one, so a quota at its limit would have stopped a running model
+  on its next rolling restart. Without an extension nothing changes. See
+  [docs/development.md](docs/development.md#extensions).
+
 ### Added
 
 - **An extension interface** (#190), internal and versioned to the exact release, for a separately distributed
