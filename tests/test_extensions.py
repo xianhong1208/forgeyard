@@ -30,8 +30,8 @@ from tests.workload_helpers import make_node
 
 GIB = 1024**3
 SAMPLE = EntryPoint("sample", "tests.fixtures.ext_sample:extension", extensions.GROUP)
-COMMUNITY_HEAD = "0021_single_sign_on"
-COMMUNITY_TABLE = "identity_providers"   # made by the community head
+COMMUNITY_HEAD = "0022_teams"
+COMMUNITY_TABLE = "teams"   # made by the community head
 
 
 @pytest.fixture()

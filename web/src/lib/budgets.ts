@@ -12,14 +12,18 @@ export type Budget = {
 };
 
 export type BudgetKey = Budget & {
-  id: string; name: string; prefix: string; status: string; user: { id: number; username: string | null }; locked_by: string | null;
+  id: string; name: string; prefix: string; status: string; user: { id: number | null; username: string | null }; locked_by: string | null;
 };
 export type BudgetPerson = Budget & { id: number; username: string; status: string };
 export type BudgetProvider = Budget & { id: number; name: string; kind: string; enabled: boolean };
 
+export type BudgetTeam = Budget & { id: number; name: string; title: string };
+
 export type BudgetsResponse = {
   month: string; resets_at: string; is_admin: boolean; everyone: boolean;
   keys: BudgetKey[]; people: BudgetPerson[]; providers: BudgetProvider[];
+  // 1.6.1 (#190): the teams you manage (admins with ?everyone=true: every team).
+  teams?: BudgetTeam[];
 };
 
 export const LEVEL_LABEL: Record<BudgetLevel, string> = labels({ ok: "cloud.level.ok", warning: "cloud.level.warning", exhausted: "cloud.level.exhausted" });

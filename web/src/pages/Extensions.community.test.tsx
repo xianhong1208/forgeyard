@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import { navItems, routes, setupHealthCards, usageTabs } from "../ext";
+import { navItems, routes, setupHealthCards, teamPageTabs, usageTabs } from "../ext";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 const REPORT = { findings: [], snoozed: [], counts: { error: 0, warning: 0, info: 0 }, badge: 0, snooze_days: 30,
@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe("community edition", () => {
   it("FY-WEB-1035 the slots are empty: the menu, Usage and Setup health ask nothing more and show nothing more", async () => {
-    expect([routes, navItems, usageTabs, setupHealthCards].map((l) => l.length)).toEqual([0, 0, 0, 0]);
+    expect([routes, navItems, usageTabs, setupHealthCards, teamPageTabs].map((l) => l.length)).toEqual([0, 0, 0, 0, 0]);
     const fetch = server();
     render(<MemoryRouter initialEntries={["/start"]}><AuthProvider><App /></AuthProvider></MemoryRouter>);
     const panel = await screen.findByRole("region", { name: "Setup health" });
@@ -40,7 +40,7 @@ describe("community edition", () => {
     expect(within(panel).queryByText(/Extensions loaded/)).toBeNull();
     const nav = screen.getByRole("navigation", { name: "Main" });
     expect(within(nav).getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual(
-      ["/machines", "/serving", "/models", "/cloud", "/playground", "/keys", "/usage", "/users", "/audit", "/start", "/guide", "/account"]);
+      ["/machines", "/serving", "/models", "/cloud", "/playground", "/keys", "/usage", "/teams", "/users", "/audit", "/start", "/guide", "/account"]);
     expect(fetch.mock.calls.some(([u]) => u === "/api/info")).toBe(false);
   });
 });

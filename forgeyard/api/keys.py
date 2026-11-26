@@ -17,6 +17,10 @@ And for a key's monthly cloud budget (`budget_micros`, micro-USD; forgeyard/gate
 owner may set or remove it; an admin's value on someone else's key is locked; null removes it (no
 budget) and unlocks it.
 
+Team keys (1.6.1, #190): a key made with `team` belongs to that team (fixed; its usage counts to the team). Its
+managers and admins make, change and revoke it, and it keeps working when the person who made it is disabled or
+deleted. Managers act on it as its owner would; an admin's value on it is locked for them.
+
 A key's `workloads` setting (1.3: which apps exposed at /x/<name> it could call) went with apps in 1.5.3 (#89).
 A request that still sends it with "none" (or null, or an empty list) is taken as before, without it; asking for
 any app access is refused with 422 apps_removed (forgeyard/removed.py).
@@ -32,11 +36,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import audit, removed
+from forgeyard import audit, removed, teams as tm
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
 from forgeyard.api.tls import trust_page
 from forgeyard.config import get_settings
-from forgeyard.db import ApiKey, Deployment, GatewayRoute, as_utc, get_db, utcnow
+from forgeyard.db import ApiKey, Deployment, GatewayRoute, Team, as_utc, get_db, utcnow
 from forgeyard.models import routes as mroutes
 from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
@@ -63,6 +67,8 @@ class KeyIn(BaseModel):
     # Removed in 1.5.3 (#89), with /x/: only "none" (or nothing) is still taken, and means nothing.
     workloads: Optional[str] = Field(default=None, max_length=16)
     workload_list: Optional[list[str]] = Field(default=None, max_length=MAX_MODELS)
+    # 1.6.1 (#190): a team key, for this team (its name); made by the team's managers and admins. None: your own key.
+    team: Optional[str] = Field(default=None, max_length=64)
 
 
 class KeyPatchIn(BaseModel):
@@ -141,6 +147,8 @@ def key_out(k: ApiKey, limits: dict, spend: Optional[gbudgets.Spend] = None, *, 
         "expires_at": k.expires_at, "created_at": k.created_at, "last_used_at": k.last_used_at,
         "revoked_at": k.revoked_at, "revoked_by": k.revoked_by, "status": key_status(k),
         "user": {"id": k.user_id, "username": k.user.username if k.user else None},
+        # 1.6.1 (#190): a team key's team (null: a personal key), and who made the key (null before 1.6.1).
+        "team": tm.brief(k.team) if k.team_id is not None else None, "created_by": k.created_by,
         "this_minute": {"requests": requests, "tokens": tokens},
         "budget_locked_by": k.budget_locked_by,
         "budget": budget_out(k.budget_micros, spend.spent.get(("key", k.id), 0), spend.held.get(("key", k.id), 0)),
@@ -162,10 +170,18 @@ def _models(db: DbSession, names: Optional[list[str]]) -> Optional[list[str]]:
 
 def _get(db: DbSession, key_id: str, caller: Caller) -> ApiKey:
     k = db.scalar(select(ApiKey).where(ApiKey.public_id == key_id).options(selectinload(ApiKey.user)))
-    # Someone else's key is "not found" for a non-admin: they cannot even learn that it exists.
-    if k is None or (k.user_id != caller.user.id and caller.user.role != "admin"):
+    # Someone else's key is "not found" for a non-admin: they cannot even learn that it exists. A team key is the
+    # team's managers' (1.6.1).
+    if k is None or not (caller.user.role == "admin" or _acts_as_owner(db, k, caller)):
         raise fail(404, "not_found", "No such API key.")
     return k
+
+
+def _acts_as_owner(db: DbSession, k: ApiKey, caller: Caller) -> bool:
+    """The caller's own key, or (1.6.1) a key of a team the caller manages as a manager."""
+    if k.team_id is not None:
+        return tm.role_in(db, caller.user, k.team_id) == "manager"
+    return k.user_id == caller.user.id
 
 
 def _check_own(caller: Caller, owner_id: int, limits: dict, rpm: Optional[int], tpm: Optional[int],
@@ -185,10 +201,13 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
               db: DbSession = Depends(get_db)):
     """Your keys; admins with ?all=true: everyone's."""
     admin = caller.user.role == "admin"
-    q = select(ApiKey).options(selectinload(ApiKey.user)).order_by(ApiKey.revoked_at.is_not(None),
-                                                                     ApiKey.created_at.desc(), ApiKey.id.desc())
+    q = select(ApiKey).options(selectinload(ApiKey.user), selectinload(ApiKey.team)).order_by(
+        ApiKey.revoked_at.is_not(None), ApiKey.created_at.desc(), ApiKey.id.desc())
+    managed = tm.managed_ids(db, caller.user)
     if not (all and admin):
-        q = q.where(ApiKey.user_id == caller.user.id)
+        # Your own keys, and (1.6.1) the keys of the teams you manage.
+        q = q.where(ApiKey.user_id == caller.user.id if not managed else
+                    (ApiKey.user_id == caller.user.id) | ApiKey.team_id.in_(managed))
     limits = gkeys.get_limits(db)
     rows = db.scalars(mroutes.query().order_by(GatewayRoute.served_name)).all()
     spend = gbudgets.ledger.snapshot()
@@ -200,6 +219,9 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
                                         spend.held.get(("person", me.id), 0)),
             "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
             "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows],
+            # 1.6.1 (#190): the teams you may make keys for (admins: every team; others: the ones they manage).
+            "teams": [tm.brief(t) for t in db.scalars(select(Team).where(Team.id.in_(managed)) if not admin
+                                                       else select(Team)).all()],
             **({"env_seeds": _env_seeds(db)} if admin else {})}
 
 
@@ -221,13 +243,28 @@ def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current),
     _check_own(caller, caller.user.id, limits, body.rpm, body.tpm, body.cloud, cloud_settings["max"])
     models = _models(db, body.models)
     cloud = body.cloud or cloud_settings["default"]
+    team = None
+    if body.team is not None:
+        # 1.6.1 (#190): a team key belongs to the team, not to the person making it.
+        team = tm.by_name(db, body.team)
+        if team is None or not (caller.user.role == "admin" or tm.role_in(db, caller.user, team.id) is not None):
+            raise fail(404, "team_not_found", "No such team.")
+        if not tm.manages(db, caller.user, team.id):
+            raise fail(403, "not_team_manager", "Only admins and the team's managers make its keys.")
     raw, prefix, digest = gkeys.new_key()
-    k = ApiKey(user_id=caller.user.id, name=body.name.strip(), prefix=prefix, hash=digest, models=models,
+    k = ApiKey(user_id=None if team else caller.user.id, team_id=team.id if team else None,
+               created_by=caller.user.username, name=body.name.strip(), prefix=prefix, hash=digest, models=models,
                rpm=body.rpm, tpm=body.tpm, cloud=cloud, budget_micros=body.budget_micros,
                expires_at=utcnow() + timedelta(days=body.expires_in_days) if body.expires_in_days else None)
+    if team is not None and caller.user.role == "admin" and tm.role_in(db, caller.user, team.id) != "manager":
+        # An admin's values on a team they do not manage are locked for its managers, as on someone else's key.
+        for name, col in LOCKS.items():
+            if getattr(body, name) is not None and name in body.model_fields_set:
+                setattr(k, col, caller.user.username)
     db.add(k)
     db.flush()
     audit.record(db, "api_key.created", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
+                 team=team.name if team else None,
                  prefix=prefix, models=models, rpm=body.rpm, tpm=body.tpm, cloud=cloud,
                  budget_micros=body.budget_micros, expires_at=k.expires_at.isoformat()
                  if k.expires_at else None)
@@ -241,7 +278,7 @@ def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current),
 @router.patch("/keys/{key_id}")
 def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     k = _get(db, key_id, caller)
-    own = k.user_id == caller.user.id
+    own = _acts_as_owner(db, k, caller)   # 1.6.1: a team's managers act on its keys as an owner would
     no_app_access(body)
     fields = body.model_fields_set - set(REMOVED_FIELDS)
     if not own and fields - set(LOCKS):
@@ -284,7 +321,8 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
         locked = [n for n, col in LOCKS.items() if after[col] and after[col] != before[col]]
         unlocked = [n for n, col in LOCKS.items() if before[col] and not after[col]]
         audit.record(db, "api_key.changed", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
-                     owner=k.user.username if k.user else None, changes=changed, locked=locked or None,
+                     owner=k.user.username if k.user else None, team=k.team.name if k.team else None,
+                     changes=changed, locked=locked or None,
                      unlocked=unlocked or None)
     db.commit()
     db.refresh(k)
@@ -299,7 +337,8 @@ def revoke_key(key_id: str, caller: Caller = Depends(current), db: DbSession = D
         k.revoked_at = utcnow()
         k.revoked_by = caller.user.username
         audit.record(db, "api_key.revoked", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
-                     prefix=k.prefix, owner=k.user.username if k.user else None)
+                     prefix=k.prefix, owner=k.user.username if k.user else None,
+                     team=k.team.name if k.team else None)
         db.commit()
     db.refresh(k)
     return {"api_key": key_out(k, gkeys.get_limits(db), cloud_cap=gkeys.get_cloud(db)["max"])}
@@ -339,29 +378,54 @@ def set_key_cloud(body: CloudIn, caller: Caller = Depends(require_admin), db: Db
 
 
 # ------------------------------------------------------------------ usage
+def _usage_team(db: DbSession, name: Optional[str], caller: Caller) -> Optional[Team]:
+    """1.6.1 (#190): ?team=<name>: that team's usage (its keys' requests), for admins and the team's managers."""
+    if name is None:
+        return None
+    team = tm.by_name(db, name)
+    role = tm.role_in(db, caller.user, team.id) if team is not None else None
+    if team is None or (role is None and caller.user.role != "admin"):
+        raise fail(404, "team_not_found", "No such team.")
+    if not tm.manages(db, caller.user, team.id):
+        raise fail(403, "not_team_manager", "Only admins and the team's managers see its usage.")
+    return team
+
+
+def _usage_teams(db: DbSession, caller: Caller) -> list[dict]:
+    """The teams whose usage the caller may see (admins: every team)."""
+    q = select(Team) if caller.user.role == "admin" else select(Team).where(Team.id.in_(tm.managed_ids(db, caller.user)))
+    return [tm.brief(t) for t in db.scalars(q.order_by(Team.title, Team.name)).all()]
+
+
 @router.get("/usage")
 def get_usage(days: int = Query(default=7, ge=1, le=366), group: str = Query(default="model"),
-              everyone: bool = Query(default=False), caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
-    """Your gateway usage (your keys and your playground); admins with ?everyone=true: all of it."""
+              everyone: bool = Query(default=False), team: Optional[str] = Query(default=None, max_length=64),
+              caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+    """Your gateway usage (your keys and your playground); admins with ?everyone=true: all of it; admins and a team's
+    managers with ?team=<name>: the team's (1.6.1)."""
     if group not in gusage.GROUPS:
         raise fail(422, "bad_group", f"group: one of {', '.join(gusage.GROUPS)}")
+    the_team = _usage_team(db, team, caller)
     gusage.recorder.flush()
     admin = caller.user.role == "admin"
-    scope_user = None if (everyone and admin) else caller.user.id
-    out = gusage.summary(db, days=days, user_id=scope_user, group_by=group)
-    out["everyone"] = scope_user is None
+    scope_user = None if (everyone and admin) or the_team is not None else caller.user.id
+    out = gusage.summary(db, days=days, user_id=scope_user, group_by=group,
+                         team_id=the_team.id if the_team is not None else None)
+    out["everyone"] = scope_user is None and the_team is None
     out["is_admin"] = admin
+    out["team"] = tm.brief(the_team)
+    out["teams"] = _usage_teams(db, caller)
     return out
 
 
 @router.get("/usage/series")
 def get_usage_series(step: str = Query(default="day"), periods: int = Query(default=30, ge=1),
                      split: str = Query(default="none"), metric: str = Query(default="requests"),
-                     everyone: bool = Query(default=False), caller: Caller = Depends(current),
-                     db: DbSession = Depends(get_db)):
+                     everyone: bool = Query(default=False), team: Optional[str] = Query(default=None, max_length=64),
+                     caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     """Usage over time for the Usage page's charts (1.4): one value per day, week or month, in total or
-    per key, model, provider or person. Whose usage follows GET /api/usage: your own, or everyone's
-    for admins with ?everyone=true."""
+    per key, model, provider, person or team (1.6.1). Whose usage follows GET /api/usage: your own, everyone's
+    for admins with ?everyone=true, or a team's with ?team=<name>."""
     if step not in gusage.STEPS:
         raise fail(422, "bad_step", f"step: one of {', '.join(gusage.STEPS)}")
     if split not in gusage.SPLITS:
@@ -370,12 +434,15 @@ def get_usage_series(step: str = Query(default="day"), periods: int = Query(defa
         raise fail(422, "bad_metric", f"metric: one of {', '.join(gusage.SERIES_METRICS)}")
     if periods > gusage.MAX_PERIODS[step]:
         raise fail(422, "too_many_periods", f"periods: at most {gusage.MAX_PERIODS[step]} for step={step}")
+    the_team = _usage_team(db, team, caller)
     gusage.recorder.flush()
     admin = caller.user.role == "admin"
-    scope_user = None if (everyone and admin) else caller.user.id
-    out = gusage.series(db, step=step, periods=periods, split=split, metric=metric, user_id=scope_user)
-    out["everyone"] = scope_user is None
+    scope_user = None if (everyone and admin) or the_team is not None else caller.user.id
+    out = gusage.series(db, step=step, periods=periods, split=split, metric=metric, user_id=scope_user,
+                        team_id=the_team.id if the_team is not None else None)
+    out["everyone"] = scope_user is None and the_team is None
     out["is_admin"] = admin
+    out["team"] = tm.brief(the_team)
     return out
 
 

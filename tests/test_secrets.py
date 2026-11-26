@@ -161,7 +161,8 @@ def test_fy_sec_004_migration_encrypts_plain_rows_and_the_downgrade_restores_the
     assert all(crypto.is_sealed(v) for s in specs for v in (s.get("env") or {}).values())
     db = new_session()
     try:
-        assert db.scalar(select(Deployment)).hf_token == "hf_written_by_1_0"
+        # Only the column read (the database is at 0018: deployments.team_id comes with 0022, 1.6.1).
+        assert db.scalar(select(Deployment.hf_token)) == "hf_written_by_1_0"
         assert db.scalar(select(Replica.secret).where(Replica.secret.is_not(None))) == plain["secret"]
         assert db.scalar(select(Workload).where(Workload.name == "web")).spec["env"]["API_TOKEN"] == "env-secret-456"
     finally:
@@ -172,7 +173,7 @@ def test_fy_sec_004_migration_encrypts_plain_rows_and_the_downgrade_restores_the
     db = new_session()
     try:
         with pytest.raises(crypto.SecretError, match="not encrypted"):
-            db.scalar(select(Deployment))
+            db.scalar(select(Deployment.hf_token))
     finally:
         db.close()
 

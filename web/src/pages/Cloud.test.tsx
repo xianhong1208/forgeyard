@@ -132,7 +132,7 @@ describe("navigation", () => {
     const view = mount("/models");
     const nav = await screen.findByRole("navigation", { name: "Main" });
     const top = () => within(nav).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent);
-    expect(top()).toEqual(["Machines", "Serving", "Models", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
+    expect(top()).toEqual(["Machines", "Serving", "Models", "Cloud", "Playground", "API keys", "Usage", "Teams", "Users", "Audit log"]);
     expect(within(nav).getByRole("link", { name: "Serving" }).getAttribute("href")).toBe("/serving");
     expect(within(nav).getByRole("link", { name: "Cloud" }).getAttribute("href")).toBe("/cloud");
     expect(within(nav).queryByRole("link", { name: /Providers|Apps|Workloads/ })).toBeNull();

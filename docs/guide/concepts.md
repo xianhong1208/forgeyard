@@ -608,6 +608,32 @@ The **owner** is the first account. It is always an admin and cannot be demoted,
 deleted, so nobody can lock administration out. New people get a one-time link to set their own
 password; self-registration is off unless `REGISTRATION=approval`.
 
+## Teams
+
+A **team** (1.6.1) is a group of people who share API keys, deployments and a monthly cloud budget. Teams are flat:
+no team inside another, and one install is one organisation. An install has no team until an admin makes one, and
+then nothing changes for keys, deployments or usage that have no team.
+
+| Team role | Can |
+|---|---|
+| `member` | see the team's page, its members and its deployments |
+| `manager` | what a member can; add people as members and remove members; make, change and revoke the team's API keys; see the team's usage; stop, start and change the team's deployments (not the engine, its extra arguments or the team) |
+
+A team role is a second layer next to the install-wide [role](#roles). Admins do everything for every team, and only
+admins make, rename and delete teams, choose managers and set a team's cloud budget. Admins and operators keep their
+rights on every deployment; an operator chooses a deployment's team when deploying or on its **Change** page.
+
+- **Team keys.** A key made for a team belongs to the team, not to the person who made it. It keeps working when
+  that person is disabled or deleted, and stops when it is revoked. Its team is fixed when it is made: to move a
+  key, make a new one.
+- **Usage.** A request counts to the team of the key that made it. Personal keys and the Playground count to no
+  team. **Usage** has a *Team* split (admins), and a team's managers see the team's usage.
+- **Budget.** A team's monthly cloud budget is reserved and alerted like the others ([Cost and
+  budgets](#cost-and-budgets)): a team key's cloud requests count to the key's budget and the team's, never to a
+  person's.
+- **Deleting a team** is refused while one of its keys still works (`409 team_has_keys`) or a deployment belongs to it
+  (`409 team_has_deployments`). Its revoked keys go with it; usage rows keep its id.
+
 ## Sign-in and sessions
 
 - Passwords have at least 12 characters, and common passwords are refused. Repeated failed sign-ins

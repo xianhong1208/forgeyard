@@ -600,7 +600,7 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
 | `X-Forgeyard-Voice` | 回應 | 文字轉語音：請求沒指定聲音、或指定了模型沒有的 OpenAI 聲音時，閘道所選的聲音；模型只有自己的一種聲音時為 `default` |
 | `X-Forgeyard-Dropped-Params` | 回應 | Forgeyard 在送往回答的供應商途中拿掉的請求參數（只有推論引擎才有的，例如 `top_k`、`chat_template_kwargs`；模型自己的拿掉清單），以逗號分隔。該供應商回錯誤時也會帶上。沒有拿掉任何參數時沒有這個標頭（[結構化輸出](cloud-providers.md#when-a-request-spills)永遠不會被拿掉：這種請求會略過那個供應商） |
-| `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
+| `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person`、`team`（1.6.1）或 `provider:<name>`。由其他目標成功回答時也會帶上 |
 | `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`、503 `local_busy`（1），以及原樣轉回的副本或供應商自己的 429 或 503 |
 
 ### 錯誤
@@ -666,7 +666,7 @@ LongCat-Image-Edit、FLUX.1 Kontext。模型頁面會標示模型能不能編輯
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
 | 401 | `revoked_api_key` | 金鑰已被撤銷 | 建立新金鑰 |
 | 401 | `expired_api_key` | 金鑰已過期 | 建立新金鑰 |
-| 401 | `account_disabled` | 金鑰的擁有者已停用或正在等待核准 | 詢問管理員 |
+| 401 | `account_disabled` | 金鑰的擁有者已停用或正在等待核准（團隊金鑰不會：它屬於團隊） | 詢問管理員 |
 | 402 | `budget_exhausted` | 每月預算讓請求無法送往任何能提供服務的供應商，本機也無法接手。`budget` 物件會說明是哪個預算、何時重置 | 等到月底、提高預算，或改用本機模型。不要重試 |
 | 402 | `budget_unpriced` | 有預算適用，但供應商的模型沒有價格，所以無法預留它的費用 | 由管理員設定它的價格 |
 | 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
@@ -978,6 +978,29 @@ docker run --rm -v forgeyard-data:/data tonyhuang1101/forgeyard:1.5.3 python -m 
 | `last` | 這台伺服器做的最後一個決定 `{at, text}`，或 `null` |
 
 每個決定都是部署的一個事件（kind `scaled`）：*Scaled up to N: …*、*Wants N replicas, room for M: …*（放不下期間只記一次）、*Draining replica N: …*、*Kept replica N: …*、*Removed replica N after draining for … s*、*Asleep with N replicas (its minimum)*。它們不記入稽核紀錄。負載樣本、排空和決定都記在伺服器的記憶體裡：重新啟動後時間窗重新開始，進行中的排空不會移除任何副本。
+
+## 透過 API 管理團隊
+
+團隊（1.6.1；[團隊](concepts.md#teams)）。團隊的 `name` 和使用者名稱的規則一樣（2 到 64 個字元：`a-z`、`0-9`、`.`、`_`、`-`）；`title` 是頁面上顯示的名稱。
+
+| 請求 | 誰可以 | 做什麼 |
+|---|---|---|
+| `GET /api/teams` | 所有人 | 管理員和操作員：所有團隊；其他人：自己所在的團隊。每個團隊有 `my_role`（`member`、`manager` 或 `null`）、`can_manage`、`members`、`managers`、可用的 `keys` 和 `deployments` 的數量，以及 `budget`（本月花費） |
+| `POST /api/teams` | 管理員 | `{"name", "title", "budget_micros"}`；201。`422 bad_team_name`、`409 team_name_taken` |
+| `GET /api/teams/{name}` | 管理員和成員 | 上面的內容加上 `member_list`、`deployment_list`，管理員和管理者另外有 `key_list`。不在團隊裡的人會得到 `404 not_found` |
+| `PATCH /api/teams/{name}` | 管理員 | `name`、`title`、`budget_micros`（每月的微美元；`null`：沒有預算）。沒送的欄位保留原值 |
+| `DELETE /api/teams/{name}` | 管理員 | 團隊還有可用的金鑰時回應 `409 team_has_keys`（帶 `keys`）；還有部署屬於它時回應 `409 team_has_deployments`（帶 `deployments`）。已撤銷和已過期的金鑰會一起刪除 |
+| `PUT /api/teams/{name}/members/{username}` | 管理員；管理者 | `{"role": "member"}` 或 `{"role": "manager"}`。管理者只能把人加入為成員，其他都會得到 `403 admins_only`。`404 no_such_user`；不是管理者的成員會得到 `403 not_team_manager` |
+| `DELETE /api/teams/{name}/members/{username}` | 管理員；管理者 | 管理者可以移除成員，不能移除管理者（`403 admins_only`）。`404 not_a_member` |
+
+其他地方：
+
+- `POST /api/keys` 加上 `"team": "<name>"` 會建立團隊金鑰（團隊的管理者和管理員；成員會得到 `403 not_team_manager`，團隊外的人會得到 `404 team_not_found`）。每個金鑰的回應都有 `team`（`{id, name, title}` 或 `null`）和 `created_by`；團隊金鑰的 `user` 是 `{"id": null, "username": null}`。`GET /api/keys` 也會列出你管理的團隊的金鑰，以及 `teams`：你可以為哪些團隊建立金鑰。
+- `POST /api/deployments` 和 `PATCH /api/deployments/{id}` 接受 `team`（名稱；變更時 `null` 表示不屬於任何團隊）；只有管理員和操作員能設定（`404 team_not_found`）。部署會回應 `team` 和 `can_manage`。不是操作員的團隊管理者可以停止、啟動和變更它，但不能改 `recipe`、`params.extra_args` 或 `team`（`403 operators_only`，帶 `fields`）；其他人會得到 `403 forbidden`。
+- `GET /api/usage` 和 `GET /api/usage/series` 接受 `team=<name>`（管理員和團隊的管理者；否則是 `403 not_team_manager` 或 `404 team_not_found`），以及 `group=team` / `split=team`。`GET /api/usage` 會回應 `team` 和 `teams`（你可以查看哪些團隊的用量）。
+- `GET /api/budgets` 會列出 `teams` 和它們的預算：你管理的團隊；管理員加上 `?everyone=true` 時是所有團隊。
+
+稽核動作：`team.created`、`team.changed`（帶 `changes`）、`team.deleted`、`team.member_added`、`team.member_changed`、`team.member_removed`。`api_key.created`、`api_key.changed`、`api_key.revoked`、`deployment.created` 和 `deployment.changed` 會寫出 `team`。團隊的預算警示 `scope` 是 `team`。
 
 ## 透過 API 查看機器的模型快取
 

@@ -8,7 +8,7 @@ import { bytes } from "./machines";
 import { usd } from "./prices";
 
 export type Step = "day" | "week" | "month";
-export type Split = "none" | "key" | "model" | "provider" | "user";
+export type Split = "none" | "key" | "model" | "provider" | "user" | "team";
 
 export type SeriesLine = { id: string; name: string; values: number[]; total: number; other?: boolean; cloud?: boolean };
 export type Period = { start: string; end: string; partial: boolean };
@@ -28,9 +28,9 @@ const view = (step: Step, periods: number) => ({
 export const VIEWS: { step: Step; label: string; periods: number; range: string }[] = [view("day", 30), view("week", 13), view("month", 12)];
 
 const SPLIT_LABEL = labels({ none: "usage.split.none", key: "usage.split.key", model: "usage.split.model", provider: "usage.split.provider",
-  user: "usage.split.user" });
+  user: "usage.split.user", team: "usage.split.team" });
 const split = (id: Split, admin?: boolean) => ({ id, ...(admin ? { admin } : {}), get label() { return SPLIT_LABEL[id]; } });
-export const SPLITS: { id: Split; label: string; admin?: boolean }[] = [split("none"), split("key"), split("model"), split("provider"), split("user", true)];
+export const SPLITS: { id: Split; label: string; admin?: boolean }[] = [split("none"), split("key"), split("model"), split("provider"), split("user", true), split("team", true)];
 
 // One step as a word in a sentence ("per day") and as a column heading ("Day").
 export const STEP_WORD: Record<Step, string> = labels({ day: "usage.step.day", week: "usage.step.week", month: "usage.step.month" });
@@ -247,9 +247,9 @@ export function isSeries(x: unknown): x is SeriesResponse {
 // The name of a row or line as the reader reads it (#189). The server names a few groups itself, in English
 // ("Console playground", "Other (3)", "deleted key #4"); in Chinese those get their translation, every other
 // name (models, keys, people, providers, days) stays as it is.
-const ROW_NAME: Record<string, [string, "usage.row.total" | "usage.row.console" | "usage.row.api" | "usage.row.local" | "usage.row.deleted"]> = {
+const ROW_NAME: Record<string, [string, "usage.row.total" | "usage.row.console" | "usage.row.api" | "usage.row.local" | "usage.row.deleted" | "usage.row.noTeam"]> = {
   total: ["Total", "usage.row.total"], console: ["Console playground", "usage.row.console"], api: ["API keys", "usage.row.api"],
-  local: ["Local replicas", "usage.row.local"], deleted: ["Deleted providers", "usage.row.deleted"],
+  local: ["Local replicas", "usage.row.local"], deleted: ["Deleted providers", "usage.row.deleted"], none: ["No team", "usage.row.noTeam"],
 };
 export function rowName(id: string, name: string, lang: Lang = getLang()): string {
   if (lang === "en") return name;
@@ -260,5 +260,9 @@ export function rowName(id: string, name: string, lang: Lang = getLang()): strin
   if ((m = /^deleted key #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedKey", { id: m[1] });
   if ((m = /^user #(\d+)$/.exec(name))) return translate(lang, "usage.row.user", { id: m[1] });
   if ((m = /^deleted provider model #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedModel", { id: m[1] });
+  // 1.6.1 (#190): teams the server names itself.
+  if ((m = /^deleted team #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedTeam", { id: m[1] });
+  if ((m = /^team key \(deleted team #(\d+)\)$/.exec(name))) return translate(lang, "usage.row.teamKeyDeleted", { id: m[1] });
+  if ((m = /^team key \((.+)\)$/.exec(name))) return translate(lang, "usage.row.teamKey", { name: m[1] });
   return name;
 }

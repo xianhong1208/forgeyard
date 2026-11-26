@@ -142,14 +142,15 @@ describe("Usage's charts", () => {
   it("FY-WEB-788 the views, splits, metrics and steps follow the language when read; CJK text is measured wider", () => {
     expect(VIEWS.map((v) => v.label)).toEqual(["Daily", "Weekly", "Monthly"]);
     expect(VIEWS[1].range).toBe("the last 13 weeks");
-    expect(SPLITS.map((s) => s.label)).toEqual(["Total", "Key", "Model", "Provider", "Person"]);
+    expect(SPLITS.map((s) => s.label)).toEqual(["Total", "Key", "Model", "Provider", "Person", "Team"]);
     expect(SPLITS.find((s) => s.id === "user")?.admin).toBe(true);
+    expect(SPLITS.find((s) => s.id === "team")?.admin).toBe(true);
     expect(METRICS.find((m) => m.id === "tokens")?.label).toBe("Tokens (in + out)");
     expect([STEP_WORD.week, STEP_HEAD.week]).toEqual(["week", "Week"]);
     setLang("zh-TW");
     expect(VIEWS.map((v) => v.label)).toEqual(["每日", "每週", "每月"]);
     expect(VIEWS[1].range).toBe("最近 13 週");
-    expect(SPLITS.map((s) => s.label)).toEqual(["總計", "金鑰", "模型", "供應商", "使用者"]);
+    expect(SPLITS.map((s) => s.label)).toEqual(["總計", "金鑰", "模型", "供應商", "使用者", "團隊"]);
     expect(METRICS.find((m) => m.id === "busy_ms")?.label).toBe("忙碌時間");
     expect([STEP_WORD.month, STEP_HEAD.day]).toEqual(["個月", "日期"]);
     expect(textUnits("Nov 12")).toBe(6);

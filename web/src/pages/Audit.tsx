@@ -33,6 +33,7 @@ const FILTERS: { value: string; label: Key }[] = [
   { value: "route.", label: "admin.audit.filter.route" },
   { value: "provider.", label: "admin.audit.filter.provider" },
   { value: "budget.", label: "admin.audit.filter.budget" },
+  { value: "team.", label: "admin.audit.filter.team" },
 ];
 
 // An event's action: English shows the code as recorded (admins search by it); another language names it

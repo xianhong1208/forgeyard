@@ -16,6 +16,8 @@ vi.mock("../ext", () => ({
     { to: "/licence", feature: "quotas", admin: true, label: () => "Licence" }],
   usageTabs: [{ id: "reports", feature: "reports", label: () => "Reports", render: () => createElement("p", null, "the reports tab") }],
   setupHealthCards: [{ id: "licence", feature: "quotas", render: () => createElement("p", null, "licence valid until 2027-11-26") }],
+  teamPageTabs: [{ id: "team-quotas", feature: "quotas", label: () => "Team quotas",
+    render: (team: { name: string }) => createElement("p", null, `the quotas of ${team.name}`) }],
 }));
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -24,13 +26,18 @@ const REPORT = { findings: [], snoozed: [], counts: { error: 0, warning: 0, info
   checked_at: "2026-11-26T00:00:00Z", extensions: [{ name: "sample", version: "0.1.0" }] };
 const CHECKLIST = { kind: "setup", steps: [], done: 0, total: 0, complete: true, hidden: false, gateway_url: "https://fy.lan:7860/v1", example: null };
 
+const TEAM = { id: 4, name: "ml", title: "Machine learning", created_by: "owner", created_at: "2026-11-26T08:00:00Z", my_role: null, can_manage: true,
+  members: 0, managers: 0, keys: 0, deployments: 0, budget: { budget_micros: null, spent_micros: 0, reserved_micros: 0, used: null, level: null },
+  member_list: [], key_list: [], deployment_list: [] };
+
 function server(features: string[], user: Record<string, unknown> = OWNER, audit: string[] = []) {
   const fetch = vi.fn(async (url: string) => {
     const body = url === "/api/auth/state" ? { needs_setup: false, registration: "off", user }
       : url === "/api/info" ? { version: "1.6.1", edition: "enterprise", features, audit_actions: audit }
         : url === "/api/advisor" ? REPORT
           : url === "/api/onboarding" ? CHECKLIST
-            : url.startsWith("/api/audit") ? { events: [], next_before: null } : null;
+            : url.startsWith("/api/audit") ? { events: [], next_before: null }
+              : url === "/api/teams/ml" ? { team: TEAM, month: "2026-11", resets_at: "2026-12-01T00:00:00Z" } : null;
     return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
   });
   vi.stubGlobal("fetch", fetch);
@@ -98,5 +105,17 @@ describe("extension slots", () => {
     const select = await screen.findByLabelText("Show");
     await waitFor(() => expect(within(select).getByRole("option", { name: "quota." })).toBeTruthy());
     expect(within(select).getAllByRole("option").filter((o) => o.getAttribute("value") === "user.")).toHaveLength(1);
+  });
+
+  it("FY-WEB-1045 a team page section of a listed feature comes after the community's, given the team; none without it", async () => {
+    server(["quotas"]);
+    mount("/teams/ml");
+    const section = await screen.findByRole("region", { name: "Team quotas" });
+    expect(within(section).getByText("the quotas of ml")).toBeTruthy();
+    cleanup();
+    server([]);
+    mount("/teams/ml");
+    expect(await screen.findByRole("heading", { name: "Machine learning" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Team quotas" })).toBeNull();
   });
 });

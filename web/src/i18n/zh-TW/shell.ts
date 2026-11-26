@@ -9,6 +9,7 @@ export default {
   "shell.nav.playground": "試用區",
   "shell.nav.keys": "API 金鑰",
   "shell.nav.usage": "用量",
+  "shell.nav.teams": "團隊",
   "shell.nav.users": "使用者",
   "shell.nav.audit": "稽核紀錄",
   "shell.nav.start": "開始使用",

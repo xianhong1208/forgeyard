@@ -10,7 +10,7 @@ import { ApiError, api, errorText } from "../lib/api";
 import { FIRST_ANSWER_DEFAULT, editBody, editForm, recipeDefaults, takesFirstAnswer, type EditForm } from "../lib/models";
 import { engineHref } from "../lib/pages";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentEngine, DeploymentResponse, EditOutage, EditResponse, Machine, MachineVerdict, MachinesResponse,
-  Recipe } from "../lib/types";
+  Recipe, TeamBrief, TeamsResponse } from "../lib/types";
 import { canAutoscale, scaleEditParams, scaleForm, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
 import { SleepSetting, WakeWaitField } from "../components/Sleep";
@@ -21,7 +21,7 @@ import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts
 // What a change shows next to each changed setting.
 const CHANGE_LABEL: Record<string, string> = labels({ recipe: "deploy.change.recipe", share: "deploy.change.share", gpus: "deploy.change.gpus", vram: "deploy.change.vram",
   extra_args: "deploy.change.extra_args", first_answer_timeout: "deploy.change.first_answer_timeout", replicas: "deployment.replicas",
-  machine_id: "deployment.col.machine", sleep_when_idle: "deployment.sleep.label", idle_minutes: "deploy.change.idle_minutes",
+  machine_id: "deployment.col.machine", team: "teams.field.label", sleep_when_idle: "deployment.sleep.label", idle_minutes: "deploy.change.idle_minutes",
   wake_wait: "deploy.change.wake_wait", autoscale: "deploy.change.autoscale", min_replicas: "deploy.change.min_replicas",
   max_replicas: "deploy.change.max_replicas", autoscale_target: "deploy.change.autoscale_target",
   scale_up_seconds: "deploy.change.scale_up_seconds", scale_down_minutes: "deploy.change.scale_down_minutes" });
@@ -35,17 +35,20 @@ export function DeploymentEditPage() {
   const { data: machines } = useApi<MachinesResponse>("/machines");
   const d = data?.deployment;
   const recipe = cat?.recipes.find((r) => r.name === d?.recipe);
-  if (user && user.role === "user") {
+  // 1.6.1 (#190): admins, operators and the managers of its team change it (the API says which).
+  const operator = !!user && user.role !== "user";
+  const { data: teamList } = useApi<TeamsResponse>(operator ? "/teams" : null);
+  if (d && d.can_manage === false) {
     return (<><PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.title")} /><Notice>{t("deploy.edit.notAllowed")}</Notice></>);
   }
   if (!d || !recipe || !cat) return <><PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.title")} /><p className="muted">{t("common.loading")}</p></>;
   return <EditView key={d.id} d={d} recipe={recipe} recipes={cat.recipes} model={cat.models.find((m) => m.id === d.model.id)}
-    machines={(machines?.machines ?? []).filter((m) => m.status !== "revoked")} />;
+    machines={(machines?.machines ?? []).filter((m) => m.status !== "revoked")} operator={operator} teams={teamList?.teams ?? []} />;
 }
 
 // The form starts from what the deployment runs with now, once (a reload does not undo edits).
-function EditView({ d, recipe: current, recipes, model, machines: usable }: {
-  d: Deployment; recipe: Recipe; recipes: Recipe[]; model: CatalogModel | undefined; machines: Machine[];
+function EditView({ d, recipe: current, recipes, model, machines: usable, operator, teams }: {
+  d: Deployment; recipe: Recipe; recipes: Recipe[]; model: CatalogModel | undefined; machines: Machine[]; operator: boolean; teams: TeamBrief[];
 }) {
   const t = useT();
   const navigate = useNavigate();
@@ -58,12 +61,14 @@ function EditView({ d, recipe: current, recipes, model, machines: usable }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; machines?: MachineVerdict[] } | null>(null);
   const [scale, setScale] = useState<ScaleForm>(() => scaleForm(d.params));   // 1.5.0: fixed or automatic replicas
+  const [team, setTeam] = useState(d.team?.name ?? "");   // 1.6.1: admins and operators only
 
   const body = editBody(f, recipe);
   if (engine !== d.recipe) body.recipe = engine;
   const auto = canAutoscale(recipe) && scale.mode === "auto";
   body.params = { ...(body.params as Record<string, unknown>), ...scaleEditParams(scale) };
   if (auto) delete body.replicas;   // the autoscaler sets the number; the bounds keep it within them
+  if (operator && team !== (d.team?.name ?? "")) body.team = team || null;
   const bodyKey = JSON.stringify(body);
 
   useEffect(() => {
@@ -118,7 +123,21 @@ function EditView({ d, recipe: current, recipes, model, machines: usable }: {
         lead={t("deploy.edit.lead", { model: d.model.name, recipe: d.recipe, served: d.served_name })} />
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label={t("deploy.edit.formLabel")}>
         <div>
-          <EngineChoice d={d} engine={engine} onChange={chooseEngine} />
+          {!operator && d.team && <Notice>{t("teams.managerNote", { name: d.team.title })}</Notice>}
+          {operator && <EngineChoice d={d} engine={engine} onChange={chooseEngine} />}
+          {operator && teams.length > 0 && (
+            <section className="panel">
+              <h2>{t("teams.field.label")}</h2>
+              <div className="grid-2">
+                <div className="field"><label htmlFor="e-team">{t("teams.field.label")}</label>
+                  <select id="e-team" value={team} onChange={(e) => setTeam(e.target.value)}>
+                    <option value="">{t("teams.field.none")}</option>
+                    {teams.map((x) => <option key={x.id} value={x.name}>{x.title}</option>)}
+                  </select>
+                  <p className="field-hint">{t("teams.field.editHint")}</p></div>
+              </div>
+            </section>
+          )}
           <section className="panel">
             <h2>{t("deploy.edit.sharing")}</h2>
             <div className="grid-3">
@@ -167,8 +186,10 @@ function EditView({ d, recipe: current, recipes, model, machines: usable }: {
                 <div className="field"><label htmlFor="e-vram">{t("deploy.vramOverride")}</label>
                   <input id="e-vram" value={f.vram} onChange={(e) => set("vram", e.target.value)} placeholder={t("deploy.theEstimate")} />
                   <p className="field-hint">{t("deploy.edit.vramHint")}</p></div>
-                <div className="field"><label htmlFor="e-extra">{t("deploy.change.extra_args")}</label>
-                  <textarea id="e-extra" className="mono" rows={3} value={f.extraArgs} onChange={(e) => set("extraArgs", e.target.value)} placeholder={t("deploy.onePerLine")} /></div>
+                {operator && (
+                  <div className="field"><label htmlFor="e-extra">{t("deploy.change.extra_args")}</label>
+                    <textarea id="e-extra" className="mono" rows={3} value={f.extraArgs} onChange={(e) => set("extraArgs", e.target.value)} placeholder={t("deploy.onePerLine")} /></div>
+                )}
                 {takesFirstAnswer(recipe) && (
                   <div className="field"><label htmlFor="e-first">{t("deploy.firstAnswer")}</label>
                     <input id="e-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
@@ -281,6 +302,7 @@ function changeValue(k: string, v: unknown, machines: { id: number; name: string
   const on = tNow("deploy.value.on");
   const off = tNow("deploy.value.off");
   if (k === "autoscale") return v === true ? on : off;
+  if (k === "team") return v ? String(v) : tNow("teams.field.none");
   if (v === null || v === undefined) return k === "machine_id" ? tNow("deploy.value.automatic") : k === "vram" ? tNow("deploy.theEstimate") : k === "sleep_when_idle" ? off : "—";
   if (k === "sleep_when_idle") return v === true ? on : off;
   if (k === "machine_id") return machines.find((m) => m.id === v)?.name ?? tNow("deployment.machineN", { id: String(v) });

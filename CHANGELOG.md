@@ -18,12 +18,37 @@ version until 1.0.
   extension's pages, menu links, Usage tabs and Setup health cards (`web/src/ext/index.ts`), each shown only while
   the server lists its feature. A sample extension in the tests uses every hook. See
   [docs/development.md](docs/development.md#extensions).
+- **Teams** (#190, community edition). Admins make teams on the new **Teams** page and choose their members and
+  managers; a team's managers add and remove members. A **team key** (made by the team's managers or an admin)
+  belongs to the team: its requests count to the team and its monthly cloud budget, and it keeps working when the
+  person who made it is disabled or deleted; it stops when it is revoked. A deployment may belong to a team, whose
+  managers then stop, start and change it (not its engine, its extra arguments or its team); admins and operators
+  keep their rights on every deployment. **Usage** gains a *Team* split and a team view for its managers; the budget
+  ledger a `team` scope (alerts at 80 % and 100 %); the audit log `team.*` actions. A team with working keys or with
+  deployments cannot be deleted. Without a team nothing changes. Guide:
+  [Share models with a team](docs/guide/how-to.md#share-models-with-a-team).
+
+### Migrations
+
+- `0022_teams`: tables `teams` and `team_members`; `api_keys.team_id` and `api_keys.created_by`, and
+  `api_keys.user_id` becomes nullable (on SQLite `api_keys` is rebuilt; nothing references it);
+  `deployments.team_id`; `usage_daily.team_id` (0 on every existing row) with an index on (team_id, day). No team
+  exists after the upgrade and no existing row changes meaning. Going down deletes the team keys.
 
 ### API changes
 
 - `GET /api/info` (signed in): `version`, `edition` (`community` without an extension), `features` and
   `audit_actions` (both empty without an extension).
 - `GET /api/advisor` gains `extensions`: the loaded extensions' names and versions (empty without one).
+- Teams: `GET`/`POST /api/teams`, `GET`/`PATCH`/`DELETE /api/teams/{name}`, `PUT`/`DELETE
+  /api/teams/{name}/members/{username}`. `POST /api/keys`, `POST /api/deployments` and `PATCH /api/deployments/{id}`
+  take `team`; keys answer `team` and `created_by` (a team key's `user.id` is `null`), deployments `team` and
+  `can_manage`. `POST /api/deployments/{id}/stop`, `/start` and `PATCH /api/deployments/{id}` are open to the
+  deployment's team managers (`403 operators_only` for the engine, `extra_args` and the team). `GET /api/usage` and
+  `/api/usage/series` take `team=` and `group=team` / `split=team`; `GET /api/budgets` lists `teams`;
+  `X-Forgeyard-Budget-Exhausted` may say `team`. New error codes: `bad_team_name`, `team_name_taken`, `team_not_found`,
+  `not_team_manager`, `admins_only`, `no_such_user`, `not_a_member`, `team_has_keys`, `team_has_deployments`,
+  `operators_only`. See [Teams through the API](docs/guide/reference.md#teams-through-the-api).
 - A preview that an extension refuses (`POST /api/deployments/estimate`, and the plans in deploy, edit and engine
   trial answers) has `fits: false` and `refused: {code, message}`; deploy, edit and trials then answer 409 with the
   extension's code instead of `does_not_fit`. Without an extension nothing changes.

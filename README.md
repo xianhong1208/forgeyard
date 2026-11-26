@@ -80,6 +80,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
   by e-mail; someone new waits for an admin's approval, or gets an account at once from allowed e-mail domains; an
   existing account is linked by its owner; one claim can set the role. The provider does its own two-factor sign-in.
   API keys keep working until an admin disables the account.
+- **Teams (1.6.1).** A team shares API keys, deployments and a monthly cloud budget. A team key belongs to the team:
+  its requests count to the team, and it keeps working when the person who made it leaves. The team's managers add
+  members, make its keys, see its usage and stop, start and change its deployments without being operators. Without
+  a team, keys and deployments work as before ([how](docs/guide/how-to.md#share-models-with-a-team)).
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging

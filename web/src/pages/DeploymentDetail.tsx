@@ -37,7 +37,10 @@ export function DeploymentDetailPage() {
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const d = data?.deployment;
-  const canManage = data?.can_manage ?? false;
+  // 1.6.1 (#190): stop, start and change: admins, operators and the managers of its team (the API says per deployment);
+  // delete and the replicas' output stay with admins and operators.
+  const operator = data?.can_manage ?? false;
+  const canManage = d?.can_manage ?? operator;
 
   const act = async (what: "stop" | "start" | "delete") => {
     if (!d) return;
@@ -91,7 +94,7 @@ export function DeploymentDetailPage() {
             ) : (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> {t("deployment.start")}</button>
             )}
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void act("delete")}><IconTrash size={16} aria-hidden="true" /> {t("deployment.delete")}</button>
+            {operator && <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void act("delete")}><IconTrash size={16} aria-hidden="true" /> {t("deployment.delete")}</button>}
           </>
         )}
       />
@@ -128,6 +131,7 @@ export function DeploymentDetailPage() {
               : <span className="muted">{t("deployment.machineAuto")}</span>}</span>
             {d.estimate.device === "gpu" && <span className="small">{d.params.share === "vram" ? t("deployment.sharesVram") : <span className="muted">{t("deployment.exclusiveGpu")}</span>}</span>}
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
+            {d.team && <Link to={`/teams/${d.team.name}`} className="chip chip-tone-run" title={t("teams.chipTitle", { name: d.team.title })}>{t("teams.chip", { name: d.team.title })}</Link>}
           </div>
           <Gateway d={d} />
           <WhenNotInUse d={d} canManage={canManage} />
@@ -173,7 +177,7 @@ export function DeploymentDetailPage() {
             <TryIt d={d} />
           </div>
           {d.routing && <Fallback key={d.routing.id} routing={d.routing} reload={reload} />}
-          {canManage && <Output w={w} />}
+          {operator && <Output w={w} />}
           <section className="panel" aria-labelledby="events-title">
             <h2 id="events-title">{t("deployment.events")}</h2>
             <ol className="events">

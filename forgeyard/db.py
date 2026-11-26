@@ -65,6 +65,41 @@ class User(Base):
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
+class Team(Base):
+    """A group of people who share API keys, deployments and a cloud budget (1.6.1, #190). Flat: no team inside
+    another, and no organisation above them (one install is one organisation). An install has none until an admin
+    makes one, and a key, deployment or usage row without a team works exactly as before."""
+
+    __tablename__ = "teams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # like a username: [a-z0-9._-]
+    title: Mapped[str] = mapped_column(String(128))                         # shown; admins change it
+    # What the team's keys may cost at cloud providers per UTC calendar month, micro-USD (the ledger's scope
+    # "team", forgeyard/gateway/budgets.py). NULL: no budget. Only admins set it.
+    budget_micros: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TeamMember(Base):
+    """A person in a team, as a member or a manager (who adds and removes members, makes the team's keys and stops,
+    starts and changes its deployments). A person may be in several teams."""
+
+    __tablename__ = "team_members"
+    __table_args__ = (UniqueConstraint("team_id", "user_id", name="uq_team_members_team_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="member")          # member | manager
+    added_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    team: Mapped[Team] = relationship()
+    user: Mapped["User"] = relationship()
+
+
 class Session(Base):
     """A signed-in browser. The cookie carries a random token; only its SHA-256 is stored."""
 
@@ -449,9 +484,14 @@ class Deployment(Base):
     hf_token: Mapped[Optional[str]] = mapped_column(EncryptedText("deployments.hf_token"), nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 1.6.1 (#190): the team it belongs to: that team's managers may stop, start and change it (admins and operators
+    # manage every deployment, as before). NULL: no team (every deployment from before 1.6.1).
+    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"), index=True,
+                                                   nullable=True)
 
     model: Mapped[CatalogModel] = relationship()
     workload: Mapped[Workload] = relationship()
+    team: Mapped[Optional[Team]] = relationship()
 
 
 class GatewayRoute(Base):
@@ -580,7 +620,17 @@ class ApiKey(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # What the UI and the API use to refer to a key; never the key or its hash.
     public_id: Mapped[str] = mapped_column(String(36), unique=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # The person a personal key belongs to (deleted with them). NULL for a team key (1.6.1, #190): it belongs to its
+    # team, and keeps working when the person who made it is disabled or deleted.
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True,
+                                                   nullable=True)
+    # 1.6.1: the team a team key belongs to, fixed when it is made (its usage counts to that team). NULL: a personal
+    # key (every key from before 1.6.1). The database refuses to delete a team a key points at (NO ACTION, as
+    # RESTRICT; see migration 0022); the API answers 409 team_has_keys while one still works.
+    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"), index=True,
+                                                   nullable=True)
+    # 1.6.1: who made it (username); NULL on keys from before 1.6.1.
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     name: Mapped[str] = mapped_column(String(64))
     prefix: Mapped[str] = mapped_column(String(16))                       # "fyk_" + 8 characters
     hash: Mapped[str] = mapped_column(String(64), unique=True)            # sha256(key) hex
@@ -606,7 +656,8 @@ class ApiKey(Base):
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
-    user: Mapped[User] = relationship()
+    user: Mapped[Optional[User]] = relationship()
+    team: Mapped[Optional[Team]] = relationship()
 
 
 class UsageDaily(Base):
@@ -660,11 +711,15 @@ class UsageDaily(Base):
     latency_ms_sum: Mapped[int] = mapped_column(BigInteger, default=0)
     # Request counts per latency bucket (forgeyard/gateway/usage.py: BUCKETS_MS), for p50 / p95.
     latency_buckets: Mapped[list] = mapped_column(JSON, default=list)
+    # 1.6.1 (#190): the team of the key that made the requests (a key's team is fixed, so the key already decides the
+    # row); 0: no team (personal keys, the Playground, and every row from before 1.6.1). Kept when the team goes.
+    team_id: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     __table_args__ = (
         Index("ix_usage_daily_slot", "day", "source", "key_id", "user_id", "model", "target", unique=True),
         Index("ix_usage_daily_user_day", "user_id", "day"),
         Index("ix_usage_daily_deployment_day", "deployment_id", "day"),
+        Index("ix_usage_daily_team_day", "team_id", "day"),
     )
 
 
@@ -675,7 +730,7 @@ class BudgetAlert(Base):
     __tablename__ = "budget_alerts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    scope: Mapped[str] = mapped_column(String(16))                        # key | person | provider
+    scope: Mapped[str] = mapped_column(String(16))                        # key | person | provider | team
     scope_id: Mapped[int] = mapped_column(Integer)
     month: Mapped[str] = mapped_column(String(7))                         # YYYY-MM, UTC
     threshold: Mapped[int] = mapped_column(Integer)                       # 80 | 100

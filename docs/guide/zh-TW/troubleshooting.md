@@ -329,11 +329,11 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 ### 401
 
-`missing_api_key`、`invalid_api_key`、`expired_api_key`、`revoked_api_key`、`account_disabled`：沒有帶金鑰（請送出 `Authorization: Bearer fyk_…`）、金鑰錯誤、過期或已撤銷，或金鑰擁有者的帳號已停用。請到 **API 金鑰** 檢查金鑰；需要的話建立一把新的。
+`missing_api_key`、`invalid_api_key`、`expired_api_key`、`revoked_api_key`、`account_disabled`：沒有帶金鑰（請送出 `Authorization: Bearer fyk_…`）、金鑰錯誤、過期或已撤銷，或金鑰擁有者的帳號已停用（團隊金鑰沒有擁有者：撤銷之前都可以使用）。請到 **API 金鑰** 檢查金鑰；需要的話建立一把新的。
 
 ### 402
 
-**你會看到：** `402`，帶著 `budget_exhausted` 或 `budget_unpriced`，以及標頭 `X-Forgeyard-Budget-Exhausted: key`（或 `person`、`provider:<name>`）。
+**你會看到：** `402`，帶著 `budget_exhausted` 或 `budget_unpriced`，以及標頭 `X-Forgeyard-Budget-Exhausted: key`（或 `person`、`team`、`provider:<name>`）。
 
 **原因：** 這個請求只能由雲端供應商處理，而每月預算讓它無法送往任何一個能處理它的供應商：
 

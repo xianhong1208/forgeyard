@@ -485,6 +485,9 @@ export type Deployment = {
     // embedding or classification model) the languages its card names, for the Playground's English-only warning.
     embed?: EmbedModel | null; languages?: string[] | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
+  // 1.6.1 (#190): its team (null: none), and whether the signed-in person may stop, start and change it (admins,
+  // operators, and the team's managers).
+  team?: TeamBrief | null; can_manage?: boolean;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
   // 1.2: the deployment's own route with its tiers, and other routes it is a target of.
@@ -620,7 +623,9 @@ export type ApiKey = {
   cloud: CloudLevel; cloud_locked_by?: string | null; effective_cloud?: CloudLevel;
   effective_rpm: number | null; effective_tpm: number | null; expires_at: string | null; created_at: string;
   last_used_at: string | null; revoked_at: string | null; revoked_by: string | null; status: "active" | "revoked" | "expired";
-  user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };
+  user: { id: number | null; username: string | null }; this_minute: { requests: number; tokens: number };
+  // 1.6.1 (#190): a team key's team (null: a personal key), and who made the key (null on keys from before 1.6.1).
+  team?: TeamBrief | null; created_by?: string | null;
   // Monthly cloud budget (1.2) and this month's spend; budget_locked_by: an admin set it on someone else's key.
   budget?: Budget; budget_locked_by?: string | null;
 };
@@ -632,6 +637,8 @@ export type KeysResponse = {
   models: { name: string; api: string; kind?: RouteKind }[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
   month?: string; resets_at?: string; person_budget?: Budget;
+  // 1.6.1 (#190): the teams the signed-in person may make keys for (admins: every team).
+  teams?: TeamBrief[];
 };
 
 export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string; trust_url?: string | null };
@@ -653,7 +660,26 @@ export type UsageTotal = UsageRow & { split?: { local: UsageRow; cloud: UsageRow
 
 export type UsageResponse = {
   from: string; to: string; days: number; group_by: string; total: UsageTotal; rows: UsageRow[]; everyone: boolean; is_admin: boolean;
+  // 1.6.1 (#190): the team shown (?team=), and the teams whose usage the signed-in person may see.
+  team?: TeamBrief | null; teams?: TeamBrief[];
 };
+
+// ---------------------------------------------------------------- teams (1.6.1, #190)
+export type TeamBrief = { id: number; name: string; title: string };
+export type TeamRole = "member" | "manager";
+
+export type Team = TeamBrief & {
+  created_by: string | null; created_at: string; my_role: TeamRole | null; can_manage: boolean;
+  members: number; managers: number; keys: number; deployments: number; budget: Budget;
+  // On a team's own page.
+  member_list?: { username: string; role: TeamRole; status: string; added_by: string | null; added_at: string }[];
+  key_list?: { id: string; name: string; prefix: string; status: "active" | "revoked" | "expired"; created_by: string | null;
+    created_at: string; last_used_at: string | null }[];
+  deployment_list?: { id: number; name: string; served_name: string }[];
+};
+
+export type TeamsResponse = { teams: Team[]; is_admin: boolean; month: string; resets_at: string };
+export type TeamResponse = { team: Team; month: string; resets_at: string };
 
 // ---------------------------------------------------------------- routes and providers (1.2)
 export type RouteKind = "local" | "mixed" | "cloud";
