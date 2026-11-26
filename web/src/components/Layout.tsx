@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { useAuth } from "../auth";
+import { navItems as extNav } from "../ext";
 import { LANG_NAME, LANGS, setLang } from "../i18n/lang";
 import { useT } from "../i18n/react";
+import { shown, useInfo } from "../lib/info";
 import { AdvisorProvider, HealthBadge } from "./Advisor";
 import { Mark } from "./Mark";
 import { EnrolmentRequiredPage, MfaBanner, setupOverdue } from "./MfaRequired";
@@ -40,6 +42,7 @@ export function Layout() {
   // shown (the server refuses everything else with 403 mfa_enrolment_required), with the guide, language and sign-out.
   const overdue = setupOverdue(user);
   const admin = user?.role === "admin" && !overdue;
+  const info = useInfo(extNav.length > 0 && !overdue);
   const links = overdue ? [] : [
     { to: "/machines", label: t("shell.nav.machines") },
     { to: "/serving", label: t("shell.nav.serving") },
@@ -54,6 +57,8 @@ export function Layout() {
           { to: "/audit", label: t("shell.nav.audit") },
         ]
       : []),
+    // 1.6.1 (#190): an extension's pages, once /api/info lists their features (none in the community edition).
+    ...extNav.filter((n) => shown(info, n, admin)).map((n) => ({ to: n.to, label: n.label(t) })),
   ];
 
   return (

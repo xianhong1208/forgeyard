@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 
+import { useAuth } from "../auth";
 import { BreakdownTable, NAME, type BreakdownColumn } from "../components/BreakdownTable";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { LineChart } from "../components/LineChart";
 import { Notice, PageHeader } from "../components/ui";
+import { usageTabs as extTabs } from "../ext";
 import { labels, t as tNow } from "../i18n/core";
 import { formatNumber } from "../i18n/format";
 import { getLang } from "../i18n/lang";
@@ -15,6 +17,7 @@ import { ms, num } from "../lib/gateway";
 import { STEP_WORD, assignSlots, isSeries, metricChoices, metricKind, METRICS, rowName, SPLITS, VIEWS, type SeriesResponse, type Split, type Step } from "../lib/charts";
 import { bytes } from "../lib/machines";
 import { share, usd } from "../lib/prices";
+import { shown, useInfo } from "../lib/info";
 import type { UsageResponse, UsageRow } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { usePoll } from "../lib/poll";
@@ -42,7 +45,12 @@ function named<R extends { id: string; name: string }>(rows: R[]): R[] {
 
 export function UsagePage() {
   const t = useT();
-  const [tab, setTab] = useState<"requests" | "cost">("requests");
+  const [tab, setTab] = useState<string>("requests");
+  // 1.6.1 (#190): an extension's tabs after Requests and Cost, once /api/info lists their features.
+  const { user } = useAuth();
+  const info = useInfo(extTabs.length > 0);
+  const moreTabs = extTabs.filter((x) => shown(info, x, user?.role === "admin"));
+  const more = moreTabs.find((x) => x.id === tab);
   const [days, setDays] = useState(7);
   const [group, setGroup] = useState("model");
   const [costGroup, setCostGroup] = useState("day");
@@ -87,7 +95,14 @@ export function UsagePage() {
             {id === "requests" ? t("usage.tab.requests") : t("usage.tab.cost")}
           </button>
         ))}
+        {moreTabs.map((x) => (
+          <button key={x.id} type="button" role="tab" id={`usage-tab-${x.id}`} aria-selected={tab === x.id} aria-controls="usage-panel"
+            className={tab === x.id ? "on" : ""} onClick={() => setTab(x.id)}>
+            {x.label(t)}
+          </button>
+        ))}
       </div>
+      {more ? <div id="usage-panel" role="tabpanel" aria-labelledby={`usage-tab-${more.id}`}>{more.render()}</div> : <>
       <div className="usage-controls">
         <div className="segmented" role="group" aria-label={t("usage.period")}>
           {DAYS.map((d) => (
@@ -148,6 +163,7 @@ export function UsagePage() {
       )}
       {tab === "requests" && data && <p className="muted small usage-foot">{t("usage.foot.requests", { range: dates(t, data.from, data.to) })}</p>}
       </div>
+      </>}
     </>
   );
 }

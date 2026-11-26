@@ -4,6 +4,7 @@ export default {
   "advisor.title": "設定健康檢查",
   "advisor.lead":
     "檢查這台伺服器的設定、機器、模型、金鑰和供應商，找出壞掉、有風險或沒有作用的設定和組合。只有管理員看得到。警告和說明可以只對你自己暫時隱藏；錯誤會一直顯示到修好為止。",
+  "advisor.extensions": "已載入的擴充功能：{list}。",
   "advisor.checking": "檢查中…",
   "advisor.nothing": "沒有需要注意的地方。",
   "advisor.nothingShort": "沒有需要注意的地方",

@@ -65,6 +65,30 @@ image to a machine without registry access. `scripts/pin_images.py` checks both 
   references; FY-TFM-004 expects the old image's refusal until the pin reaches 1.5.4). A release that did not change it keeps the pin:
   a server upgrade alone never changes the image a vision model runs.
 
+## Extensions
+
+Since 1.6.1 (#190) the server and the console have a small extension interface. It serves a separately distributed
+package (the enterprise edition's), which adds pages, API routes, tables and checks without a fork. **It is internal,
+not a public plugin API**: it is versioned to the exact release, and a hook may change in any release. An extension
+names the one Forgeyard version it was built for, and the server refuses to start with any other.
+
+- **Server** (`forgeyard/extensions.py`, which lists every hook and where it is called): at startup each entry point
+  in the group `forgeyard.extensions` is loaded; its object has `name`, `version`, `requires` (the exact Forgeyard
+  version), optionally `edition`, and `register(reg)`. The hooks add API routers (after the community's), an Alembic
+  branch of migrations (startup runs `upgrade heads`), a machine filter and a check before placement, a check of each
+  gateway request (from memory, before the rate limits), an observer of the usage the recorder writes, Setup health
+  findings, the features and audit prefixes `GET /api/info` lists, and the engine-switch policy. Without an extension
+  every hook gives the community default, `GET /api/info` says `"edition": "community"` and nothing else changes. A
+  hook that raises is logged and allows: an extension's bug never stops models from serving.
+- **Console** (`web/src/ext/index.ts`): empty lists of pages, menu links, Usage tabs and Setup health cards, which
+  the community pages render. An extension's build replaces that file; each entry names a feature and shows only
+  while `GET /api/info` lists it.
+- **Tests**: `tests/fixtures/ext_sample` is a sample extension that uses every hook, loaded from a real entry point
+  object by `tests/test_extensions.py` (FY-EXT-*): a route, a migration, a refused placement and a refused gateway
+  request, a finding. Keep it working when a hook's call site moves: it is how public CI notices a broken hook.
+  `web/src/pages/Extensions.test.tsx` fills the console's slots the same way.
+- Community code never checks a licence; it only asks the registry.
+
 ## Before a release
 
 The release steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#releasing). One of them guards the image

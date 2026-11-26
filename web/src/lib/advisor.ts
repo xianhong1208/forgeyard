@@ -30,6 +30,8 @@ export type AdvisorReport = {
   badge: number;
   snooze_days: number;
   checked_at: string;
+  // 1.6.1 (#190): the extensions the server loaded (none in the community edition; absent from older servers).
+  extensions?: { name: string; version: string }[];
 };
 
 /** A report as the advisor API sends it, or null: anything else (an older server, a proxy's error page

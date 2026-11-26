@@ -2,8 +2,10 @@ import { IconAlertTriangle, IconCircleCheck, IconInfoCircle, IconStethoscope } f
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router";
 
+import { setupHealthCards as extCards } from "../ext";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
+import { shown, useInfo } from "../lib/info";
 import { KeyBackupButton } from "./KeyBackup";
 import { SEVERITY_LABEL, asReport, backupKid, findingDetail, findingTitle, fixHref, fixLabel, forPage, summary, worst, type AdvisorReport, type Finding,
   type Severity } from "../lib/advisor";
@@ -184,6 +186,13 @@ function FindingRow({ f }: { f: Finding }) {
   );
 }
 
+// 1.6.1 (#190): an extension's cards (web/src/ext; none in the community edition), once /api/info lists their features.
+function ExtHealthCards() {
+  const info = useInfo(extCards.length > 0);
+  const cards = extCards.filter((c) => shown(info, c, true));
+  return <>{cards.map((c) => <div key={c.id} className="health-card">{c.render()}</div>)}</>;
+}
+
 // Get started: every finding, with the snoozed ones behind a toggle.
 export function SetupHealth() {
   const a = useAdvisor();
@@ -218,6 +227,12 @@ export function SetupHealth() {
           {showSnoozed && <ul className="findings">{r.snoozed.map((f) => <FindingRow key={f.key} f={f} />)}</ul>}
         </div>
       )}
+      {r?.extensions && r.extensions.length > 0 && (
+        <p className="muted small health-extensions">
+          {t("advisor.extensions", { list: r.extensions.map((e) => `${e.name} ${e.version}`).join(", ") })}
+        </p>
+      )}
+      <ExtHealthCards />
     </section>
   );
 }

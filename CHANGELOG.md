@@ -6,6 +6,28 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **An extension interface** (#190), internal and versioned to the exact release, for a separately distributed
+  package (the enterprise edition's): `forgeyard/extensions.py` loads the entry points of the group
+  `forgeyard.extensions` at startup and refuses to start when one was built for another Forgeyard version. Its hooks
+  add API routes, an Alembic branch (startup now runs `upgrade heads`), a machine filter and a check before
+  placement (deploy, edit, engine trials, start, wake, scale-up), a check of each gateway request before the rate
+  limits (chat and the other endpoints, and video jobs), a usage observer, Setup health findings, features, audit
+  prefixes and the engine-switch policy (it replaces `trials.switch_policy`). The console gets empty slots for an
+  extension's pages, menu links, Usage tabs and Setup health cards (`web/src/ext/index.ts`), each shown only while
+  the server lists its feature. A sample extension in the tests uses every hook. See
+  [docs/development.md](docs/development.md#extensions).
+
+### API changes
+
+- `GET /api/info` (signed in): `version`, `edition` (`community` without an extension), `features` and
+  `audit_actions` (both empty without an extension).
+- `GET /api/advisor` gains `extensions`: the loaded extensions' names and versions (empty without one).
+- A preview that an extension refuses (`POST /api/deployments/estimate`, and the plans in deploy, edit and engine
+  trial answers) has `fits: false` and `refused: {code, message}`; deploy, edit and trials then answer 409 with the
+  extension's code instead of `does_not_fit`. Without an extension nothing changes.
+
 ## [1.6.0] — 2026-11-26
 
 Two-factor sign-in and single sign-on (#39), both in the community edition. Anyone can add an authenticator app to

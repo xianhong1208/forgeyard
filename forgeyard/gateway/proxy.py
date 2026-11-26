@@ -104,7 +104,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
-from forgeyard import metrics
+from forgeyard import extensions, metrics
 from forgeyard.config import get_settings
 from forgeyard.gateway import budgets, imagegen, pricing, quirks, speech, waiting
 from forgeyard.gateway.answer import Answering
@@ -377,6 +377,10 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
                   started: float) -> Response:
     """Limits, a target, the upstream request and the answer. Records usage when it is over."""
     admission: Optional[Admission] = None
+    if why := extensions.registry.gateway_refused(caller, route):
+        # 1.6.1 (#190): an extension refuses it (a quota), from memory; before the rate limits, so it takes no slot.
+        record(caller, route.served_name, route.deployment_id, why[0], started, endpoint=endpoint)
+        raise GatewayError(*why)
     if caller.source == "api":
         verdict = key_limiter.admit(caller.key_id, caller.rpm, caller.tpm, parsed.max_tokens)
         if isinstance(verdict, Refusal):

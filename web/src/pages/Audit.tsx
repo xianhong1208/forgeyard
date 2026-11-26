@@ -5,6 +5,7 @@ import type { Key } from "../i18n/core";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
+import { useInfo } from "../lib/info";
 import { useApi } from "../lib/useApi";
 
 type Event = {
@@ -129,6 +130,10 @@ function EventTable({ filter }: { filter: string }) {
 export function AuditPage() {
   const t = useT();
   const [filter, setFilter] = useState("");
+  // 1.6.1 (#190): the action prefixes an extension records (none in the community edition), named when the console
+  // has a name for them (admin.audit.filter.<prefix>), else shown as recorded.
+  const info = useInfo();
+  const more = (info?.audit_actions ?? []).filter((p) => !FILTERS.some((f) => f.value === p));
   return (
     <>
       <PageHeader
@@ -140,6 +145,7 @@ export function AuditPage() {
             <label htmlFor="audit-filter">{t("admin.audit.show")}</label>
             <select id="audit-filter" value={filter} onChange={(e) => setFilter(e.target.value)}>
               {FILTERS.map((f) => <option key={f.value} value={f.value}>{t(f.label as "admin.audit.filter.all")}</option>)}
+              {more.map((p) => <option key={p} value={p}>{t.maybe(`admin.audit.filter.${p.replace(/\.$/, "")}`, p)}</option>)}
             </select>
           </div>
         }

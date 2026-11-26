@@ -37,7 +37,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import __version__, settings_check
+from forgeyard import __version__, extensions, settings_check
 from forgeyard.config import Settings
 from forgeyard.db import (
     ApiKey, Deployment, GatewayRoute, Node, Provider, ProviderModel, Replica, RouteTarget, ServerSetting, UsageDaily,
@@ -1353,7 +1353,7 @@ def run(db: DbSession, settings: Settings, *, now: Optional[datetime] = None, re
         strict: bool = False) -> list[Finding]:
     """Every finding, errors first. A check that fails is logged and skipped (`strict` raises)."""
     ctx = Context(db, settings, now=now, request_host=request_host)
-    for fn in CHECKS:
+    for fn in [*CHECKS, *extensions.registry.finding_checks]:   # 1.6.1 (#190): an extension's checks too
         try:
             ctx.found.extend(fn(ctx))
         except Exception:

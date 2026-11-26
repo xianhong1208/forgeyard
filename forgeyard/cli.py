@@ -57,10 +57,15 @@ def _serve() -> int:
     except SecretKeyError as e:
         log.error("%s", e)
         return 2
+    from forgeyard.extensions import ExtensionError
+
     try:
         config = tls.uvicorn_config(create_app())
     except tls.TlsError as e:
         log.error("HTTPS: %s", e)
+        return 2
+    except ExtensionError as e:   # 1.6.1 (#190): one built for another version, or broken
+        log.error("%s", e)
         return 2
     material = tls.live.material
     if material is not None and material.mode != "off":

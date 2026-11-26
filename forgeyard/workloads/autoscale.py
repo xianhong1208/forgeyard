@@ -493,6 +493,8 @@ class Autoscaler:
         ctx = context_for(db, d)
         if ctx is None:
             return "its recipe is gone"
+        if why := scheduler.refused(db, ctx):   # 1.6.1 (#190): an extension refuses more (a quota)
+            return why[1]
         verdicts = scheduler.evaluate(db, ctx)
         siblings = {r.node_id for r in live if r.node_id is not None}
         opt = scheduler.choose(verdicts, ctx.machine_id, siblings=siblings)

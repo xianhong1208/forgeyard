@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
-from forgeyard import advisor, audit
+from forgeyard import advisor, audit, extensions
 from forgeyard.api.deps import Caller, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import ServerSetting, get_db, utcnow
@@ -40,7 +40,9 @@ def report(db: DbSession, caller: Caller, request: Request) -> dict:
     shown, snoozed = advisor.split(findings, caller.user, now)
     counts = {s: sum(1 for f in shown if f["severity"] == s) for s in advisor.SEVERITIES}
     return {"findings": shown, "snoozed": snoozed, "counts": counts, "badge": counts["error"] + counts["warning"],
-            "snooze_days": advisor.SNOOZE_DAYS, "checked_at": now.isoformat()}
+            "snooze_days": advisor.SNOOZE_DAYS, "checked_at": now.isoformat(),
+            # 1.6.1 (#190): the extensions this server loaded (none in the community edition).
+            "extensions": [{"name": e.name, "version": e.version} for e in extensions.registry.loaded]}
 
 
 @router.get("")

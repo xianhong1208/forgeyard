@@ -10,6 +10,7 @@ from sqlalchemy.orm import close_all_sessions
 from fastapi.testclient import TestClient
 
 from forgeyard.agent import config as agent_config
+from forgeyard.extensions import registry as extension_registry
 from forgeyard.config import REMOVED, Settings, get_settings
 from forgeyard.db import reset_engine
 from forgeyard.gateway.balancer import balancer
@@ -119,14 +120,14 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setenv("DATABASE_URL", PG_URL)
     get_settings.cache_clear()
     reset_engine()
-    for state in (limiter, balancer, key_limiter, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, waking, autoscaler, pins, signatures, trials.runner, sso.pending, oidc.cache):  # in-memory state of one server
+    for state in (limiter, balancer, key_limiter, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, waking, autoscaler, pins, signatures, trials.runner, sso.pending, oidc.cache, extension_registry):  # in-memory state of one server
         state.reset()
     forget_ceiling()
     yield
     _close_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
     reset_engine()
     get_settings.cache_clear()
-    for state in (limiter, balancer, key_limiter, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, waking, autoscaler, pins, signatures, trials.runner, sso.pending, oidc.cache):
+    for state in (limiter, balancer, key_limiter, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, waking, autoscaler, pins, signatures, trials.runner, sso.pending, oidc.cache, extension_registry):
         state.reset()
 
 

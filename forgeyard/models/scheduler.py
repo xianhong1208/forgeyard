@@ -35,6 +35,11 @@
 A replica in backoff because its download failed for a network reason is placed again on another
 machine that fits (unpinned deployments only; a pinned one stays and says why): see fetch_failed.
 
+Extensions (1.6.1, #190; forgeyard/extensions.py) may leave machines out (a team's machine pool; those machines say
+"not one of the machines this deployment may use") and refuse a placement before any machine is looked at (a quota):
+the preview then does not fit and says why with the extension's code (`refused`), and a replica being placed waits
+with "Cannot be placed: <why>". Without an extension neither happens.
+
 When nothing fits, every machine says why, and by how much memory it falls short. When exclusive
 cards are what is in the way and the memory would be enough, it says that it fits if both share VRAM
 (1.3.1), and the preview of an exclusive deployment that needs half a card or less says so too.
@@ -51,6 +56,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
+from forgeyard import extensions
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, utcnow
 from forgeyard.machines.protocol import FEATURE_ENGINE_ZIP, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
@@ -422,14 +428,31 @@ def choose(verdicts: list[Verdict], machine_id: Optional[int], strategy: str = "
     return min(usable, key=key)
 
 
+NOT_ALLOWED = "not one of the machines this deployment may use"
+
+
 def evaluate(db: DbSession, ctx: Context, *, exclude: Optional[int] = None,
              extra: Optional[dict[int, dict[str, list[Hold]]]] = None, release: Collection[int] = (),
              credit: Optional[tuple[int, dict[str, int]]] = None, ports: Optional[dict[int, int]] = None
              ) -> list[Verdict]:
+    nodes = candidates(db, ctx.machine_id)
+    allowed = {n.id for n in extensions.registry.allowed_nodes(db, ctx, nodes)} \
+        if extensions.registry.placement_filters else None
     return [evaluate_node(db, n, ctx, exclude=exclude, extra=(extra or {}).get(n.id), release=release,
                           credit=credit[1] if credit is not None and credit[0] == n.id else None,
                           ports=(ports or {}).get(n.id, 0))
-            for n in candidates(db, ctx.machine_id)]
+            if allowed is None or n.id in allowed else Verdict(n.id, n.name, n.status, False, NOT_ALLOWED)
+            for n in nodes]
+
+
+def refused(db: DbSession, ctx: Context) -> Optional[tuple[str, str]]:
+    """(code, text) when an extension refuses this placement whatever the machines (1.6.1, #190), else None."""
+    return extensions.registry.placement_refused(db, ctx)
+
+
+def refusal_code(plan: dict) -> str:
+    """The code a preview that does not fit is refused with: the extension's, or does_not_fit."""
+    return (plan.get("refused") or {}).get("code") or "does_not_fit"
 
 
 # An exclusive deployment that needs at most this share of the card it gets is told that sharing VRAM
@@ -473,6 +496,9 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
     """Where the deployment's replicas would go now, one after the other, without placing them.
     `release` and `prefer` (an edit, 1.3.1): the deployment's own replicas restart, so they hold
     nothing, and replica i goes back to machine prefer[i] when that machine still takes it."""
+    if why := refused(db, ctx):   # 1.6.1 (#190): an extension refuses it (a quota), whatever the machines
+        return {"fits": False, "placed": [], "failed_replica": 0, "machines": [], "summary": why[1],
+                "refused": {"code": why[0], "message": why[1]}, "share_hint": None}
     extra: dict[int, dict[str, list[Hold]]] = {}
     ports: dict[int, int] = {}
     placed = []
@@ -538,6 +564,13 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
         reason = "Cannot be placed: its deployment or recipe is gone"
         if reason != r.reason:
             r.reason, r.updated_at = reason, utcnow()
+        return None
+    if why := refused(db, ctx):   # 1.6.1 (#190): an extension refuses it (a quota)
+        reach.note(r.id, None)
+        reason = f"Cannot be placed: {why[1]}"[:400]
+        if reason != r.reason:
+            r.reason, r.updated_at = reason, utcnow()
+            event(db, r.workload, "unplaced", reason, r.ordinal)
         return None
     verdicts = evaluate(db, ctx, exclude=r.id, credit=credit)
     siblings = {o.node_id for o in r.workload.replicas if o.id != r.id and o.node_id is not None and not o.final}

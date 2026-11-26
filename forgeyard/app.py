@@ -8,11 +8,11 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from forgeyard import __version__, settings_check
+from forgeyard import __version__, extensions, settings_check
 from forgeyard.api import (
     advisor as advisor_api,
     audit_log,
@@ -41,6 +41,7 @@ from forgeyard.api import (
     users,
     workloads,
 )
+from forgeyard.api.deps import Caller, current
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import get_engine, new_session
@@ -127,6 +128,8 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # 1.6.1 (#190): installed extensions (forgeyard/extensions.py); one built for another version stops the start here.
+    ext = extensions.load()
     app = FastAPI(title="Forgeyard", version=__version__, lifespan=lifespan,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     app.add_middleware(GuardMiddleware)
@@ -142,6 +145,13 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health():
         return {"ok": True, "version": __version__}
+
+    @app.get("/api/info")
+    def info(_: Caller = Depends(current)):
+        """The edition and what extensions add (1.6.1, #190): the console shows an extension's pages only for the
+        features listed here. Without an extension: the community edition, no features."""
+        return {"version": __version__, "edition": ext.edition, "features": list(ext.feature_names),
+                "audit_actions": list(ext.audit_prefixes)}
 
     app.include_router(auth.router)
     app.include_router(mfa_api.router)
@@ -176,6 +186,8 @@ def create_app() -> FastAPI:
     app.include_router(install.router)
     app.include_router(guide.router)
     app.include_router(metrics_api.router)  # GET /metrics (1.4.5, #165), before the web UI's catch-all
+    for router in ext.routers:  # 1.6.1 (#190): after the community routes, which they cannot replace
+        app.include_router(router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     def api_not_found(rest: str):

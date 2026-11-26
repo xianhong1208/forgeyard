@@ -52,7 +52,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from forgeyard import metrics
+from forgeyard import extensions, metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, VideoJob, as_utc, new_session, utcnow
 from forgeyard.gateway import imageedit, imagegen, proxy, videogen, waking
@@ -347,6 +347,8 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
         if not fits:
             code = min((c for c in why.values() if c), key=videogen.ORDER.index)
             raise videogen.refusal(route.served_name, code, ask, [g.films for g in groups])
+        if why := extensions.registry.gateway_refused(caller, route):
+            raise GatewayError(*why)   # 1.6.1 (#190): an extension refuses it (a quota), before the rate limits
         if caller.source == "api":
             verdict = key_limiter.admit(caller.key_id, caller.rpm, caller.tpm, None)
             if isinstance(verdict, Refusal):
