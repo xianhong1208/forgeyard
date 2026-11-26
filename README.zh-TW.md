@@ -33,6 +33,10 @@
 - **單一登入（1.6.0）。** 除了密碼之外，大家也可以透過你的 OpenID Connect 身分提供者（Keycloak、Authentik、Microsoft Entra ID、Google）登入。帳號是依身分提供者的簽發者和主體找到的，絕不依電子郵件；新的人會等管理員核准，或來自允許網域時直接拿到帳號；現有的帳號由本人連結；可以用一個宣告決定角色。雙重驗證由身分提供者負責。API 金鑰會一直有效，直到管理員停用該帳號。
 - **沒有網路的機器。** 用檔案帶過去的推論引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和推論引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
+## 1.6 的新功能
+
+1.6.0 加入**雙重驗證**和**單一登入**。每個人都可以在 **我的帳號** 加入驗證器 App，之後登入時還要輸入它顯示的 6 位數驗證碼；手機遺失時可以用 10 組備用碼登入。管理員可以要求管理員或所有人都必須開啟，並給一段寬限期；API 金鑰不受影響（[作法](docs/guide/zh-TW/how-to.md#turn-on-two-factor-sign-in)）。除了密碼之外，大家也可以透過一個 OpenID Connect 身分提供者（Keycloak、Authentik、Entra ID、Google）登入：新的人預設要等管理員核准，現有的帳號由本人連結，也可以用一個宣告決定角色（[作法](docs/guide/zh-TW/how-to.md#sign-in-with-single-sign-on-oidc)）。啟動時會執行兩個資料庫遷移；從原始碼執行的伺服器需要 `uv sync --extra server`，agent 不必更新（[版本說明](CHANGELOG.md#160--2026-11-26)（英文））。
+
 ## 1.5 的新功能
 
 1.5.0 只在需要時使用 GPU。部署可以**閒置時休眠**，把記憶體還回來；下一個請求會喚醒它，不論同時來了多少個請求都只喚醒一次，
@@ -77,7 +81,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.6
+  docker.io/tonyhuang1101/forgeyard:1.6.0
 sudo docker logs forgeyard
 ```
 
@@ -120,7 +124,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.6
+  docker.io/tonyhuang1101/forgeyard-agent:1.6.0
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD、純 CPU 與 Windows 機器：

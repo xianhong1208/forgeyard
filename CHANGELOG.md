@@ -6,109 +6,174 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-11-26
+
+Two-factor sign-in and single sign-on (#39), both in the community edition. Anyone can add an authenticator app to
+their account, so that signing in asks for its 6-digit code too, and admins can require two-factor sign-in of admins
+or of everyone, with a grace period. People can also sign in through one OpenID Connect identity provider (Keycloak,
+Authentik, Microsoft Entra ID, Google or any provider with a discovery document), next to their password. Single
+sign-on was accepted against a real Keycloak: 36 checks passed, 0 failed. It was not tried against Entra ID or
+Google. Failed tries at the entry points that need no account are now counted per client address, so they no longer
+make everybody wait (#303).
+
+### Upgrade notes
+
+- **Two migrations run on start**, `0020_two_factor` and `0021_single_sign_on`. They add tables (`mfa_factors`,
+  `recovery_codes`, `login_challenges`, `identity_providers`, `user_identities`) and session columns
+  (`sessions.mfa_at`, `sessions.auth_method`, `sessions.fresh_until`). Each new row is deleted with its account;
+  `user_identities` (unique issuer and subject) also with its provider. No existing row changes: accounts, their
+  sessions and their API keys work as before, and every existing session counts as a password sign-in. Back up before
+  upgrading as always ([how](docs/guide/how-to.md#back-up-and-restore)). **To go back to 1.5.6**, restore that
+  backup. The migrations also go down: that drops the new tables and columns, so everyone signs in with the password
+  alone again, and accounts made through the provider stay and need a set-password link.
+- **A server run from source needs `uv sync --extra server`**: the `server` extra gains Authlib and joserfc. The
+  server image has them. Without them the console says single sign-on is unavailable, and everything else works.
+- **Nothing changes for anyone until an admin turns something on.** Required two-factor sign-in is off by default,
+  and no identity provider is set up. Only a person who adds an authenticator to their own account signs in in two
+  steps from then on.
+- **API keys are not affected** by two-factor sign-in, required or not, or by single sign-on. A key works until it is
+  revoked or its owner's account is disabled; when someone leaves your identity provider, disable their Forgeyard
+  account to stop their keys.
+- **Five entry points that need no account count failures per client address** (#303): the single sign-on finish,
+  agent join tokens, the setup token, set-password links and sign-up. After 5 failures from one address, that address
+  answers `429` with `Retry-After` (2 s, doubling up to 5 minutes); other addresses are not affected. See *Fixed*.
+- **The agents need no update.** Nothing the agent runs changed since 1.5.6:
+  `git diff v1.5.6 v1.6.0 -- forgeyard/agent Dockerfile.agent images/` is empty. Of the modules the agent's code can
+  import, only `forgeyard/cli.py` changed: it gains the server-only `users reset-mfa` command, whose imports run
+  inside it. A 1.5.6 agent works unchanged. The machine page still offers **Update the agent**, because the agent's
+  version differs from the server's. The vision image pin stays at `forgeyard-vision` 1.5.4rc1: the vision image's
+  source did not change.
+
+### API changes
+
+Old clients that sign in with a password, for an account without an authenticator, see no change. The changed
+answers:
+
+- `POST /api/auth/login` for an account with an authenticator answers `{"mfa_required": true, "challenge": …,
+  "expires_in": 300}` and starts no session; `POST /api/auth/mfa` with the challenge and a code (or a recovery code)
+  signs in.
+- While required two-factor sign-in is past someone's grace period, the console's API, the Playground included,
+  answers them `403 mfa_enrolment_required` on every route except the setup (`GET /api/auth/mfa/factors`,
+  `POST /api/auth/mfa/totp/start`, `POST /api/auth/mfa/totp`), `GET /api/auth/me`, `GET /api/auth/state` and
+  `POST /api/auth/logout`.
+- `POST /api/secret-key/backup` takes no password from an account without one: a fresh sign-in at the provider or an
+  authenticator code confirms it instead. An admin with an authenticator gives a current code too.
+- The five entry points above answer `429` per client address, no longer for everybody at once.
+
+New endpoints:
+
+- two-factor sign-in: `GET /api/auth/mfa/factors`, `POST /api/auth/mfa/totp/start`, `POST /api/auth/mfa/totp`,
+  `POST /api/auth/mfa/factors/{id}/remove`, `POST /api/auth/mfa/recovery-codes`, `POST /api/auth/mfa`,
+  `POST /api/users/{id}/mfa-reset`, `GET` / `PUT /api/users/mfa-policy`;
+- single sign-on: `GET` / `PUT` / `DELETE /api/identity-provider`, `POST /api/identity-provider/check`,
+  `POST /api/auth/sso/start`, `POST /api/auth/sso/finish`, `GET /api/auth/sso/identities`,
+  `POST /api/auth/sso/unlink`.
+
+New fields: users carry `has_mfa` and `mfa_enrolment` (`null` or `{"by", "due"}`); my sessions carry `two_factor`;
+`GET /api/auth/state` carries `sso` and `session` (`auth_method`, `fresh_until`), and `GET /api/auth/me` the same in
+its `session`; `GET /api/secret-key` carries `has_mfa`, `sso_linked` and `fresh_until`; Setup health findings may
+carry `facts`.
+
+New error codes: `mfa_code_invalid` (with `attempts_left` at sign-in), `mfa_challenge_expired`, `mfa_code_required`,
+`mfa_new_code_invalid`, `mfa_enrolment_expired`, `mfa_factor_limit`, `mfa_not_enabled`, `reauth_required`,
+`mfa_enrolment_required`; for single sign-on `sso_not_configured`, `sso_unavailable`, `sso_provider_unreachable`,
+`sso_state_invalid`, `sso_denied`, `sso_token_failed`, `sso_token_invalid` (with a `reason`), `sso_not_fresh`,
+`sso_domain_not_allowed`, `sso_email_unverified`, `sso_wrong_account`, `pending_approval`, `identity_in_use`,
+`identity_already_linked`, `no_linked_identity`, `last_way_in` and `fresh_sign_in_required`.
+
 ### Added
 
-- **Two-factor sign-in with an authenticator app** (#39, 1.6.0 PR 1). In **My account**, anyone adds an authenticator
-  app (TOTP, RFC 6238: SHA-1, 6 digits, 30 s) by scanning a QR code or typing its setup key, then confirms it with
-  the app's first code and their password. Signing in then takes two steps: the right password answers
-  `{"mfa_required": true, "challenge": …}` and no session; `POST /api/auth/mfa` with the challenge and a code signs in.
-  A challenge lasts 5 minutes and takes 5 wrong codes; wrong codes count against the same back-off as wrong
-  passwords. A code is accepted for its 30 s step or one step either side, and each step once per authenticator.
-  The first authenticator makes **10 recovery codes**, shown once and stored hashed; each signs in once in place of
-  a code, and a new set voids the old one. Removing an authenticator or making new codes asks for the password or a
-  current code again. Up to 5 authenticators per account.
-- **Admins: Reset two-factor** on **Users** for someone who lost their phone and their codes: their authenticators
+- **Two-factor sign-in with an authenticator app** (#39, #297). In **My account**, anyone adds an authenticator app
+  (TOTP, RFC 6238: SHA-1, 6 digits, 30 s) by scanning a QR code or typing its setup key, then confirms it with the
+  app's first code and their password. Signing in then takes two steps (see *API changes*). A challenge lasts
+  5 minutes and takes 5 wrong codes; wrong codes count against the same back-off as wrong passwords. A code is
+  accepted for its 30 s step or one step either side, and each step once per authenticator. Up to 5 authenticators
+  per account.
+  - The first authenticator makes **10 recovery codes**, shown once and stored hashed. Each signs in once in place of
+    a code, and a new set voids the old one.
+  - Removing an authenticator or making new codes asks for the password or a current code again.
+  - The authenticator's secret is encrypted with the server's secret key.
+- **Admins: Reset two-factor** on **Users**, for someone who lost their phone and their codes: their authenticators
   and recovery codes are removed and their sessions end (reason `mfa_reset`). Nobody resets their own here, and only
-  the owner changes the owner's. Users shows who has two-factor sign-in, and **Setup health** has a note
-  `admins-without-mfa` naming active admins without it.
-- **The secret-key backup download asks for a current code too** when the admin has an authenticator.
-- Audit log: `auth.mfa_enrolled`, `auth.mfa_removed`, `auth.recovery_code_used`, `auth.recovery_codes_created`,
-  `user.mfa_reset`; a wrong code is an `auth.login_failed` with `reason: mfa_code`.
-- API: `GET /api/auth/mfa/factors`, `POST /api/auth/mfa/totp/start`, `POST /api/auth/mfa/totp`,
-  `POST /api/auth/mfa/factors/{id}/remove`, `POST /api/auth/mfa/recovery-codes`, `POST /api/auth/mfa`,
-  `POST /api/users/{id}/mfa-reset`; users carry `has_mfa`, my sessions `two_factor`, `GET /api/secret-key` `has_mfa`.
-  Error codes: `mfa_code_invalid` (with `attempts_left` at sign-in), `mfa_challenge_expired`, `mfa_code_required`,
-  `mfa_new_code_invalid`, `mfa_enrolment_expired`, `mfa_factor_limit`, `mfa_not_enabled`, `reauth_required`.
-- **Migration `0020_two_factor`**: new tables `mfa_factors` (the secret encrypted with the server's secret key),
-  `recovery_codes` and `login_challenges`, each deleted with its account, and `sessions.mfa_at`. No existing row
-  changes: accounts without an authenticator, their sessions and API keys work exactly as before. Going down drops
-  them, and everyone signs in with the password alone again.
-- `python -m forgeyard secrets reset` (a lost secret key) also removes the authenticators it can no longer read, so
-  those people sign in with their password alone and add theirs again.
-- New web dependency: `uqr` 0.1.3 (MIT, no dependencies of its own) draws the QR code in the page; nothing is fetched.
-- **Required two-factor sign-in** (#39, 1.6.0 PR 2). On **Users**, admins choose **Not required** (the default),
+  the owner changes the owner's. Users shows who has two-factor sign-in.
+- **Required two-factor sign-in** (#39, #300). On **Users**, admins choose **Not required** (the default),
   **Required of admins** (the owner included) or **Required of everyone**, and a **grace period** (7 days by default,
-  0 to 90). The period counts from when the setting started to cover a person, or from when their account was made if
-  that is later; widening from admins to everyone keeps the admins' deadline. During it, people without an
-  authenticator sign in as before and see a banner with the days left. After it, they still sign in with their
-  password but only see **Add two-factor sign-in to continue**: the console's API, the Playground included, answers
-  `403 mfa_enrolment_required` to everything but the setup (`/api/auth/mfa/factors`, `…/totp/start`, `…/totp`),
-  `/api/auth/me`, `/api/auth/state` and sign-out. API keys are not affected. Users shows
-  each person's deadline. Audit: `mfa_policy.changed`. API: `GET` / `PUT /api/users/mfa-policy`; users carry
-  `mfa_enrolment` (`null` or `{"by", "due"}`). Stored as one `server_settings` row (`mfa_required`): no migration.
+  0 to 90).
+  - The period counts from when the setting started to cover a person, or from when their account was made if that
+    is later. Widening from admins to everyone keeps the admins' deadline.
+  - During it, people without an authenticator sign in as before and see a banner with the days left.
+  - After it, they still sign in with their password but only see **Add two-factor sign-in to continue**, and the
+    console's API answers `403 mfa_enrolment_required` (see *API changes*). API keys are not affected.
+  - Users shows each person's deadline. Stored as one `server_settings` row (`mfa_required`), with no migration of
+    its own.
 - **`python -m forgeyard users reset-mfa NAME`** on the server host: removes an account's authenticators and recovery
-  codes and ends its sessions, audited as `user.mfa_reset` with the actor `cli`. The way back in for an owner (or the
-  only admin) who lost both the phone and the codes. Works with the server running and needs no secret key.
-- **Setup health**: `admins-without-mfa` becomes a warning while two-factor sign-in is required of admins, and a new
-  note `mfa-setup-pending` counts the people still in the grace period and past it. Both send `facts` (the names,
-  counts and first deadline) with the finding, so the console writes their detail in Traditional Chinese too.
-- **Single sign-on through an OpenID Connect provider** (#39, 1.6.0 PR 3): Keycloak, Authentik, Microsoft Entra ID,
-  Google or any provider with a discovery document; one per server, set by admins on **Users** (name, issuer with a
-  **Check** of its discovery document, client id, client secret, scopes, what happens to someone new, allowed e-mail
-  domains, an optional role claim and mapping). The sign-in page offers **Sign in with <name>** under the password
-  form. Authorization code flow with PKCE (S256), `state` and `nonce`; the ID token must be signed with RS256 or
-  ES256 by a key from the provider's JWKS, from the configured issuer, for this client id, unexpired, with this
-  sign-in's nonce. The provider sends the browser to the web UI's `/sso/callback`, which finishes the sign-in with a
-  same-origin `POST /api/auth/sso/finish`, so the `SameSite=Strict` session cookie stays as it is. A half-done
-  sign-in lives 10 minutes in the server's memory, once only, and only in the browser that started it.
-- **Accounts from the provider are found by issuer and subject, never by e-mail.** Someone new gets a pending account
-  (an admin approves it on **Users**) or, with **automatic accounts**, an active one, which needs allowed e-mail
-  domains; the domains limit both. An existing account is linked by its owner in **My account** (password or code
-  first, then a fresh sign-in at the provider) and unlinked while a password remains. A disabled account cannot sign
-  in. With a role claim and mapping, each sign-in sets the role (the highest match; *user* when none; unchanged when
-  the claim is missing); never the owner's.
+  codes and ends its sessions, audited as `user.mfa_reset` with the actor `cli`. It is the way back in for an owner
+  (or the only admin) who lost both the phone and the codes. It works with the server running and needs no secret
+  key.
+- **Single sign-on through an OpenID Connect provider** (#39, #301): Keycloak, Authentik, Microsoft Entra ID, Google
+  or any provider with a discovery document. One per server, set by admins on **Users**: name, issuer (with a
+  **Check** of its discovery document), client id, client secret, scopes, what happens to someone new, allowed e-mail
+  domains, and an optional role claim and mapping. The client secret is encrypted with the server's secret key. The
+  sign-in page offers **Sign in with <name>** under the password form.
+  - Authorization code flow with PKCE (S256), `state` and `nonce`. The ID token must be signed with RS256 or ES256 by
+    a key from the provider's JWKS, come from the configured issuer, name this client id, be unexpired and carry this
+    sign-in's nonce.
+  - The provider sends the browser to the web UI's `/sso/callback`, which finishes the sign-in with a same-origin
+    `POST /api/auth/sso/finish`, so the `SameSite=Strict` session cookie stays as it is. A half-done sign-in lives
+    10 minutes in the server's memory, once only, and only in the browser that started it.
+- **Accounts from the provider are found by issuer and subject, never by e-mail.**
+  - Someone new gets a pending account, which an admin approves on **Users**, or, with **automatic accounts**, an
+    active one. Automatic accounts need allowed e-mail domains; the domains limit both.
+  - An existing account is linked by its owner in **My account** (password or code first, then a fresh sign-in at the
+    provider) and unlinked while a password remains.
+  - A disabled account cannot sign in.
+  - With a role claim and mapping, each sign-in sets the role: the highest match; *user* when none matches; unchanged
+    when the claim is missing. Never the owner's.
 - **Sessions through the provider are exempt from required two-factor sign-in** (the provider does its own), and
   accounts without a password are not counted as missing it. Where a password is asked again (the secret-key backup,
   adding an authenticator), an account without one signs in again at the provider (`max_age=0`, plus `prompt=login`
-  except at Google) and has 5 minutes, or types an authenticator code.
-- Audit log: `auth.sso_login`, `auth.sso_login_failed` (with the reason), `user.registered` (`via: sso`),
-  `user.identity_linked`, `user.identity_unlinked`, `idp.created`, `idp.changed` (never with the secret),
-  `idp.deleted`. API: `GET` / `PUT` / `DELETE /api/identity-provider`, `POST /api/identity-provider/check`,
-  `POST /api/auth/sso/start`, `POST /api/auth/sso/finish`, `GET /api/auth/sso/identities`, `POST /api/auth/sso/unlink`;
-  `GET /api/auth/state` carries `sso` and `session` (`auth_method`, `fresh_until`), `GET /api/auth/me` the same in
-  its `session`, `GET /api/secret-key` `sso_linked` and `fresh_until`; `POST /api/secret-key/backup` takes no
-  password from an account without one.
-- New setting `SSO_CA_FILE`: a CA to trust for an identity provider inside your network whose certificate comes
-  from a company CA. Calls to the provider go out directly, never through `EGRESS_PROXY`.
+  except at Google) and then has 5 minutes, or types an authenticator code.
+- New setting `SSO_CA_FILE`: a CA to trust for an identity provider inside your network whose certificate comes from
+  a company CA. Calls to the provider go out directly, never through `EGRESS_PROXY`.
+- **Setup health**: a note `admins-without-mfa` names active admins without two-factor sign-in; it becomes a warning
+  while two-factor sign-in is required of admins. A new note `mfa-setup-pending` counts the people still in the grace
+  period and past it. Both send `facts` (the names, counts and first deadline) with the finding, so the console
+  writes their detail in Traditional Chinese too.
+- Audit log: `auth.mfa_enrolled`, `auth.mfa_removed`, `auth.recovery_code_used`, `auth.recovery_codes_created`,
+  `user.mfa_reset`, `mfa_policy.changed`, `auth.sso_login`, `auth.sso_login_failed` (with the reason),
+  `user.registered` (`via: sso`), `user.identity_linked`, `user.identity_unlinked`, `idp.created`, `idp.changed`
+  (never with the secret) and `idp.deleted`. A wrong code is an `auth.login_failed` with `reason: mfa_code`.
+- `scripts/accept_sso.py` (#302): the acceptance of single sign-on against a real OpenID Connect provider in a real
+  browser: approval and automatic accounts, the role mapping, disabled accounts, linking, the two-factor exemption,
+  the key backup's fresh sign-in, API keys and refused callbacks. Everything it changes is put back.
+- New dependencies:
+  - server (the `server` extra): **Authlib 1.9.10** (BSD-3) for the token request and its client authentication,
+    with **joserfc 1.8.0** (BSD-3, installed with it) for the ID token's signature. The agent does not carry them;
+  - web: **`uqr` 0.1.3** (MIT, no dependencies of its own) draws the QR code in the page; nothing is fetched.
+
+### Changed
+
+- **The secret-key backup download asks for a current code too** when the admin has an authenticator.
+- **`python -m forgeyard secrets reset`** (a lost secret key) also removes the authenticators it can no longer read,
+  so those people sign in with their password alone and add theirs again. It also drops an identity provider's
+  client secret it can no longer read, and turns the provider off.
 - **Setup health**: `registrations-pending` sends its names as `facts`, so the console writes its detail in
   Traditional Chinese too.
-- **Migration `0021_single_sign_on`**: new tables `identity_providers` (the client secret encrypted with the server's
-  secret key) and `user_identities` (unique issuer and subject; deleted with the account or the provider), and
-  `sessions.auth_method` (`password` for every existing session) and `sessions.fresh_until`. With no provider set
-  up nothing changes. Going down drops them; accounts made through the provider stay and need a set-password link.
-- `python -m forgeyard secrets reset` also drops an identity provider's client secret it can no longer read, and turns
-  the provider off.
-- New server dependency (the `server` extra): **Authlib 1.9.10** (BSD-3) for the token request and its client
-  authentication, with **joserfc 1.8.0** (BSD-3, installed with it) for the ID token's signature. Without them the
-  console says single sign-on is unavailable; the agent does not carry them.
-- `scripts/accept_sso.py` (#39, 1.6.0 PR 4): the acceptance of single sign-on against a real OpenID Connect provider
-  in a real browser: approval and automatic accounts, the role mapping, disabled accounts, linking, the two-factor
-  exemption, the key backup's fresh sign-in, API keys and refused callbacks; everything it changes is put back.
 
 ### Fixed
 
-- **Failed tries at the doors without an account no longer make everybody wait.** Failed single sign-on finishes,
-  agent join tokens, setup tokens, set-password links and self-registrations were counted under one name for the
-  whole server, so failures from any address could delay every person's (or every agent's) next try, up to 5
-  minutes. A password sign-in whose username was that name added to it too. They are now counted per door and per
-  client address, apart from password sign-ins: after 5 failures from one address, that address waits (2 s,
+- **Failed tries at the entry points without an account no longer make everybody wait** (#303). Failed single
+  sign-on finishes, agent join tokens, setup tokens, set-password links and self-registrations were counted under one
+  name for the whole server, so failures from any address could delay every person's (or every agent's) next try, up
+  to 5 minutes. A password sign-in whose username was that name added to it too. They are now counted per entry point
+  and per client address, apart from password sign-ins: after 5 failures from one address, that address waits (2 s,
   doubling, up to 5 minutes); other addresses are not affected. The cap of 30 failures per address in 15 minutes
-  still covers every door. A single sign-on finish whose state, browser and ID token check out clears its
+  still covers every entry point. A single sign-on finish whose state, browser and ID token check out clears its
   address's count. Audit lines are unchanged.
-- **Traditional Chinese spacing next to names and values**: a space stays only between a Latin letter or digit and
-  a Chinese character, never between two Chinese characters ("ann、bob、cy 和另外 2 人申請了帳號", "這個模型的授權是未註明",
-  "閒置 2 小時後結束"). Fixed once where the console fills in `{…}` values, so Setup health's people findings and
-  every other sentence follow it.
+- **Traditional Chinese spacing next to names and values** (#303): a space stays only between a Latin letter or
+  digit and a Chinese character, never between two Chinese characters ("ann、bob、cy 和另外 2 人申請了帳號",
+  "這個模型的授權是未註明", "閒置 2 小時後結束"). Fixed once where the console fills in `{…}` values, so Setup health's
+  people findings and every other sentence follow it.
 
 ## [1.5.6] — 2026-11-26
 

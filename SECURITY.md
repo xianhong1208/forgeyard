@@ -13,7 +13,8 @@ fix is released as a patch version, and the advisory names you unless you ask ot
 
 | Version | Security fixes and serious bug fixes |
 |---|---|
-| 1.5.x (the newest minor release) | Yes |
+| 1.6.x (the newest minor release) | Yes |
+| 1.5.x | No: upgrade to 1.6.x |
 | 1.4.x (long-term support) | Yes, until 2027-06-30 |
 | Anything older | No: upgrade |
 
