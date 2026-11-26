@@ -89,11 +89,11 @@ describe("extension slots", () => {
     expect(within(panel).queryByText("licence valid until 2027-11-26")).toBeNull();
   });
 
-  it("FY-WEB-1033 a Usage tab of a listed feature follows Requests and Cost and shows its own panel", async () => {
+  it("FY-WEB-1033 a Usage tab of a listed feature follows the community's tabs (Requests, Cost, GPU hours) and shows its own panel", async () => {
     server(["reports"]);
     mount("/usage");
     const tab = await screen.findByRole("tab", { name: "Reports" });
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Requests", "Cost", "Reports"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Requests", "Cost", "GPU hours", "Reports"]);
     fireEvent.click(tab);
     expect(await screen.findByText("the reports tab")).toBeTruthy();
     expect(screen.getByRole("tabpanel").textContent).toBe("the reports tab");

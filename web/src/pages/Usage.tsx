@@ -47,7 +47,7 @@ function named<R extends { id: string; name: string }>(rows: R[]): R[] {
 export function UsagePage() {
   const t = useT();
   const [tab, setTab] = useState<string>("requests");
-  // 1.6.1 (#190): an extension's tabs after Requests and Cost, once /api/info lists their features.
+  // 1.6.1 (#190): an extension's tabs after Requests, Cost and GPU hours, once /api/info lists their features.
   const { user } = useAuth();
   const info = useInfo(extTabs.length > 0);
   const moreTabs = extTabs.filter((x) => shown(info, x, user?.role === "admin"));
