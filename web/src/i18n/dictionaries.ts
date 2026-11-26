@@ -20,6 +20,7 @@ import enLibrary from "./en/library";
 import enKeys from "./en/keys";
 import enMachine from "./en/machine";
 import enMachines from "./en/machines";
+import enMfa from "./en/mfa";
 import enModelpage from "./en/modelpage";
 import enPlayground from "./en/playground";
 import enServer from "./en/server";
@@ -45,6 +46,7 @@ import zhLibrary from "./zh-TW/library";
 import zhKeys from "./zh-TW/keys";
 import zhMachine from "./zh-TW/machine";
 import zhMachines from "./zh-TW/machines";
+import zhMfa from "./zh-TW/mfa";
 import zhModelpage from "./zh-TW/modelpage";
 import zhPlayground from "./zh-TW/playground";
 import zhServer from "./zh-TW/server";
@@ -60,6 +62,8 @@ export const EN_MODULES = {
   // Machines and deployments (#189, group 1)
   deploy: enDeploy, deployment: enDeployment, machine: enMachine,
   playground: enPlayground, usage: enUsage,
+  // Two-factor sign-in (1.6.0, #39)
+  mfa: enMfa,
 };
 export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, string>> = {
   admin: zhAdmin, cloud: zhCloud, keys: zhKeys,
@@ -67,6 +71,7 @@ export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, strin
   serving: zhServing, shell: zhShell, start: zhStart,
   deploy: zhDeploy, deployment: zhDeployment, machine: zhMachine,
   playground: zhPlayground, usage: zhUsage,
+  mfa: zhMfa,
 };
 
 export const en = {
@@ -74,6 +79,7 @@ export const en = {
   ...enAddmodel, ...enAdvisor, ...enAuth, ...enCommon, ...enEnginepage, ...enEngineupdates, ...enEnginetry, ...enEnginetrial, ...enFleet, ...enGuide, ...enLibrary, ...enMachines, ...enModelpage, ...enServer, ...enServing, ...enShell, ...enStart,
   ...enDeploy, ...enDeployment, ...enMachine,
   ...enPlayground, ...enUsage,
+  ...enMfa,
 };
 export type Key = keyof typeof en;
 
@@ -83,4 +89,5 @@ export const zhTW: Record<Key, string> = {
   ...zhAddmodel, ...zhAdvisor, ...zhAuth, ...zhCommon, ...zhEnginepage, ...zhEngineupdates, ...zhEnginetry, ...zhEnginetrial, ...zhFleet, ...zhGuide, ...zhLibrary, ...zhMachines, ...zhModelpage, ...zhServer, ...zhServing, ...zhShell, ...zhStart,
   ...zhDeploy, ...zhDeployment, ...zhMachine,
   ...zhPlayground, ...zhUsage,
+  ...zhMfa,
 };

@@ -617,5 +617,10 @@ password; self-registration is off unless `REGISTRATION=approval`.
 - On **My account**, you change your password (your other sessions are signed out) and see every
   browser signed in as you, each of which you can sign out. An admin can sign someone out everywhere,
   disable them, or give them a new set-password link on **Users**.
+- **Two-factor sign-in** (1.6.0) is each person's choice: with an authenticator app added in **My account**,
+  signing in also asks for its 6-digit code (or one of 10 single-use recovery codes). Wrong codes count like
+  wrong passwords. An admin can reset someone's two-factor sign-in on **Users**; the owner's is the owner's own.
+  It applies to signing in to the console only: API keys work as before. See
+  [Turn on two-factor sign-in](how-to.md#turn-on-two-factor-sign-in).
 - The **Audit log** (admins) records sign-ins, failed sign-ins, changes to accounts, machines, models,
   keys and providers, and budget alerts.

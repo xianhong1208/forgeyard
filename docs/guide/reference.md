@@ -1653,6 +1653,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `certificate-name-missing` | error | Your own certificate does not name `PUBLIC_URL`'s host |
 | `certificate-expiring` | warning | Your own certificate expires within 30 days, or Forgeyard's CA within 90. An error within 14 days |
 | `registrations-pending` | note | People are waiting for approval |
+| `admins-without-mfa` | note | Admins sign in with a password alone (no two-factor sign-in) |
 | `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
 | `replica-traffic-plain` | warning | Traffic to a machine is not encrypted: its agent is older than 1.4.5 and is reached over plain HTTP; the fix opens its update command ([more](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)) |
 | `replica-certificate` | error | A machine whose agent serves its replicas over TLS has no certificate from this server, or it expired or is not being renewed (fewer than 3 days left): its replicas cannot be reached ([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)) |

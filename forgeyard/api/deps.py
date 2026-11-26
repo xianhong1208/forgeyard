@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import Session as DbSession, object_session
 
 from forgeyard.config import get_settings
 from forgeyard.db import Session, User, get_db
-from forgeyard.security import sessions
+from forgeyard.security import mfa, sessions
 from forgeyard.security.client import client_ip
 
 ROLES = ("admin", "operator", "user")
@@ -93,7 +93,10 @@ def public_base(request: Request) -> str:
     return base
 
 
-def user_out(u: User) -> dict:
+def user_out(u: User, has_mfa: Optional[bool] = None) -> dict:
+    if has_mfa is None:  # a list passes it, from one query for everyone
+        db = object_session(u)
+        has_mfa = bool(db is not None and u.id is not None and mfa.has_factor(db, u.id))
     return {
         "id": u.id,
         "username": u.username,
@@ -102,6 +105,7 @@ def user_out(u: User) -> dict:
         "status": u.status,
         "is_owner": u.is_owner,
         "has_password": u.password_hash is not None,
+        "has_mfa": has_mfa,
         "created_at": u.created_at,
         "last_login_at": u.last_login_at,
     }

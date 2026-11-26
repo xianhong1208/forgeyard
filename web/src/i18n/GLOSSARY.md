@@ -72,6 +72,11 @@ reader plainly with 你, never 您.
 | session | 工作階段 | |
 | owner / admin / operator / user | 擁有者 / 管理員 / 操作員 / 使用者 | |
 | sign in / sign out | 登入 / 登出 | |
+| two-factor sign-in | 雙重驗證 | 1.6.0. Not 兩步驟驗證 or 多因素認證. |
+| authenticator app | 驗證器 App | Google Authenticator and the like; app names stay in English. |
+| code (from the app) | 驗證碼 | 6 位數驗證碼. |
+| recovery codes | 備用碼 | 一組備用碼 = one code. |
+| setup key | 設定金鑰 | The TOTP secret typed instead of scanning the QR 碼. |
 | image (container) | 映像檔 | pull = 拉取, layer = 層. |
 | relay (through the server) | 經由伺服器 | |
 | try out (an engine: a trial run) / trial | 試跑 / 試跑紀錄 | 1.5.2: a temporary deployment that is checked, then removed. Not 試用 (*Try this version* = 試用這個版本, which makes a copy) and not 試試看 (a deployment's *Try it*, one request). |

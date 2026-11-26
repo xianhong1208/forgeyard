@@ -6,6 +6,36 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Two-factor sign-in with an authenticator app** (#39, 1.6.0 PR 1). In **My account**, anyone adds an authenticator
+  app (TOTP, RFC 6238: SHA-1, 6 digits, 30 s) by scanning a QR code or typing its setup key, then confirms it with
+  the app's first code and their password. Signing in then takes two steps: the right password answers
+  `{"mfa_required": true, "challenge": …}` and no session; `POST /api/auth/mfa` with the challenge and a code signs in.
+  A challenge lasts 5 minutes and takes 5 wrong codes; wrong codes count against the same back-off as wrong
+  passwords. A code is accepted for its 30 s step or one step either side, and each step once per authenticator.
+  The first authenticator makes **10 recovery codes**, shown once and stored hashed; each signs in once in place of
+  a code, and a new set voids the old one. Removing an authenticator or making new codes asks for the password or a
+  current code again. Up to 5 authenticators per account.
+- **Admins: Reset two-factor** on **Users** for someone who lost their phone and their codes: their authenticators
+  and recovery codes are removed and their sessions end (reason `mfa_reset`). Nobody resets their own here, and only
+  the owner changes the owner's. Users shows who has two-factor sign-in, and **Setup health** has a note
+  `admins-without-mfa` naming active admins without it.
+- **The secret-key backup download asks for a current code too** when the admin has an authenticator.
+- Audit log: `auth.mfa_enrolled`, `auth.mfa_removed`, `auth.recovery_code_used`, `auth.recovery_codes_created`,
+  `user.mfa_reset`; a wrong code is an `auth.login_failed` with `reason: mfa_code`.
+- API: `GET /api/auth/mfa/factors`, `POST /api/auth/mfa/totp/start`, `POST /api/auth/mfa/totp`,
+  `POST /api/auth/mfa/factors/{id}/remove`, `POST /api/auth/mfa/recovery-codes`, `POST /api/auth/mfa`,
+  `POST /api/users/{id}/mfa-reset`; users carry `has_mfa`, my sessions `two_factor`, `GET /api/secret-key` `has_mfa`.
+  Error codes: `mfa_code_invalid` (with `attempts_left` at sign-in), `mfa_challenge_expired`, `mfa_code_required`,
+  `mfa_new_code_invalid`, `mfa_enrolment_expired`, `mfa_factor_limit`, `mfa_not_enabled`, `reauth_required`.
+- **Migration `0020_two_factor`**: new tables `mfa_factors` (the secret encrypted with the server's secret key),
+  `recovery_codes` and `login_challenges`, each deleted with its account, and `sessions.mfa_at`. No existing row
+  changes: accounts without an authenticator, their sessions and API keys work exactly as before. Going down drops
+  them, and everyone signs in with the password alone again.
+- `python -m forgeyard secrets reset` (a lost secret key) also removes the authenticators it can no longer read, so
+  those people sign in with their password alone and add theirs again.
+- New web dependency: `uqr` 0.1.3 (MIT, no dependencies of its own) draws the QR code in the page; nothing is fetched.
 ## [1.5.6] — 2026-11-26
 
 Clearer machine and model pages, and Windows machines (#282). The deploy page, a model's page and an engine's page

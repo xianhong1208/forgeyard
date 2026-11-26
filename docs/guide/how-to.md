@@ -1525,6 +1525,44 @@ To let people ask for an account themselves, start the server with `REGISTRATION
 sign-in page then offers to request an account, and requests wait on **Users** until an admin chooses
 **Approve** or **Reject**.
 
+## Turn on two-factor sign-in
+
+With two-factor sign-in (1.6.0), signing in asks for your password and a 6-digit code from an authenticator app on
+your phone, so a password someone else learned is not enough. Any TOTP app works: Google Authenticator, Microsoft
+Authenticator, 1Password, Bitwarden, Aegis and others.
+
+1. Open **My account** (your name, top right) and choose **Add an authenticator app** under **Two-factor sign-in**.
+2. Scan the QR code with the app. If you cannot scan it, type the **Setup key** in the app instead (time-based,
+   6 digits, every 30 seconds).
+3. Type the **Code from the app**, give it a **Name** if you like (for example *Work phone*), type your password, and
+   choose **Turn on two-factor sign-in**. Nothing is saved until the code is right, so a mistyped key changes
+   nothing.
+4. Save the **10 recovery codes** it shows now, apart from your password (**Download as a text file** or copy them).
+   They are shown only once. Each one signs you in once in place of a code, if the phone is lost or not at hand.
+
+From then on, **Sign in** asks for the code after the password. Choose **No phone at hand? Use a recovery code** to
+type a recovery code instead. A sign-in waits 5 minutes for the code and takes 5 wrong codes; then sign in again.
+Wrong codes count like wrong passwords, so many of them make the next try wait. Each code works once: a code that
+already signed you in is refused, so wait for the next one.
+
+In **My account** you can also:
+
+- **Add another authenticator** (up to 5), for example a second phone. It is confirmed with your password or a code
+  from one you already use.
+- **New recovery codes**: a new set of 10; the old ones stop working. Do this when few are left.
+- **Remove** an authenticator. Removing the last one turns two-factor sign-in off and the recovery codes with it.
+
+Both ask for your password or a current code from the app again. Downloading the secret key backup asks for a code
+too.
+
+**Lost the phone and the recovery codes?** Ask an admin: on **Users**, **Reset two-factor** removes your
+authenticators and recovery codes and ends your sessions; you then sign in with your password alone and can add an
+authenticator again. Nobody resets their own two-factor sign-in there, and only the owner can change the owner's, so
+the owner should keep the recovery codes somewhere safe. If the server's secret key is lost for good,
+[`secrets reset`](#back-up-and-restore) removes every authenticator, because it can no longer read them.
+
+Admins see who uses two-factor sign-in on **Users**, and **Setup health** names the admins who do not.
+
 ## Use the console in Traditional Chinese
 
 The console speaks English and Traditional Chinese (1.5.1). The first time a browser opens it, it follows the
@@ -2162,7 +2200,8 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
 It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
-(and any deployment's own), and model replicas restart with new internal keys.
+(and any deployment's own), and model replicas restart with new internal keys. Authenticator apps of
+two-factor sign-in are removed too: those people sign in with their password alone and add theirs again.
 
 ## Look at a model or an engine
 

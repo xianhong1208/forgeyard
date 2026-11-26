@@ -24,7 +24,7 @@ from forgeyard.api.deps import (
 )
 from forgeyard.config import get_settings
 from forgeyard.db import Session, User, get_db, utcnow
-from forgeyard.security import passwords, secrets_store, sessions
+from forgeyard.security import mfa, passwords, secrets_store, sessions
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -42,6 +42,11 @@ class SetupIn(BaseModel):
 class LoginIn(BaseModel):
     username: str = Field(max_length=200)
     password: str = Field(max_length=1024)
+
+
+class LoginCodeIn(BaseModel):
+    challenge: str = Field(max_length=200)
+    code: str = Field(max_length=64)
 
 
 class RegisterIn(BaseModel):
@@ -68,8 +73,9 @@ def has_users(db: DbSession) -> bool:
     return (db.scalar(select(func.count()).select_from(User)) or 0) > 0
 
 
-def _start_session(request: Request, response: Response, db: DbSession, user: User) -> None:
-    token, _ = sessions.create(db, user, client_ip(request), request.headers.get("user-agent"))
+def _start_session(request: Request, response: Response, db: DbSession, user: User, *, mfa_at=None) -> None:
+    token, row = sessions.create(db, user, client_ip(request), request.headers.get("user-agent"))
+    row.mfa_at = mfa_at
     user.last_login_at = utcnow()
     response.set_cookie(
         sessions.COOKIE,
@@ -150,13 +156,61 @@ def login(body: LoginIn, request: Request, response: Response, db: DbSession = D
         raise fail(403, "pending_approval", "Your account is waiting for an admin to approve it.")
     if user.status != "active":
         raise fail(403, "account_disabled", "This account is disabled. Ask an admin.")
-    limiter.login_succeeded(name)
     if passwords.needs_rehash(user.password_hash):
         user.password_hash = passwords.hash_password(body.password)
+    if mfa.has_factor(db, user.id):
+        # 1.6.0 (#39): the password was right; a code from the account's authenticator (or a recovery code) is
+        # still to come, at POST /api/auth/mfa. No session yet, and the failure count stays until the code is
+        # right, so wrong codes add to the same back-off as wrong passwords.
+        challenge = mfa.new_challenge(db, user)
+        db.commit()
+        return {"mfa_required": True, "challenge": challenge,
+                "expires_in": int(mfa.CHALLENGE_TTL.total_seconds())}
+    limiter.login_succeeded(name)
     _start_session(request, response, db, user)
     audit.record(db, "auth.login", actor=user, ip=ip)
     db.commit()
     return {"user": user_out(user)}
+
+
+@router.post("/mfa")
+def login_code(body: LoginCodeIn, request: Request, response: Response, db: DbSession = Depends(get_db)):
+    """The second step of a sign-in with two-factor: the challenge from /login and a code."""
+    settings = get_settings()
+    ip = client_ip(request)
+    row = mfa.find_challenge(db, body.challenge)
+    if row is None:
+        raise fail(400, "mfa_challenge_expired", "This sign-in took too long or had too many wrong codes. "
+                                                 "Sign in again.")
+    user = db.get(User, row.user_id)
+    wait = limiter.login_wait(user.username, ip, settings.login_free_failures, settings.login_ip_failures)
+    if wait:
+        raise fail(429, "rate_limited", "Too many failed sign-ins. Wait before trying again.",
+                   retry_after=retry_after(wait))
+    if user.status != "active":
+        mfa.finish_challenge(db, row)
+        db.commit()
+        raise fail(403, "account_disabled", "This account is disabled. Ask an admin.")
+    how = mfa.check_code(db, user.id, body.code)
+    if how is None:
+        left = mfa.wrong_code(db, row)
+        limiter.login_failed(user.username, ip)
+        audit.record(db, "auth.login_failed", actor=user, ip=ip, reason="mfa_code")
+        db.commit()
+        raise fail(400, "mfa_code_invalid", "That code is not right.", attempts_left=left)
+    if not mfa.finish_challenge(db, row):  # another request with this challenge won
+        db.rollback()
+        raise fail(400, "mfa_challenge_expired", "This sign-in took too long or had too many wrong codes. "
+                                                 "Sign in again.")
+    limiter.login_succeeded(user.username)
+    _start_session(request, response, db, user, mfa_at=utcnow())
+    audit.record(db, "auth.login", actor=user, ip=ip, mfa=how)
+    left = None
+    if how == "recovery":
+        left = mfa.recovery_left(db, user.id)
+        audit.record(db, "auth.recovery_code_used", actor=user, ip=ip, left=left)
+    db.commit()
+    return {"user": user_out(user), "recovery_codes_left": left}
 
 
 @router.post("/logout")
@@ -227,6 +281,7 @@ def my_sessions(caller: Caller = Depends(current), db: DbSession = Depends(get_d
             "expires_at": s.expires_at,
             "ip": s.ip,
             "user_agent": s.user_agent,
+            "two_factor": s.mfa_at is not None,
         }
         for s in sessions.live_sessions(db, caller.user.id)
     ], "idle_minutes": get_settings().session_idle_minutes, "max_days": get_settings().session_max_days}

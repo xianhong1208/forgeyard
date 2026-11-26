@@ -100,7 +100,7 @@ const SMART = route({ id: 10, served_name: "smart", targets: [local(1, 1, "chat"
 // Every action the server records (forgeyard/**/*.py: audit.record(db, "<action>", …)).
 const ACTIONS = [
   "api_key.changed", "api_key.created", "api_key.revoked", "api_key_cloud.changed", "api_key_limits.changed", "auth.login", "auth.login_failed",
-  "auth.logout", "auth.other_sessions_ended", "auth.password_changed", "auth.password_set_by_link", "auth.session_ended", "budget.exhausted",
+  "auth.logout", "auth.mfa_enrolled", "auth.mfa_removed", "auth.other_sessions_ended", "auth.recovery_code_used", "auth.recovery_codes_created", "auth.password_changed", "auth.password_set_by_link", "auth.session_ended", "budget.exhausted",
   "budget.warning", "deployment.changed", "deployment.created", "deployment.deleted", "deployment.started", "deployment.stopped",
   "hf_token.cleared", "hf_token.set", "machine.gpu_allowlist_changed", "machine.gpu_keys_changed", "machine.join_refused",
   "machine.join_token_cancelled", "machine.join_token_created", "machine.joined", "machine.removed", "machine.revoked", "model.added",
@@ -109,7 +109,7 @@ const ACTIONS = [
   "provider.changed", "provider.cloned", "provider.created", "provider.deleted", "provider.model_changed", "provider.model_removed",
   "provider.models_added", "provider.prices_refreshed", "recipe.created", "recipe.deleted", "recipe.updated", "route.changed", "route.created",
   "route.deleted", "secret_key.backup_confirmed", "secret_key.backup_downloaded", "secret_key.backup_failed", "setup.owner_created",
-  "setup.owner_from_env", "setup.token_rejected", "user.approved", "user.budget_changed", "user.created", "user.deleted",
+  "setup.owner_from_env", "setup.token_rejected", "user.approved", "user.budget_changed", "user.created", "user.deleted", "user.mfa_reset",
   "user.password_link_issued", "user.registered", "user.signed_out", "user.updated", "workload.created", "workload.deleted",
   "workload.gateway_changed", "workload.started", "workload.stopped",
 ];
