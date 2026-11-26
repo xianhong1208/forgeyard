@@ -230,3 +230,24 @@ it("FY-WEB-1017 Setup health's two-factor findings in Traditional Chinese: the d
   expect(screen.queryByText(/signs in with a password alone/)).toBeNull();
   expect(screen.queryByText(/still in the grace period/)).toBeNull();
 });
+
+it("FY-WEB-1028 Setup health's people-waiting-for-approval finding in Traditional Chinese, from its facts", async () => {
+  localStorage.setItem(LANG_KEY, "zh-TW");
+  const findings = [
+    { key: "r@server", id: "registrations-pending", severity: "info", title: "5 people waiting for approval",
+      detail: "ann, bob, cy and 2 more asked for an account. Approve or remove them on Users.", fix_url: "/users",
+      fix_label: "Open Users", scope: "server", pages: ["users"], snoozable: true,
+      facts: { people: ["ann", "bob", "cy", "dee", "eve"] } },
+    { key: "s@server", id: "registrations-pending", severity: "info", title: "1 person waiting for approval",
+      detail: "zed asked for an account. Approve or remove them on Users.", fix_url: "/users",
+      fix_label: "Open Users", scope: "other", pages: ["users"], snoozable: true, facts: { people: ["zed"] } },
+  ];
+  server((url) => (url === "/api/advisor" ? { status: 200, body: { findings, snoozed: [], counts: { error: 0, warning: 0, info: 2 }, badge: 0, snooze_days: 30, checked_at: "2026-11-25T00:00:00Z" } }
+    : url === "/api/users" ? { status: 200, body: { users: [OWNER] } }
+      : url === "/api/users/mfa-policy" ? { status: 200, body: { mfa_required: "off", mfa_grace_days: 7, max_grace_days: 90, in_grace_period: 0, setup_overdue: 0 } }
+        : undefined), { ...OWNER, has_mfa: true });
+  mount("/users");
+  expect(await screen.findByText("ann、bob、cy 和另外 2 人 申請了帳號。請在「使用者」頁面核准或移除。")).toBeTruthy();
+  expect(screen.getByText("zed 申請了帳號。請在「使用者」頁面核准或移除。")).toBeTruthy();
+  expect(screen.queryByText(/asked for an account/)).toBeNull();
+});

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session as DbSession
 from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, signed_in
 from forgeyard.config import get_settings
-from forgeyard.db import MfaFactor, get_db, utcnow
+from forgeyard.db import MfaFactor, as_utc, get_db, utcnow
 from forgeyard.security import mfa, passwords, totp
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -48,8 +48,15 @@ class TotpConfirmIn(ReauthIn):
     name: Optional[str] = Field(default=None, max_length=mfa.NAME_MAX)
 
 
+def fresh_sso(caller: Caller) -> bool:
+    """This session signed in again through the identity provider within the last 5 minutes (1.6.0, PR 3)."""
+    until = caller.session.fresh_until
+    return until is not None and utcnow() < as_utc(until)
+
+
 def reauth(db: DbSession, caller: Caller, body: ReauthIn) -> str:
-    """'code' or 'password' when one of them is right; else an error (and the try counts like a sign-in)."""
+    """'code' or 'password' when one of them is right, or 'sso' when neither was typed and this session signed in
+    again through the identity provider just now; else an error (and the try counts like a sign-in)."""
     settings = get_settings()
     user = caller.user
     wait = limiter.login_wait(user.username, caller.ip, settings.login_free_failures, settings.login_ip_failures)
@@ -67,6 +74,8 @@ def reauth(db: DbSession, caller: Caller, body: ReauthIn) -> str:
             return "password"
         limiter.login_failed(user.username, caller.ip)
         raise fail(400, "wrong_password", "The password is not right.")
+    if fresh_sso(caller):
+        return "sso"
     raise fail(400, "reauth_required", "Type your password, or a current code from your authenticator app.")
 
 

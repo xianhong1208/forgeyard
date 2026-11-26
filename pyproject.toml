@@ -36,7 +36,10 @@ postgres = ["psycopg[binary]>=3.2"]
 # (`uv sync --extra server`); the agent never imports it (it runs the digest the server verified) and its wheel and
 # image do not carry it. Without it, a signed engine's version cannot be verified (Try says so). Apache-2.0,
 # maintained by the Sigstore project (OpenSSF).
-server = ["sigstore>=4.6,<5"]
+# Single sign-on through an OpenID Connect provider (1.6.0, #39): Authlib (BSD-3) for the authorization-code exchange
+# with PKCE, and joserfc (BSD-3, Authlib's own JOSE library, installed with it) to check the ID token's signature.
+# Imported only when an identity provider is used; without them the console says single sign-on is unavailable.
+server = ["sigstore>=4.6,<5", "authlib>=1.9.10,<1.10", "joserfc>=1.6.8"]
 # Agent on NVIDIA machines: NVML bindings (read-only; no CUDA context, no GPU memory).
 # AMD machines use the amdsmi library that ships with ROCm.
 nvidia = ["nvidia-ml-py>=12.535"]

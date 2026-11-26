@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 from forgeyard import audit
 from forgeyard.api import links
 from forgeyard.api.deps import Caller, fail, normalise_username, public_base, require_admin, user_out
-from forgeyard.db import User, get_db
+from forgeyard.db import User, UserIdentity, get_db
 from forgeyard.security import mfa, mfa_policy, sessions
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -50,7 +50,8 @@ def list_users(_: Caller = Depends(require_admin), db: DbSession = Depends(get_d
     users = db.scalars(select(User).order_by(User.status != "pending", User.username)).all()
     with_mfa = mfa.users_with_factor(db)
     policy = mfa_policy.load(db)
-    return {"users": [user_out(u, has_mfa=u.id in with_mfa, policy=policy) for u in users]}
+    linked = set(db.scalars(select(UserIdentity.user_id).distinct()).all())
+    return {"users": [user_out(u, has_mfa=u.id in with_mfa, policy=policy, sso_linked=u.id in linked) for u in users]}
 
 
 def _policy_out(db: DbSession) -> dict:

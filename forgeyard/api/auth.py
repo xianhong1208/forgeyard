@@ -19,13 +19,12 @@ from forgeyard.api.deps import (
     current,
     fail,
     normalise_username,
-    optional_user,
     signed_in,
     user_out,
 )
 from forgeyard.config import get_settings
 from forgeyard.db import Session, User, get_db, utcnow
-from forgeyard.security import mfa, passwords, secrets_store, sessions
+from forgeyard.security import mfa, passwords, secrets_store, sessions, sso
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -74,9 +73,12 @@ def has_users(db: DbSession) -> bool:
     return (db.scalar(select(func.count()).select_from(User)) or 0) > 0
 
 
-def _start_session(request: Request, response: Response, db: DbSession, user: User, *, mfa_at=None) -> None:
+def start_session(request: Request, response: Response, db: DbSession, user: User, *, mfa_at=None,
+                  auth_method: str = "password", fresh_until=None) -> None:
     token, row = sessions.create(db, user, client_ip(request), request.headers.get("user-agent"))
     row.mfa_at = mfa_at
+    row.auth_method = auth_method      # "sso": signed in through the identity provider (forgeyard/api/sso.py)
+    row.fresh_until = fresh_until
     user.last_login_at = utcnow()
     response.set_cookie(
         sessions.COOKIE,
@@ -98,15 +100,22 @@ def _check_password(password: str, username: str) -> None:
 @router.get("/state")
 def state(request: Request, db: DbSession = Depends(get_db)):
     """What the sign-in screens need before anyone is signed in."""
-    user, ended = optional_user(request, db)
+    row, reason = sessions.resolve(db, request.cookies.get(sessions.COOKIE))
+    user = row.user if row is not None else None
+    ended = None if row is not None or reason == "no_session" else reason
     return {
         "needs_setup": not has_users(db),
         "registration": get_settings().registration,
-        "user": user_out(user) if user else None,
+        "user": user_out(user, via_sso=row.auth_method == "sso") if row is not None else None,
+        # 1.6.0 (#39): how this browser signed in (password | sso), and until when it counts as freshly signed in
+        # through the identity provider (stands in for the password where one is asked again).
+        "session": {"auth_method": row.auth_method, "fresh_until": row.fresh_until} if row is not None else None,
         # Why this browser's session ended, so the sign-in page can say so.
         "ended": ended,
         # HTTPS or not: admins get a warning while the server speaks plain HTTP.
         "tls": tls_state(request),
+        # 1.6.0 (#39): {"name": …} when people can sign in through an identity provider, else None.
+        "sso": sso.public_info(db),
     }
 
 
@@ -132,7 +141,7 @@ def setup(body: SetupIn, request: Request, response: Response, db: DbSession = D
         db.add(owner)
         db.flush()
         audit.record(db, "setup.owner_created", actor=owner, target=username, ip=ip)
-        _start_session(request, response, db, owner)
+        start_session(request, response, db, owner)
         db.commit()
         secrets_store.discard_setup_token()
     return {"user": user_out(owner)}
@@ -168,7 +177,7 @@ def login(body: LoginIn, request: Request, response: Response, db: DbSession = D
         return {"mfa_required": True, "challenge": challenge,
                 "expires_in": int(mfa.CHALLENGE_TTL.total_seconds())}
     limiter.login_succeeded(name)
-    _start_session(request, response, db, user)
+    start_session(request, response, db, user)
     audit.record(db, "auth.login", actor=user, ip=ip)
     db.commit()
     return {"user": user_out(user)}
@@ -204,7 +213,7 @@ def login_code(body: LoginCodeIn, request: Request, response: Response, db: DbSe
         raise fail(400, "mfa_challenge_expired", "This sign-in took too long or had too many wrong codes. "
                                                  "Sign in again.")
     limiter.login_succeeded(user.username)
-    _start_session(request, response, db, user, mfa_at=utcnow())
+    start_session(request, response, db, user, mfa_at=utcnow())
     audit.record(db, "auth.login", actor=user, ip=ip, mfa=how)
     left = None
     if how == "recovery":
@@ -228,10 +237,12 @@ def logout(request: Request, response: Response, db: DbSession = Depends(get_db)
 
 @router.get("/me")
 def me(caller: Caller = Depends(signed_in)):  # also while a required two-factor setup is overdue
-    return {"user": user_out(caller.user), "session": {
+    return {"user": user_out(caller.user, via_sso=caller.session.auth_method == "sso"), "session": {
         "id": caller.session.public_id,
         "expires_at": caller.session.expires_at,
         "idle_minutes": get_settings().session_idle_minutes,
+        "auth_method": caller.session.auth_method,
+        "fresh_until": caller.session.fresh_until,
     }}
 
 

@@ -27,10 +27,12 @@ GONE_API = [("POST", "/api/workloads"), ("GET", "/api/workloads/templates"), ("P
             ("POST", "/api/playground/vision/detector/detect")]
 
 
-# Columns of later migrations that this code reads on every signed-in request (1.6.0, 0020: sessions.mfa_at). These
+# Columns of later migrations that this code reads on every signed-in request (1.6.0, 0020: sessions.mfa_at; 0021:
+# sessions.auth_method and fresh_until). These
 # tests drive the 1.5.2 database through today's API, so the column stays while the database is at 0018, and goes again
 # just before the upgrade adds it.
-LATER_COLUMNS = (("sessions", "mfa_at", "TIMESTAMP"),)
+LATER_COLUMNS = (("sessions", "mfa_at", "TIMESTAMP"), ("sessions", "auth_method", "VARCHAR(16) NOT NULL DEFAULT 'password'"),
+                 ("sessions", "fresh_until", "TIMESTAMP"))
 
 
 def down_to_1_5_2() -> None:

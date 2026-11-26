@@ -76,6 +76,7 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 | `RATE_LIMIT_PER_MINUTE` | `600` | Requests per minute per address to the web UI's API, `/api` (0: no limit). The gateway, `/v1`, has per-key limits instead |
 | `LOGIN_FREE_FAILURES` | `5` | Failed sign-ins per account before each further try waits (2 s, doubling, at most 5 min) |
 | `LOGIN_IP_FAILURES` | `30` | Failed sign-ins per address within 15 minutes before that address waits |
+| `SSO_CA_FILE` | empty | Single sign-on (1.6.0): a CA file to trust for the identity provider on top of the system's, for a provider inside your network with your own CA (a company CA). Calls to the provider go out directly, never through `EGRESS_PROXY`. The provider itself is set on **Users** |
 
 Required two-factor sign-in (1.6.0) is not an environment setting: admins set it on **Users** (`GET` / `PUT
 /api/users/mfa-policy` with `mfa_required` = `off`, `admins` or `everyone`, and `mfa_grace_days`, 0 to 90, default
@@ -83,6 +84,22 @@ Required two-factor sign-in (1.6.0) is not an environment setting: admins set it
 `GET /api/auth/state`, `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/mfa/factors`, `POST
 /api/auth/mfa/totp/start` and `POST /api/auth/mfa/totp`. Each user carries `mfa_enrolment`: `null`, or `{"by": …,
 "due": …}` while it is required of them and they have no authenticator. API keys (`/v1`) are not affected.
+
+Single sign-on (1.6.0) is not an environment setting either, apart from `SSO_CA_FILE`: admins set the one identity
+provider on **Users** (`GET` / `PUT` / `DELETE /api/identity-provider`, and `POST /api/identity-provider/check` with
+`{"issuer"}` to read its discovery document). `client_secret` is write-only: left out of a `PUT` it is kept, `""`
+removes it, and answers only say `has_client_secret`. `new_accounts` is `approve` (default) or `automatic`, which
+needs `allowed_domains`; `role_claim` with `role_mapping` (`{"<claim value>": "admin" | "operator" | "user"}`) sets
+roles at each sign-in. The sign-in itself is `POST /api/auth/sso/start` (`purpose`: `login`, `link` or `reauth`)
+and `POST /api/auth/sso/finish` from the web UI's `/sso/callback` page; `GET /api/auth/sso/identities` and `POST
+/api/auth/sso/unlink` are My account's. `GET /api/auth/state` carries `sso` (`{"name"}` or `null`) and `session`
+(`auth_method`: `password` or `sso`, and `fresh_until`). Error codes: `sso_not_configured`, `sso_unavailable`,
+`sso_provider_unreachable`, `sso_state_invalid`, `sso_denied`, `sso_token_failed`, `sso_token_invalid` (with
+`reason`: `alg`, `signature`, `iss`, `aud`, `exp`, `iat`, `nonce` or `sub`), `sso_not_fresh`, `sso_domain_not_allowed`,
+`sso_email_unverified`, `sso_wrong_account`, `pending_approval`, `account_disabled`, `identity_in_use`,
+`identity_already_linked`, `no_linked_identity`, `last_way_in`, `fresh_sign_in_required`. Audit actions:
+`auth.sso_login`, `auth.sso_login_failed`, `user.registered` (`via: sso`), `user.identity_linked`,
+`user.identity_unlinked`, `idp.created`, `idp.changed`, `idp.deleted`.
 
 ### Machines
 

@@ -427,17 +427,20 @@ def registrations_pending(ctx: Context) -> Iterator[Finding]:
     if waiting:
         yield Finding("registrations-pending", "info", f"{_plural(len(waiting), 'person', 'people')} waiting for approval",
                       f"{_names(waiting)} asked for an account. Approve or remove them on Users.", "/users", "Open Users",
-                      pages=("users",))
+                      # Every name (the detail shows three): the console writes the detail in its language from them.
+                      pages=("users",), facts={"people": waiting})
 
 
 @check
 def admins_without_mfa(ctx: Context) -> Iterator[Finding]:
     """1.6.0 (#39): active admins who sign in with a password alone. A warning once two-factor sign-in is required
-    of admins (PR 2): they are then on a deadline."""
+    of admins (PR 2): they are then on a deadline. An admin without a password (single sign-on only, PR 3) is not
+    one: the identity provider does their second factor."""
     from forgeyard.security import mfa, mfa_policy
 
     with_mfa = mfa.users_with_factor(ctx.db)
-    bare = sorted(u.username for u in ctx.users if u.role == "admin" and u.status == "active" and u.id not in with_mfa)
+    bare = sorted(u.username for u in ctx.users if u.role == "admin" and u.status == "active" and u.id not in with_mfa
+                  and u.password_hash is not None)
     if not bare:
         return
     required = mfa_policy.load(ctx.db).level != "off"  # admins and everyone both cover admins

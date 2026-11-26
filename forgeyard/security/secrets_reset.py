@@ -10,7 +10,9 @@ secret.key.lost-<time>), then for every stored secret the new key cannot read:
   delete the workload and create it again with the values;
 - provider keys (1.2) are dropped: enter them again on Cloud → Providers;
 - authenticator apps of two-factor sign-in (1.6.0) are removed, and an account left without one loses its recovery
-  codes too: those people sign in with their password alone and add their authenticator again in My account.
+  codes too: those people sign in with their password alone and add their authenticator again in My account;
+- the identity provider's client secret (single sign-on, 1.6.0) is dropped and the provider turned off: enter the
+  secret again on Users and turn it back on.
 
 Nothing else changes: accounts, sessions, API keys and machines are hashed, not encrypted.
 """
@@ -38,6 +40,8 @@ events = sa.table("workload_events", sa.column("workload_id", sa.Integer), sa.co
 mfa_factors = sa.table("mfa_factors", sa.column("id", sa.Integer), sa.column("user_id", sa.Integer),
                        sa.column("secret", sa.Text))
 recovery_codes = sa.table("recovery_codes", sa.column("user_id", sa.Integer))
+idps = sa.table("identity_providers", sa.column("id", sa.Integer), sa.column("client_secret", sa.Text),
+                sa.column("enabled", sa.Boolean))
 settings_t = sa.table("server_settings", sa.column("key", sa.String), sa.column("value", sa.JSON),
                       sa.column("updated_by", sa.String), sa.column("updated_at", sa.DateTime(timezone=True)))
 
@@ -72,7 +76,8 @@ def reset() -> dict:
     crypto.reset()
     box = crypto.box()  # a new key file (or FORGEYARD_SECRET_KEY, if that is set)
     upgrade()
-    counts = {"hf_tokens": 0, "replicas": 0, "env_values": 0, "provider_keys": 0, "authenticators": 0}
+    counts = {"hf_tokens": 0, "replicas": 0, "env_values": 0, "provider_keys": 0, "authenticators": 0,
+              "sso_secrets": 0}
     with get_engine().begin() as conn:
         for row in conn.execute(sa.select(deployments.c.id, deployments.c.hf_token)
                                 .where(deployments.c.hf_token.is_not(None))).all():
@@ -92,6 +97,10 @@ def reset() -> dict:
             if not _readable(box, row.api_key, "providers.api_key"):
                 conn.execute(providers.update().where(providers.c.id == row.id).values(api_key=None, key_last4=None))
                 counts["provider_keys"] += 1
+        for row in conn.execute(sa.select(idps.c.id, idps.c.client_secret).where(idps.c.client_secret.is_not(None))).all():
+            if not _readable(box, row.client_secret, "identity_providers.client_secret"):
+                conn.execute(idps.update().where(idps.c.id == row.id).values(client_secret=None, enabled=False))
+                counts["sso_secrets"] += 1
         touched: set[int] = set()
         for row in conn.execute(sa.select(mfa_factors.c.id, mfa_factors.c.user_id, mfa_factors.c.secret)).all():
             if not _readable(box, row.secret, "mfa_factors.secret"):
@@ -146,7 +155,7 @@ def reset() -> dict:
         db.close()
     summary = (f"Dropped {counts['hf_tokens']} Hugging Face token(s), placed {counts['replicas']} model replica(s) "
                f"again, emptied {counts['env_values']} workload environment value(s), dropped "
-               f"{counts['provider_keys']} provider key(s) and removed {counts['authenticators']} authenticator app(s) "
-               "of two-factor sign-in.")
+               f"{counts['provider_keys']} provider key(s), removed {counts['authenticators']} authenticator app(s) "
+               f"of two-factor sign-in and dropped {counts['sso_secrets']} identity provider secret(s).")
     where = crypto.KEY_ENV if crypto.key_from_env() else str(path)
     return {"kid": box.kid, "key_file": where, **counts, "summary": summary}

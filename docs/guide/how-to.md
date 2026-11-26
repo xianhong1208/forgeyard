@@ -1607,6 +1607,99 @@ why that host, like its data directory, must be kept to the people who run Forge
 If the server's secret key is lost for good, [`secrets reset`](#back-up-and-restore) removes every authenticator,
 because it can no longer read them.
 
+## Sign in with single sign-on (OIDC)
+
+People can sign in through your organisation's identity provider (1.6.0) over OpenID Connect: Keycloak, Authentik,
+Microsoft Entra ID, Google, or any provider that publishes a discovery document. A server has one provider. Signing
+in with a password stays, for everyone who has one.
+
+The sign-in uses the authorization code flow with PKCE, `state` and `nonce`. Forgeyard accepts only ID tokens signed
+with RS256 or ES256 by a key the provider publishes, for its own client id, from the issuer you set, not expired.
+
+### Register Forgeyard at the provider
+
+Every provider asks for the **redirect URI**. Copy it from **Users → Single sign-on (OIDC)**: it is `PUBLIC_URL`
+followed by `/sso/callback`, for example `https://forgeyard.example.com:7860/sso/callback`. Set `PUBLIC_URL`
+([Network and addresses](reference.md#network-and-addresses)) so it does not change with the address someone typed.
+
+- **Keycloak**: in the realm, **Clients → Create client**, type *OpenID Connect*, **Client authentication** on,
+  **Standard flow** only, **Valid redirect URIs** = the redirect URI. The client secret is on its **Credentials**
+  tab. The issuer is `https://<host>/realms/<realm>`. For roles from groups, add a *Group Membership* mapper to the
+  client's dedicated scope, with the token claim name `groups` and **Full group path** off.
+- **Authentik**: **Applications → Providers → Create**, *OAuth2/OpenID Provider*, client type *Confidential*, the
+  redirect URI as a strict match, then an application that uses it. The issuer is
+  `https://<host>/application/o/<application slug>/` (with the trailing slash, as Authentik publishes it).
+- **Microsoft Entra ID**: **App registrations → New registration**, *Accounts in this organizational directory only*,
+  platform *Web* with the redirect URI; then a client secret under **Certificates & secrets**. The issuer is
+  `https://login.microsoftonline.com/<tenant id>/v2.0`. For roles, define app roles and assign them (they arrive in
+  the `roles` claim). A `groups` claim works too, but Entra leaves it out of the token for people in more than 200
+  groups. Entra does not check the e-mail addresses people put in their profile: keep new accounts waiting for
+  approval, or use allowed domains only with a single-tenant app.
+- **Google**: Google Cloud console, **APIs & Services → Credentials → Create credentials → OAuth client ID**,
+  type *Web application*, with the redirect URI under **Authorized redirect URIs**. The issuer is
+  `https://accounts.google.com`. Google refuses redirect URIs on a raw IP address (`https://192.168.1.20:7860/…`) and
+  on plain `http://` except `localhost`, so the server must be reached by a DNS name over HTTPS (your own certificate,
+  or a proxy in front). Anyone with a Google account can sign in at Google, so set **Allowed e-mail domains**. Google
+  sends no groups: set roles on **Users**.
+
+### Set it up in Forgeyard
+
+On **Users**, under **Single sign-on (OIDC)** (admins):
+
+1. **Name**: the sign-in page shows *Sign in with <name>*.
+2. **Issuer URL**, then **Check**: Forgeyard reads the provider's discovery document and says what it found.
+3. **Client ID** and **Client secret**. The secret is encrypted with the server's secret key and never shown again;
+   leave the field empty to keep it. Tick **No client secret** for a public client (PKCE only).
+4. **Scopes**: `openid email profile` by default. Add the scope that puts groups or roles in the ID token if your
+   provider needs one.
+5. **When someone new signs in**: *wait for an admin's approval* (the default) or *an active account at once*, which
+   needs at least one **allowed e-mail domain**.
+6. Optionally **Roles from the identity provider** (below), then **Turn on single sign-on** and **Save**. Saving with
+   it on reads the discovery document again and refuses a provider that cannot be used.
+
+The sign-in page then shows **Sign in with <name>** under the password form. A provider inside your network with a
+certificate from your own CA needs `SSO_CA_FILE` ([Accounts and sign-in](reference.md#accounts-and-sign-in)): it is
+trusted on top of the system's CAs, so a provider whose certificate comes from a company CA works. Calls to the identity provider
+(its discovery document, keys and token endpoint) go out directly from the server, never through `EGRESS_PROXY`: the
+server must reach the provider itself.
+**Remove** deletes the provider and every link to it; accounts stay, and those without a password then need a
+set-password link from **Users**.
+
+### Who gets in, and with which role
+
+- **Accounts are found by the provider's issuer and subject, never by e-mail.** Someone whose e-mail address at the
+  provider is an existing person's does not reach that person's account: they get a new one.
+- **Someone the server does not know yet** gets a new account named after their `preferred_username` (or the
+  e-mail's first part). With *approval*, it waits on **Users** for **Approve** or **Reject**, and the sign-in page says
+  so; with *an active account at once*, they are signed in. When **Allowed e-mail domains** is set, nobody outside
+  those domains gets an account in either case, and an address the provider marks unverified is refused.
+- **An existing account is linked by its owner**: in **My account**, under **Single sign-on**, type your password (or a
+  code from your authenticator app) and choose **Link <name>**; the provider asks for your password again. **Unlink**
+  works while you still have a password to sign in with.
+- **A disabled account cannot sign in**, through the provider either.
+- **Roles from the identity provider**: name the **Role claim** (for example `groups` or `roles`) and the values for
+  each role. At every sign-in the person gets the highest role one of their values gives, or *user* when none
+  matches; a token without the claim leaves the role as it is. The owner's role never changes. Without a mapping,
+  roles are set on **Users** only.
+
+### Two-factor sign-in and passwords
+
+- A session that signed in through the provider is not asked for Forgeyard's two-factor sign-in, even when it is
+  required ([Require two-factor for everyone](#require-two-factor-for-everyone)): turn on two-factor sign-in at the
+  provider. The same person signing in with their password is still asked.
+- An account made through the provider has **no password**. Where Forgeyard asks for the password again (downloading
+  the secret key backup, adding an authenticator app), such an account chooses **Sign in again with <name>**: the
+  provider asks for the password again (`max_age=0`, plus `prompt=login` except at Google), and for the next 5
+  minutes that counts as the password. A code from an authenticator app works too.
+- **API keys** are not tied to the provider: when someone leaves and is removed at the provider, their keys keep
+  working until an admin disables their account on **Users** (which stops the keys at once).
+
+Each sign-in through the provider is in the **Audit log** as `auth.sso_login`, and each refused one as
+`auth.sso_login_failed` with the reason (for example `state_invalid`, `token_invalid:nonce`, `pending_approval`,
+`account_disabled`, `domain_not_allowed`). New accounts are `user.registered` (via `sso`), links
+`user.identity_linked` and `user.identity_unlinked`, and the admins' changes `idp.created`, `idp.changed` (never with
+the secret) and `idp.deleted`.
+
 ## Use the console in Traditional Chinese
 
 The console speaks English and Traditional Chinese (1.5.1). The first time a browser opens it, it follows the

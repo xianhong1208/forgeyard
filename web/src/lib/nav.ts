@@ -6,7 +6,7 @@ import { labels } from "../i18n/core";
 // "/" shows the Get started list until it is done or hidden, then sends people on to MACHINES.
 export const HOME = "/";
 export const MACHINES = "/machines";
-const AUTH_PAGES = ["/login", "/setup", "/set-password", "/register"];
+const AUTH_PAGES = ["/login", "/setup", "/set-password", "/register", "/sso/callback"];
 
 export function safeNext(next: string | null | undefined): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return HOME;

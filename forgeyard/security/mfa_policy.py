@@ -114,6 +114,8 @@ def enrolment(db: DbSession, user: User, *, policy: Optional[Policy] = None,
     policy = policy or load(db)
     if policy.level == "off":
         return None
+    if user.password_hash is None:  # 1.6.0 PR 3: it can only sign in through the identity provider, which does MFA
+        return None
     by = deadline(policy, user)
     if by is None:
         return None

@@ -2008,3 +2008,27 @@ a.chip-update:hover { border-color: var(--heat-ink); }
   .mfa-enrol-grid { grid-template-columns: minmax(0, 1fr); }
   .recovery-list { columns: 1; }
 }
+/* Single sign-on (1.6.0 PR 3): "Sign in with <name>", My account's linked account, the admins' provider settings. */
+.sso-signin { margin-top: 14px; display: grid; gap: 10px; }
+.sso-or { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--muted, #6b7280); font-size: 13px; }
+.sso-or::before, .sso-or::after { content: ""; flex: 1; border-top: 1px solid var(--line, #d8dde3); }
+.sso-button { justify-content: center; }
+.sso-panel, .sso-admin { margin-top: 24px; }
+.sso-panel h2, .sso-admin h2 { display: inline-flex; align-items: center; gap: 8px; }
+.sso-admin { max-width: 760px; }
+.sso-form { display: grid; gap: 14px; margin-top: 12px; }
+.sso-form .field { margin: 0; }
+.sso-redirect .field-hint { margin-top: 6px; }
+.sso-issuer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.sso-issuer > .btn { margin-top: 24px; }
+.sso-secret { display: grid; gap: 6px; }
+.sso-fieldset { border: 1px solid var(--line, #d8dde3); border-radius: 8px; padding: 10px 14px 14px; margin: 0; display: grid; gap: 8px; min-width: 0; }
+.sso-fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
+.sso-fieldset .check { align-items: flex-start; }
+.sso-fieldset .check input { margin-top: 2px; flex: none; }
+.sso-roles summary { cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.sso-confirm p { margin: 0; }
+@media (max-width: 600px) {
+  .sso-issuer { grid-template-columns: minmax(0, 1fr); }
+  .sso-issuer > .btn { margin-top: 0; justify-self: start; }
+}

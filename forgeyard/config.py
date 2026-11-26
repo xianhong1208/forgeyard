@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     login_free_failures: int = 5
     # Failed sign-ins per IP within 15 minutes before that IP must wait.
     login_ip_failures: int = 30
+    # Single sign-on (1.6.0): a CA file to trust for the identity provider on top of the system's (an internal
+    # Keycloak or Authentik with a company CA). The provider itself is set on Users by an admin.
+    sso_ca_file: str = ""
 
     # Machines: a machine with nothing heard for this long is shown offline (a server-side check, so a
     # silent network drop counts). Agents send a heartbeat every third of it (at least 2 s).

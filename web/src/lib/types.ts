@@ -15,6 +15,8 @@ export type User = {
   // 1.6.0 (#39, PR 2): while two-factor sign-in is required of this account and it has no authenticator: by when,
   // and whether that is past (then its session reaches only the setup). null otherwise; older servers leave it out.
   mfa_enrolment?: { by: string; due: boolean } | null;
+  // 1.6.0 (#39, PR 3): linked to an account at the identity provider. Older servers leave it out.
+  sso_linked?: boolean;
   created_at: string;
   last_login_at: string | null;
 };
@@ -26,6 +28,10 @@ export type AuthState = {
   ended?: string | null;
   // forgeyard-ca | own | off, and whether this page came over HTTPS (directly or through a trusted proxy).
   tls?: { mode: TlsMode; https: boolean };
+  // 1.6.0 (#39, PR 3): the identity provider people can sign in through (its name), or null. Older servers leave it out.
+  sso?: { name: string } | null;
+  // How this browser signed in, and until when it counts as freshly signed in through the identity provider.
+  session?: { auth_method: "password" | "sso"; fresh_until: string | null } | null;
 };
 
 export type TlsMode = "forgeyard-ca" | "own" | "off";
@@ -38,6 +44,9 @@ export type SecretKeyInfo = {
   tls_mode: TlsMode;
   has_password: boolean;
   has_mfa?: boolean;
+  // 1.6.0 (PR 3): an admin without a password confirms with a fresh sign-in through the identity provider.
+  sso_linked?: boolean;
+  fresh_until?: string | null;
   passphrase_min: number;
   backed_up: { kid: string; by: string; at: string; how?: string } | null;
 };
