@@ -30,7 +30,7 @@ from tests.workload_helpers import make_node
 
 GIB = 1024**3
 SAMPLE = EntryPoint("sample", "tests.fixtures.ext_sample:extension", extensions.GROUP)
-COMMUNITY_HEAD = "0023_gpu_usage"
+COMMUNITY_HEAD = "0024_stable_ids"
 COMMUNITY_TABLE = "gpu_usage_daily"   # made by the community head
 
 

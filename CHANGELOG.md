@@ -41,6 +41,12 @@ version until 1.0.
 
 - A team's manager no longer sees "engine arguments" in the **Advanced** summary of a deployment's **Change** page,
   whose field is hidden for them.
+- On SQLite, the id of a deleted deployment, API key, person, team, machine (and of a deleted catalog model, download,
+  provider, provider model, gateway route or workload) is no longer given to the next one made. Rows that keep an id
+  without a foreign key mixed the two up: GPU hours summed a deleted deployment's time and a new one's into one row,
+  a new key took over a deleted key's usage, and a deployment pinned to a removed machine could follow its id to the
+  next machine that joined. PostgreSQL was not affected. **History recorded before 1.6.1 may already hold rows of two
+  things under one id; they cannot be split.**
 
 ### Migrations
 
@@ -51,6 +57,13 @@ version until 1.0.
 - `0023_gpu_usage`: table `gpu_usage_daily` (day, deployment, team, machine, vendor, GPU model, `gpu_ms`, `ram_mib_ms`,
   `busy_ms`; unique on day, deployment, team, machine and GPU model; no foreign keys). No existing row changes;
   counting starts when the upgraded server runs. Going down drops the table and the hours in it.
+- `0024_stable_ids` (SQLite only; nothing happens on PostgreSQL): `users`, `teams`, `api_keys`, `nodes`, `workloads`,
+  `models`, `model_downloads`, `deployments`, `providers`, `provider_models` and `gateway_routes` are rebuilt with
+  `AUTOINCREMENT` (SQLite's own procedure: foreign keys off, one transaction, the stored table text with only the
+  primary key clause changed, rows copied, indexes recreated, `foreign_key_check` before the commit). No column, row,
+  foreign key, cascade rule or index changes. Each table then starts above the highest id it ever used, counting the
+  ids that only history still holds (usage, GPU hours, budget alerts, video jobs, join tokens, a pinned machine, audit
+  detail, snoozed Setup health findings). Going down rebuilds them without `AUTOINCREMENT`.
 
 ### API changes
 

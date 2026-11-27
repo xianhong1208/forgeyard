@@ -35,12 +35,19 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Tables whose ids are kept by rows without a foreign key (usage, GPU hours, audit detail, pinned machines, snoozed
+# findings): on SQLite they use AUTOINCREMENT, so the id of a deleted row is never given to a new one (1.6.1, #190;
+# migration 0024). PostgreSQL's sequences never reuse an id; the option does nothing there.
+STABLE_IDS = {"sqlite_autoincrement": True}
+
+
 class Base(DeclarativeBase):
     pass
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -71,6 +78,7 @@ class Team(Base):
     makes one, and a key, deployment or usage row without a team works exactly as before."""
 
     __tablename__ = "teams"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # like a username: [a-z0-9._-]
@@ -263,6 +271,7 @@ class Node(Base):
     """A machine, represented by its agent."""
 
     __tablename__ = "nodes"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
@@ -341,6 +350,7 @@ class Workload(Base):
     workload is a model deployment's (runtime "model"); apps, the others, were removed."""
 
     __tablename__ = "workloads"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(48), unique=True)
@@ -433,6 +443,7 @@ class CatalogModel(Base):
     needs (from inspecting it once, when it was added)."""
 
     __tablename__ = "models"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
@@ -469,6 +480,7 @@ class Deployment(Base):
     """A model served with a recipe: expands into one service workload and one gateway route."""
 
     __tablename__ = "deployments"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(48), unique=True)
@@ -502,6 +514,7 @@ class GatewayRoute(Base):
     it (a cloud model to spill to) or create routes without one (a cloud-only model)."""
 
     __tablename__ = "gateway_routes"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     served_name: Mapped[str] = mapped_column(String(128), unique=True)
@@ -552,6 +565,7 @@ class Provider(Base):
     Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible URL (a vLLM elsewhere)."""
 
     __tablename__ = "providers"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
@@ -608,7 +622,7 @@ class ProviderModel(Base):
 
     provider: Mapped[Provider] = relationship(back_populates="models")
 
-    __table_args__ = (Index("ix_provider_models_name", "provider_id", "upstream_model", "api", unique=True),)
+    __table_args__ = (Index("ix_provider_models_name", "provider_id", "upstream_model", "api", unique=True), STABLE_IDS)
 
 
 class ApiKey(Base):
@@ -616,6 +630,7 @@ class ApiKey(Base):
     people see to tell their keys apart."""
 
     __tablename__ = "api_keys"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # What the UI and the API use to refer to a key; never the key or its hash.
@@ -842,6 +857,7 @@ class ModelDownload(Base):
     per machine."""
 
     __tablename__ = "model_downloads"
+    __table_args__ = STABLE_IDS
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # What the agent knows it by. Random, like replicas.uid.
