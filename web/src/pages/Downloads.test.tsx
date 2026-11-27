@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import { downloadLine, recentDownloads, targetDetail } from "../lib/downloads";
+import { CATALOG_FAILED_MS, catalogDownloads, downloadLine, recentDownloads, targetDetail } from "../lib/downloads";
 import { downloadText } from "../lib/models";
 import type { CatalogResponse, DownloadTarget, DownloadTargets, MachineCache, ModelDownload } from "../lib/types";
 import fixture from "../test/machines.json";
@@ -140,7 +140,7 @@ describe("Download to…", () => {
 
   it("FY-WEB-278 progress under the model, with the deployment's words, and Cancel after asking", async () => {
     let list = [dl(), dl({ id: 8, machine: { id: 3, name: "cpu-b", connected: true }, state: "failed", download: null,
-      reason: "Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co", finished_at: "2026-11-16T10:05:00Z" })];
+      reason: "Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co", finished_at: new Date(Date.now() - 3600_000).toISOString() })];
     const fetch = server((url, init) => {
       if (url === "/api/models") return { status: 200, body: catalog };
       if (url === "/api/downloads/9/cancel" && init?.method === "POST") {
@@ -166,7 +166,9 @@ describe("Download to…", () => {
     fireEvent.click(cancel);
     expect(await screen.findByText("Cancelled the download of qwen3-1.7b-gguf to a100-box.")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
-    expect(screen.getByText(/^Cancelled by owner/)).toBeTruthy();
+    // The catalog keeps only downloads under way or just failed (1.6.2): the cancelled one leaves the list.
+    expect(screen.queryByText(/^Cancelled by owner/)).toBeNull();
+    expect(screen.getByText(/^Failed: Qwen3/)).toBeTruthy();
   });
 
   it("FY-WEB-279 from a machine's page: pick a model, this machine ticked; its downloads listed there", async () => {
@@ -238,5 +240,33 @@ describe("Download to…", () => {
     const list = [dl({ id: 4 }), dl({ id: 3, state: "done" }), dl({ id: 2, state: "failed", machine: { id: 2, name: "b", connected: true } }),
       dl({ id: 1, state: "failed" })];
     expect(recentDownloads(list, "machine").map((d) => d.id)).toEqual([4, 2]);
+  });
+  it("FY-WEB-1051 the catalog list shows downloads under way and failures of the last day, not finished ones (1.6.2)", async () => {
+    const now = Date.parse("2026-11-27T12:00:00Z");
+    const ago = (ms: number) => new Date(now - ms).toISOString();
+    const m = (id: number, name: string) => ({ id, name, connected: true });
+    const list = [
+      dl({ id: 20, machine: m(1, "a100-box") }),                                                              // under way
+      dl({ id: 19, machine: m(2, "b"), state: "done", download: null, finished_at: ago(60_000) }),            // history
+      dl({ id: 18, machine: m(3, "c"), state: "failed", download: null, reason: "disk full", finished_at: ago(3600_000) }),
+      dl({ id: 17, machine: m(4, "d"), state: "failed", download: null, reason: "old", finished_at: ago(CATALOG_FAILED_MS + 1000) }),
+      dl({ id: 16, machine: m(5, "e"), state: "cancelled", download: null, finished_at: ago(1000) }),
+      dl({ id: 15, machine: m(6, "f"), state: "done", download: null, finished_at: ago(1000) }),              // a later success …
+      dl({ id: 14, machine: m(6, "f"), state: "failed", download: null, reason: "net", finished_at: ago(5000) }), // … hides this
+      dl({ id: 13, machine: m(7, "g"), state: "queued", download: null }),
+    ];
+    expect(catalogDownloads(list, now).map((d) => d.id)).toEqual([20, 13, 18]);
+    // In the catalog: no "Downloaded …" row and no chip saying done; the failure of the last hour is there.
+    const shown = [dl({ machine: m(1, "a100-box") }), dl({ id: 7, machine: m(2, "b"), state: "done", download: null, via: "server", finished_at: new Date().toISOString() }),
+      dl({ id: 6, machine: m(3, "c"), state: "failed", download: null, reason: "disk full", finished_at: new Date(Date.now() - 3600_000).toISOString() })];
+    server((url) => url === "/api/models" ? { status: 200, body: catalog }
+      : url === "/api/downloads" ? { status: 200, body: { downloads: shown, can_download: true } }
+        : url === "/api/deployments" ? { status: 200, body: { deployments: [] } } : undefined);
+    mount("/models");
+    await screen.findByRole("progressbar", { name: "Download of qwen3-1.7b-gguf to a100-box" });
+    const rows = screen.getByRole("list", { name: "Downloads" });
+    expect(within(rows).getAllByRole("listitem").map((li) => li.querySelector("strong")!.textContent)).toEqual(["a100-box", "c"]);
+    expect(within(rows).getByText("Failed: disk full")).toBeTruthy();
+    expect(screen.queryByText(/^Downloaded/)).toBeNull();
   });
 });

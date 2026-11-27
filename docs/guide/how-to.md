@@ -462,10 +462,10 @@ comes through the server, from one of two places:
 
 Which one it was shows in several places:
 
-- the progress, on the deployment's page, under the model in the catalog and on the machine's page:
-  *Downloading the model via the server: … of …* from the internet, *Downloading the model via the
-  server, from gpu-01: … of …* from that machine's cache, then *Downloaded … via the server* or
-  *Downloaded … via the server, from gpu-01* when it is done;
+- the progress, on the deployment's page, under the model in the catalog, on the model's page and on the
+  machine's page: *Downloading the model via the server: … of …* from the internet, *Downloading the model
+  via the server, from gpu-01: … of …* from that machine's cache, then, on the model's and the machine's
+  pages, *Downloaded … via the server* or *Downloaded … via the server, from gpu-01* when it is done;
 - **Download to…**, before you start: *via the server*, or *via the server, from gpu-01*, on the
   machine's line;
 - the downloads API: `via` is `direct`, `server` or `machine`, with the sending machine in `source`
@@ -2135,7 +2135,7 @@ saying so. The groups, in the order they run:
 | `relay` | models through the server: with the CPU machine's **Internet access for downloads** set to **Always through the server**, **Download to…** of a small GGUF (26 MB) arrives through the server; then a second machine (`--relay-second-machine`, default the second CPU machine, else the GPU machine) gets it from the first machine's cache. Both machines' setting goes back, and the model leaves their caches |
 | `images` | on a machine with Docker or Podman (`--engine-machine`, default the GPU machine): its engine images; an image file of a few KB that the script builds is uploaded, copied to a second machine that takes images (`--second-engine-machine`), and removed with **Remove engine image** (a recipe names it for a few seconds, since only images a recipe names may be removed) |
 | `scale` | sleep when idle, waking (by a request, **Wake now**, the Playground), spill while waking, `model_waking`, `cannot_wake`, **Stop**, automatic replicas with draining, start times and their metrics ([below](#check-sleep-waking-and-automatic-replicas)) |
-| `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
+| `console` | every main page as an admin and as a plain user, at 1440, 1100, 900 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll, and nothing on an engine card shows outside the card |
 
 `--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
 they need even when `models` is not chosen. The exit code is 0 when nothing failed, 1 when a check
@@ -2629,9 +2629,10 @@ Admins and operators can do it.
    it. Untick it to download the model only.
 4. Click **Download to N machines**.
 
-The progress shows under the model's row in the catalog and on each machine's page, with the same
-words and bar as a deployment's download. A finished one says when and how the model came
-(*Downloaded 9 d ago via the server*). Whether the engine image is on a machine is not part of that
+The progress shows under the model's row in the catalog, on the model's page and on each machine's
+page, with the same words and bar as a deployment's download. The catalog lists a download only while it
+is under way, or for a day after it failed; the model's page keeps the latest one for each machine. A
+finished one says when and how the model came (*Downloaded 9 d ago via the server*). Whether the engine image is on a machine is not part of that
 line: it can be removed or replaced later, so the engine's page and the deploy page show it as it is now. **Cancel** stops it at once on that machine; what is on
 disk is kept, and **Download to…** again goes on from there. A download on a machine that goes
 offline waits and goes on when its agent is back. When it is done, the machine's **Models in cache**
@@ -2666,8 +2667,9 @@ see [Run a machine without internet access](#run-a-machine-without-internet-acce
      directly, so there is no wait for a failure first.
    - **Direct only**: never through the server.
 2. Deploy, or use **Download to…**, as usual. The progress says *Downloading the model via the server:
-   … of …* on the deployment's page, under the model in the Catalog and on the machine's page, and a
-   finished download says *Downloaded … via the server*. The **Download to…** dialog says *via the
+   … of …* on the deployment's page, under the model in the Catalog, on the model's page and on the
+   machine's page, and a finished download says *Downloaded … via the server* on the model's and the
+   machine's pages. The **Download to…** dialog says *via the
    server* for a machine set to always use it.
 
 What stays the same: the agent resumes a download from what is on disk after a break (the server

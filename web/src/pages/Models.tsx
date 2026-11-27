@@ -5,7 +5,7 @@ import { Link, Navigate, useSearchParams } from "react-router";
 import { useAuth } from "../auth";
 import { AbilityChips } from "../components/AbilityChips";
 import { TrialCardChip } from "../components/EngineTrials";
-import { DownloadDialog, DownloadList } from "../components/DownloadTo";
+import { DownloadDialog, DownloadList, useDownloads } from "../components/DownloadTo";
 import { CheckBar, UpdateBadge } from "../components/EngineUpdates";
 import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
@@ -13,14 +13,14 @@ import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { useT } from "../i18n/react";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
-import { isActive, recentDownloads } from "../lib/downloads";
+import { catalogDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { HARDWARE_LABEL, engineDescription, engineHardware, engineRuns, freeName, renameRecipe } from "../lib/engines";
 import { engineHref, modelHref } from "../lib/pages";
 import { TASK_LABEL, mediaText, params, shortSource, taskLabel } from "../lib/models";
-import type { CatalogModel, CatalogResponse, DownloadsResponse, EngineUpdate, EngineUpdatesResponse, ModelDownload, ModelSources, Recipe,
+import type { CatalogModel, CatalogResponse, EngineUpdate, EngineUpdatesResponse, ModelDownload, ModelSources, Recipe,
   RecipeVariant } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -89,22 +89,14 @@ function Library({ tab }: { tab: LibraryTab }) {
   );
 }
 
-// 1.4: the downloads ahead of a deployment ("Download to…"), polled while one is under way.
-const DOWNLOADS_POLL_MS = 2000;
-
+// 1.4: the downloads ahead of a deployment ("Download to…"); the list shows only those under way or just failed (1.6.2).
 function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }) {
   const t = useT();
-  const dl = useApi<DownloadsResponse>("/downloads");
+  const dl = useDownloads("/downloads");
   const [dialog, setDialog] = useState<CatalogModel | null>(null);
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const running = (dl.data?.downloads ?? []).some(isActive);
   const reloadDl = dl.reload;
-  useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") reloadDl(); }, DOWNLOADS_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [running, reloadDl]);
-  const byModel = (id: number): ModelDownload[] => recentDownloads((dl.data?.downloads ?? []).filter((d) => d.model?.id === id), "machine");
+  const byModel = (id: number): ModelDownload[] => catalogDownloads((dl.data?.downloads ?? []).filter((d) => d.model?.id === id));
   const said = (tone: "ok" | "error") => (text: string) => { setNote({ tone, text }); reloadDl(); };
   return (
     <>
@@ -272,7 +264,7 @@ function EngineCard({ r, canManage, update, onEdit, onDeleted }: {
           row of chips, one line of tasks, and the Details row at the bottom. Only an open card grows. */}
       <header className="engine-head">
         <h3 className="mono" title={r.name}><Link to={engineHref(r.name)} className="name-link">{r.name}</Link></h3>
-        <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
+        <span className="chip chip-wraps engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
         {!r.builtin && <span className="chip chip-tone-run engine-custom">{t("library.custom")}</span>}
       </header>
       {/* 1.5.2 (#189): the image it runs (or its program), one line on every card so they keep one height. */}

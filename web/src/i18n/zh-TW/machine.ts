@@ -256,7 +256,6 @@ export default {
   "machine.dl.progressLabel": "{model} 到 {machine} 的下載",
   "machine.dl.state.queued": "排隊中",
   "machine.dl.state.downloading": "下載中",
-  "machine.dl.state.done": "完成",
   "machine.dl.state.failed": "失敗",
   "machine.dl.state.cancelled": "已取消",
   "machine.dl.cancelLabel": "取消到 {machine} 的下載",

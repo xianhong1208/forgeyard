@@ -226,6 +226,28 @@ describe("model and engine pages (1.4.3, #140)", () => {
     expect(within(files).queryByRole("table")).toBeNull();
   });
 
+  it("FY-WEB-1052 a model's page lists its downloads to each machine, finished ones too, with a chip only when not done (1.6.2)", async () => {
+    const row = (id: number, machine: [number, string], over: Record<string, unknown>) => ({ id, model: { id: 7, name: MODEL.name, title: null },
+      engine_only: false, machine: { id: machine[0], name: machine[1], connected: true }, file: MODEL.file, recipe: "llama-cpp", via: "direct",
+      download: null, reason: null, requested_by: "owner", created_at: "2026-11-25T10:00:00Z", finished_at: null, waiting: null, ...over });
+    const downloads = [
+      row(30, [3, "cpu-c"], { state: "queued", reason: "waiting for another download on this machine to finish" }),
+      row(29, [1, "a100-box"], { state: "done", via: "server", finished_at: new Date(Date.now() - 2 * 86400_000).toISOString() }),
+      row(28, [2, "strix"], { state: "failed", reason: "disk full", finished_at: "2026-11-20T10:00:00Z" }),
+      row(27, [1, "a100-box"], { state: "failed", reason: "older, replaced by the newer one", finished_at: "2026-11-19T10:00:00Z" }),
+    ];
+    const fetch = server((url) => url === "/api/models/qwen3-1.7b-gguf" ? { status: 200, body: modelPage() }
+      : url === "/api/downloads?model_id=7" ? { status: 200, body: { downloads, can_download: true } } : undefined);
+    mount("/models/qwen3-1.7b-gguf");
+    const list = await screen.findByRole("list", { name: "Downloads" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items.map((li) => li.querySelector("strong")!.textContent)).toEqual(["cpu-c", "a100-box", "strix"]);
+    expect(within(items[1]).getByText("Downloaded 2 d ago via the server")).toBeTruthy();
+    expect(items.map((li) => li.querySelector(".chip")?.textContent ?? null)).toEqual(["queued", null, "failed"]);
+    expect(within(items[2]).getByText("Failed: disk full")).toBeTruthy();
+    expect(fetch.mock.calls.some(([u]) => u === "/api/downloads?model_id=7")).toBe(true);
+  });
+
   it("FY-WEB-473 an admin sets the display name (the name stays); a plain user sees no Display name, Deploy, Download to… or Remove", async () => {
     let title: string | null = null;
     const fetch = server((url, init) => {
