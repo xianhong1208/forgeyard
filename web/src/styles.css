@@ -423,9 +423,14 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .recipe p { margin: 6px 0; }
 /* 1.4 (#92): an engine card at a glance; the variants are behind Details. */
 .engine-card { display: flex; flex-direction: column; }
-.recipe header.engine-head { flex-wrap: nowrap; min-width: 0; height: 24px; }
-.engine-head h3 { flex: 0 0 auto; max-width: 65%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.engine-head .engine-version { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 21px; }
+/* 1.6.2: the name and the version chip are never cut. When they do not fit side by side the chip goes to a second
+   line; a chip wider than the card wraps inside itself. */
+.recipe header.engine-head { flex-wrap: wrap; min-width: 0; row-gap: 4px; }
+.engine-head h3 { flex: 0 1 auto; max-width: 100%; min-width: 0; line-height: 21px; overflow-wrap: anywhere; }
+.engine-head .engine-version { flex: 0 1 auto; min-width: 0; }
+/* A chip whose text may be longer than its box (an engine's version): it wraps instead of running out of the card. */
+.chip.chip-wraps { max-width: 100%; height: auto; min-height: 21px; padding-block: 1px; white-space: normal; overflow-wrap: anywhere;
+  line-height: 17px; }
 .engine-head .engine-custom { flex: none; }
 .recipe .engine-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
   line-height: 1.45; height: 2.9em; margin: 6px 0; }
@@ -433,12 +438,11 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .engine-facts .vendor { display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .engine-facts .chip { flex: none; }
 .recipe .engine-serves { margin: 6px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 1.5.2 (#189): the image (or program) an engine runs, beside its name: one line, the name cut with an ellipsis,
-   never the "+N". */
+/* 1.5.2 (#189): the image (or program) an engine runs, beside its name: one line, never the "+N" cut. 1.6.2: one
+   ellipsis at most, at the start, so the tag stays (right-to-left box, the reference itself isolated left-to-right). */
 .engine-image { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; max-width: 100%; vertical-align: bottom; font-size: 11.5px; }
-.engine-image-name { display: flex; min-width: 0; white-space: nowrap; }
-.engine-image-repo { flex: 0 4 auto; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
-.engine-image-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.engine-image-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+  text-align: left; }
 .engine-image-more { flex: none; }
 .engine-image-line { display: flex; min-width: 0; height: 18px; line-height: 18px; margin: 4px 0 0; }
 .recipe p.engine-image-line { margin: 4px 0 0; }
@@ -447,8 +451,13 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .field-hint.engine-image-line { height: auto; margin-top: 4px; }
 .engine-with-image { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; }
 .engine-with-image .engine-image { max-width: min(42ch, 60vw); }
-.engine-foot { display: flex; align-items: flex-start; gap: 8px; margin-top: auto; padding-top: 6px; min-height: 36px; }
+.engine-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 4px 8px; margin-top: auto;
+  padding-top: 6px; min-height: 36px; }
 .engine-details { flex: 1; min-width: 0; }
+/* 1.6.2: a closed Details keeps its width; badges that do not fit beside it go to the next line, on the right. An
+   open one takes the whole width (beside two badges it was squeezed to a few characters), the badges below it. */
+.engine-details:not([open]) { flex: 1 0 auto; }
+.engine-details[open] { flex-basis: 100%; }
 .engine-details > summary { cursor: pointer; color: var(--ink-2); width: max-content; line-height: 30px; }
 .engine-actions .btn { height: 30px; }
 .engine-details[open] > summary { margin-bottom: 4px; }
@@ -1054,16 +1063,6 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 }
 
 @media (max-width: 760px) {
-  .topbar-inner { padding: 0 16px; gap: 12px; justify-content: space-between; }
-  .nav-toggle { display: flex; align-items: center; justify-content: center; order: 3; width: 40px; height: 40px; align-self: center;
-    background: var(--steel-2); border: 1px solid var(--steel-3); border-radius: var(--radius); color: #fff; cursor: pointer; }
-  .usermenu { display: none; }
-  .mainnav { display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column; gap: 0; padding: 8px 0;
-    background: var(--steel); border-top: 1px solid var(--steel-3); box-shadow: 0 16px 24px rgb(18 26 34 / 0.25); }
-  .mainnav.open { display: flex; }
-  .mainnav a, .navbutton { padding: 13px 16px; border: 0; border-left: 3px solid transparent; font-size: 15px; text-align: left; }
-  .mainnav a.active { border-left-color: var(--heat); border-bottom: 0; background: var(--steel-2); }
-  .only-narrow { display: flex !important; }
   .content { padding: 24px 16px 48px; }
   .page-header { flex-direction: column; align-items: stretch; gap: 16px; }
   .page-header h1 { font-size: 26px; }
@@ -1457,13 +1456,27 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .advisor-more { margin: 10px 0 0; }
 /* Admins have ten links plus the badge: keep each link on one line. */
 .mainnav a { white-space: nowrap; }
-@media (min-width: 761px) and (max-width: 1260px) {
+/* 1.6.2: an admin's eleven links, the badge and the user menu need about 1100 px (English): below 1120 px the links
+   go behind the menu button, as on a phone, instead of pushing the page sideways. */
+@media (min-width: 1121px) and (max-width: 1260px) {
   .topbar-inner { gap: 18px; }
   .mainnav { gap: 0; }
   .mainnav a, .navbutton { padding: 0 9px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 1120px) {
+  .topbar-inner { padding: 0 16px; gap: 12px; justify-content: space-between; }
+  .nav-toggle { display: flex; align-items: center; justify-content: center; order: 3; width: 40px; height: 40px; align-self: center;
+    background: var(--steel-2); border: 1px solid var(--steel-3); border-radius: var(--radius); color: #fff; cursor: pointer; }
+  .usermenu { display: none; }
+  .mainnav { display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column; gap: 0; padding: 8px 0;
+    background: var(--steel); border-top: 1px solid var(--steel-3); box-shadow: 0 16px 24px rgb(18 26 34 / 0.25); }
+  .mainnav.open { display: flex; }
+  .mainnav a, .navbutton { padding: 13px 16px; border: 0; border-left: 3px solid transparent; font-size: 15px; text-align: left; }
+  .mainnav a.active { border-left-color: var(--heat); border-bottom: 0; background: var(--steel-2); }
+  .only-narrow { display: flex !important; }
   .health-badge { order: 2; margin-left: auto; }
+}
+@media (max-width: 760px) {
   .finding, .advisor-banner li { grid-template-columns: minmax(0, 1fr); }
   .finding-icon { display: none; }
 }
@@ -1850,7 +1863,7 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .lp-deps { margin: 0 -22px -22px; border-top: 1px solid var(--line); }
 .lp-deps .deprow:last-child { border-bottom: 0; }
 .lp-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-.lp-card { display: grid; gap: 6px; height: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink); text-decoration: none; background: var(--surface); }
+.lp-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; height: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink); text-decoration: none; background: var(--surface); }
 .lp-card:hover { border-color: var(--ink-2); background: var(--surface-2); }
 .lp-card-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .lp-card-hw { display: flex; flex-wrap: wrap; gap: 4px; }

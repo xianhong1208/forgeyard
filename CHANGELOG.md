@@ -37,8 +37,26 @@ version until 1.0.
   extension that enforces GPU-hour quotas reads `forgeyard.workloads.gpu_hours.month_total(db, team_id=…)`. Guide:
   [GPU hours](docs/guide/concepts.md#gpu-hours), [See who holds the GPUs](docs/guide/how-to.md#see-who-holds-the-gpus).
 
+### Changed
+
+- **The catalog lists only downloads that need you**: a download under way (its progress and **Cancel**) or
+  one that failed in the last day. Finished downloads moved to the model's page, which now lists the latest download
+  to each machine, finished ones too (before, it showed only one under way). A finished download no longer carries a
+  green *done* chip: *Downloaded 2 d ago* already says it; queued, downloading, failed and cancelled keep theirs.
+- **The top bar's links go behind the menu button below 1120 px** (was 760 px): an admin's eleven links, Setup
+  health and the user menu need about 1,100 px in English, and between 761 and 1,100 px they pushed every page
+  sideways.
+
 ### Fixed
 
+- **Engine cards no longer cut or squeeze their text**. The name and the version chip wrap to a second line
+  instead of cutting the version (*stable-diffusion.cpp master-10…*); the image line has one ellipsis at most, at its
+  start, so the tag stays readable (it had two: *ghcr.io/leejet/stable-dif… :master-cu…*); **Details** and the
+  update and trial badges no longer touch or overlap (at 390 px the badge covered *Details*), badges that do not fit
+  go to the next line; an open **Details** takes the card's whole width (beside two badges it was a few characters
+  wide and its **Copy** button stood outside the card). The engine cards on a model's page wrap a long version too.
+  The acceptance run's `console` group now checks 1100 and 900 px as well and that nothing on an engine card shows
+  outside it, with **Details** closed and open.
 - A team's manager no longer sees "engine arguments" in the **Advanced** summary of a deployment's **Change** page,
   whose field is hidden for them.
 - On SQLite, the id of a deleted deployment, API key, person, team, machine (and of a deleted catalog model, download,
