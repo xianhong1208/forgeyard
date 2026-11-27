@@ -91,7 +91,7 @@ export function EngineCards({ list, empty }: { list: Recipe[]; empty: ReactNode 
         <li key={r.name}>
           <Link to={engineHref(r.name)} className="lp-card">
             <span className="lp-card-top"><IconEngine size={16} aria-hidden="true" /><span className="mono strong">{r.name}</span>
-              <span className="chip">{r.engine} {r.version}</span>{!r.builtin && <span className="chip chip-tone-run">{t("library.custom")}</span>}</span>
+              <span className="chip chip-wraps">{r.engine} {r.version}</span>{!r.builtin && <span className="chip chip-tone-run">{t("library.custom")}</span>}</span>
             <span className="lp-card-hw"><HardwareChips r={r} /></span>
             <span className="small muted lp-clamp">{engineDescription(r)}</span>
           </Link>

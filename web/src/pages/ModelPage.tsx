@@ -3,16 +3,17 @@
 // and admins deploy and download it; admins change its display name and remove it.
 import { IconAlertTriangle, IconDownload, IconExternalLink, IconLanguage, IconLock, IconPencil, IconPhoto, IconPlus, IconTrash } from "@tabler/icons-react";
 import { AbilityChips } from "../components/AbilityChips";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { DownloadDialog, DownloadList } from "../components/DownloadTo";
+import { DownloadDialog, DownloadList, useDownloads } from "../components/DownloadTo";
 import { ModelKindIcon } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Crumb, EngineCards, FoldButton, Jump, MachineCell, Section } from "../components/LibraryPage";
 import { Notice } from "../components/ui";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
+import { isActive, recentDownloads } from "../lib/downloads";
 import { bytes } from "../lib/machines";
 import { embedSummary, embedsImages, embedsText, englishOnly, languagesLine } from "../lib/encoders";
 import { abilities, startImage } from "../lib/imageEdit";
@@ -67,7 +68,18 @@ function ModelView({ p, machines, deployments, reload }: {
   const est = headlineEstimate(recipe ? p.fits[recipe] : undefined);
   const deployHref = `/serving/deploy?model=${encodeURIComponent(m.name)}`;
   const canDownload = p.can_deploy && m.kind !== "local";
-  const downloading = p.machines.flatMap((x) => (x.download ? [x.download] : []));
+  // Its downloads to each machine (1.6.2): the one under way, else how the latest ended. The catalog list shows only
+  // those under way or just failed, so this is where a finished one is seen.
+  const dl = useDownloads(`/downloads?model_id=${m.id}`);
+  const downloads = recentDownloads(dl.data?.downloads ?? [], "machine");
+  const reloadAll = () => { reload(); dl.reload(); };
+  // When the last one ends, the machines' verdicts below are asked again (the model is there now, or not).
+  const active = downloads.some(isActive);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (wasActive.current && !active) reload();
+    wasActive.current = active;
+  }, [active, reload]);
 
   const remove = async () => {
     if (!window.confirm(t("library.removeConfirm", { name: m.name }))) return;
@@ -106,7 +118,7 @@ function ModelView({ p, machines, deployments, reload }: {
       {renaming && <RenameForm m={m} onDone={(text) => { setRenaming(false); setNote({ tone: "ok", text }); reload(); }} onCancel={() => setRenaming(false)} />}
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {dialog && <DownloadDialog model={m} machineId={dialog.machineId} onClose={() => setDialog(null)}
-        onStarted={(text) => { setNote({ tone: "ok", text }); reload(); }} />}
+        onStarted={(text) => { setNote({ tone: "ok", text }); reloadAll(); }} />}
       <p className="mk-facts">
         <span className="chip">{taskLabel(m)}</span>
         {m.modalities && m.modalities.length > 0 && <span className="chip chip-tone-run"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>}
@@ -132,8 +144,8 @@ function ModelView({ p, machines, deployments, reload }: {
         actions={<RecipePicker m={m} recipe={recipe} setRecipe={setRecipe} />}
         note={t.rich("modelpage.machinesNote", { recipe: recipe ?? t("modelpage.theEngine"),
           link: (x) => <HelpLink page="concepts" anchor="models-engines-and-estimates">{x}</HelpLink> })}>
-        {downloading.length > 0 && <DownloadList list={downloading} show="machine" canCancel={p.can_deploy}
-          onChanged={(text) => { setNote({ tone: "ok", text }); reload(); }} onError={(text) => setNote({ tone: "error", text })} />}
+        {downloads.length > 0 && <DownloadList list={downloads} show="machine" canCancel={p.can_deploy}
+          onChanged={(text) => { setNote({ tone: "ok", text }); reloadAll(); }} onError={(text) => setNote({ tone: "error", text })} />}
         <ModelMachines p={p} recipe={recipe} machines={machines} onDownload={(id) => setDialog({ machineId: id })} />
       </Section>
 

@@ -267,7 +267,6 @@ export default {
   "machine.dl.progressLabel": "Download of {model} to {machine}",
   "machine.dl.state.queued": "queued",
   "machine.dl.state.downloading": "downloading",
-  "machine.dl.state.done": "done",
   "machine.dl.state.failed": "failed",
   "machine.dl.state.cancelled": "cancelled",
   "machine.dl.cancelLabel": "Cancel the download to {machine}",

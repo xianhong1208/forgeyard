@@ -65,9 +65,3 @@ export function deploymentRuns(replicaImages: (string | null | undefined)[], rec
   return recipe ? engineRuns(recipe.variants, device) : [];
 }
 
-// An image reference split before its tag ("vllm/vllm-openai", ":v0.32.0"), so a short line cuts the repository first;
-// a program's name (no tag) stays whole.
-export function splitImage(label: string): [string, string] {
-  const colon = label.lastIndexOf(":");
-  return colon > label.lastIndexOf("/") && colon > 0 ? [label.slice(0, colon), label.slice(colon)] : [label, ""];
-}

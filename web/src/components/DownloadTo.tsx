@@ -10,10 +10,25 @@ import { TARGET_LABEL, TARGET_TONE, downloadLine, isActive, pickable, targetDeta
 import { bytes } from "../lib/machines";
 import { downloadFraction } from "../lib/models";
 import { engineHref, modelHref } from "../lib/pages";
-import type { CatalogModel, CatalogResponse, DownloadTarget, DownloadTargets, ModelDownload } from "../lib/types";
+import type { CatalogModel, CatalogResponse, DownloadTarget, DownloadTargets, DownloadsResponse, ModelDownload } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Notice } from "./ui";
 import { useT } from "../i18n/react";
+
+// The downloads at `path` (GET /api/downloads, optionally ?model_id=), asked again every 2 s while one is under way.
+export const DOWNLOADS_POLL_MS = 2000;
+
+export function useDownloads(path: string) {
+  const dl = useApi<DownloadsResponse>(path);
+  const running = (dl.data?.downloads ?? []).some(isActive);
+  const reload = dl.reload;
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") reload(); }, DOWNLOADS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [running, reload]);
+  return dl;
+}
 
 type Started = { downloads: ModelDownload[]; skipped: { machine_id: number; name: string; state: string; reason: string }[] };
 
@@ -261,7 +276,10 @@ export function DownloadList({ list, show, canCancel, onChanged, onError }: {
                 </span>
               )}
             </span>
-            <span className={`chip chip-tone-${d.state === "done" ? "ok" : d.state === "failed" ? "bad" : active ? "wait" : "off"}`}>{t.maybe(`machine.dl.state.${d.state}`, d.state)}</span>
+            {/* "Downloaded 2 d ago" already says it is done (1.6.2): a chip only for the other states. */}
+            {d.state !== "done" && (
+              <span className={`chip chip-tone-${d.state === "failed" ? "bad" : active ? "wait" : "off"}`}>{t.maybe(`machine.dl.state.${d.state}`, d.state)}</span>
+            )}
             {canCancel && active && (
               <button type="button" className="btn btn-quiet btn-small" disabled={busy !== null} onClick={() => void cancel(d)}
                 aria-label={t("machine.dl.cancelLabel", { machine: pair(d).machine })}>

@@ -88,6 +88,17 @@ export function recentDownloads(list: ModelDownload[], key: "machine" | "model",
   return out.slice(0, Math.max(limit, active.length));
 }
 
+// The catalog list's rows (1.6.2): only what needs the reader there and then. A download under way (its progress and
+// Cancel), and one that failed in the last day, so a download started from the catalog that fails is seen there.
+// Finished downloads are history: the model's page lists them. A failure followed by a newer download to the same
+// machine is gone with it (the latest per machine counts).
+export const CATALOG_FAILED_MS = 24 * 3600 * 1000;
+
+export function catalogDownloads(list: ModelDownload[], now = Date.now()): ModelDownload[] {
+  return recentDownloads(list, "machine").filter((d) => isActive(d)
+    || (d.state === "failed" && d.finished_at !== null && now - Date.parse(d.finished_at) < CATALOG_FAILED_MS));
+}
+
 export const FETCH_VIA_LABEL: Record<FetchVia, string> = labels({
   auto: "machine.fetchVia.auto", server: "machine.fetchVia.server", direct: "machine.fetchVia.direct",
 });

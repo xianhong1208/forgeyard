@@ -87,8 +87,9 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              its --agent-stop / --agent-start commands, cannot_wake while its pinned machine is offline; Stop is not
              woken; on the two CPU machines automatic replicas 1 to 2: a load adds one, a stream on it finishes while
              it is drained, none twice; sleep with a minimum of 0; the start times and the metrics
-  console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
-             and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
+  console    with Playwright for Python: every main page as an admin and as a plain user, at 1440,
+             1100, 900 and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways;
+             nothing on an engine card shows outside the card
 
 The gateway and cloud groups need the models group's deployments: it runs for them when it was not
 chosen. A machine that is not given skips what would run on it, saying so.
@@ -216,11 +217,40 @@ CLOUD_PROMPT = "Count from 1 to 20, separated by spaces."
 # Pages the console group opens: (path, the tab title it must have; None: the page's own name).
 CONSOLE_PAGES = [
     ("/start", None), ("/machines", "Machines"),
-    ("/serving", "Serving"), ("/serving/deploy", "Deploy a model"), ("/models", "Models"), ("/cloud", "Cloud"),
+    ("/serving", "Serving"), ("/serving/deploy", "Deploy a model"), ("/models", "Models"), ("/models/engines", "Models"),
+    ("/cloud", "Cloud"),
     ("/playground", "Playground"), ("/keys", "API keys"), ("/usage", "Usage"), ("/account", None),
     ("/users", "Users"), ("/audit", "Audit log"), ("/trust", "Trust this server"), ("/guide/en/how-to", "How-to"),
 ]
 ADMIN_PAGES = ("/cloud", "/users", "/audit")
+CONSOLE_WIDTHS = (1440, 1100, 900, 390)
+# What shows of an engine card's contents outside the card (1.6.2: a version chip and a Copy button did), with its
+# Details closed and then open: each element's box cut by the ancestors inside the card that hide their overflow,
+# compared with the card's box. The Details are closed again afterwards.
+CARD_OUTSIDE_JS = """() => {
+  const out = [];
+  const look = (state) => {
+    for (const card of document.querySelectorAll(".engine-card, .lp-card")) {
+      const c = card.getBoundingClientRect();
+      for (const el of card.querySelectorAll("*")) {
+        if (!el.checkVisibility()) continue;
+        const r = el.getBoundingClientRect();
+        let l = r.left, rt = r.right;
+        for (let a = el.parentElement; a && a !== card; a = a.parentElement) {
+          if (getComputedStyle(a).overflowX !== "visible") { const b = a.getBoundingClientRect(); l = Math.max(l, b.left); rt = Math.min(rt, b.right); }
+        }
+        if (rt > l && (rt > c.right + 0.5 || l < c.left - 0.5))
+          out.push(`${card.querySelector("h3, .strong")?.textContent || "?"} (${state}): ${el.tagName.toLowerCase()}`);
+      }
+    }
+  };
+  look("closed");
+  const shut = [...document.querySelectorAll(".engine-card details:not([open])")];
+  shut.forEach((d) => { d.open = true; });
+  look("open");
+  shut.forEach((d) => { d.open = false; });
+  return [...new Set(out)];
+}"""
 PUBLIC_PAGES = [("/login", "Sign in"), ("/trust", "Trust this server"), ("/guide/en/quick-start", "Quick start")]
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
@@ -2808,20 +2838,24 @@ def console_page(run: Run, ctx, who: str, path: str, title: Optional[str], shots
         except Exception:  # noqa: BLE001 - reported below as the wrong title
             pass
         got = page.title()
-        wide = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
         slug = (path.strip("/").replace("/", "-") or "home")
-        if shots:
-            page.screenshot(path=str(shots / f"{who}-1440-{slug}.png"), full_page=True)
-        page.set_viewport_size({"width": 390, "height": 844})
-        page.wait_for_timeout(400)
-        narrow = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
-        if shots:
-            page.screenshot(path=str(shots / f"{who}-390-{slug}.png"), full_page=True)
+        # 1100 and 900 px too (1.6.2): an admin's top bar pushed the page sideways between 761 and 1100 px.
+        scroll, outside = [], []
+        for width in CONSOLE_WIDTHS:
+            if width != 1440:
+                page.set_viewport_size({"width": width, "height": 844 if width < 760 else 900})
+                page.wait_for_timeout(400)
+            sw, cw = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+            if sw > cw + 1:
+                scroll.append(str(width))
+            outside += [f"{width} px: {x}" for x in page.evaluate(CARD_OUTSIDE_JS)]
+            if shots and width in (1440, 390):
+                page.screenshot(path=str(shots / f"{who}-{width}-{slug}.png"), full_page=True)
         title_ok = got.endswith(" · Forgeyard") and (want is None or got == f"{want} · Forgeyard")
-        scroll = [w for w, (sw, cw) in (("1440", wide), ("390", narrow)) if sw > cw + 1]
-        run.check(f"{who} {path}: tab title, no errors, no sideways scroll", title_ok and not errors and not scroll,
+        run.check(f"{who} {path}: tab title, no errors, no sideways scroll", title_ok and not errors and not scroll and not outside,
                   f"tab {got!r}" + ("" if title_ok else f" (should be {want!r})") + (f"; errors: {errors[:3]}" if errors else "")
-                  + (f"; scrolls sideways at {', '.join(scroll)} px" if scroll else "; fits 1440 and 390 px"))
+                  + (f"; scrolls sideways at {', '.join(scroll)} px" if scroll else f"; fits {', '.join(map(str, CONSOLE_WIDTHS))} px")
+                  + (f"; outside its card: {outside[:3]}" if outside else ""))
     except Exception as e:  # noqa: BLE001 - one page must not stop the others
         run.check(f"{who} {path}: loads", False, f"{type(e).__name__}: {str(e).splitlines()[0][:160]}")
     finally:

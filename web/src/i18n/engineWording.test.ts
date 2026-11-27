@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ZH_TW_MODULES } from "./dictionaries";
-import { deploymentRuns, engineRuns, engineRunsTitle, splitImage } from "../lib/engines";
+import { deploymentRuns, engineRuns, engineRunsTitle } from "../lib/engines";
 import type { RecipeVariant } from "../lib/types";
 
 // The compounds that keep a bare 引擎, each for a reason.
@@ -53,9 +53,5 @@ describe("the engine's name and image (1.5.2)", () => {
     expect(deploymentRuns([cuda, cuda, null], { variants }, "gpu").map((r) => [r.label, r.full])).toEqual([["ghcr.io/ggml-org/llama.cpp:server-cuda", cuda]]);
     expect(deploymentRuns([null], { variants }, "cpu").map((r) => r.label)).toEqual(["llama-bin.zip"]);
     expect(deploymentRuns([], undefined, "gpu")).toEqual([]);
-    // Split before the tag, so a short line cuts the repository first; a registry port is not a tag; a program stays whole.
-    expect(splitImage("vllm/vllm-openai:v0.32.0")).toEqual(["vllm/vllm-openai", ":v0.32.0"]);
-    expect(splitImage("registry.local:5000/llama.cpp")).toEqual(["registry.local:5000/llama.cpp", ""]);
-    expect(splitImage("llama-bin.zip")).toEqual(["llama-bin.zip", ""]);
   });
 });
