@@ -31,6 +31,18 @@ def poked(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_background_sweep(monkeypatch):
+    """These tests call move_off() themselves and check what it returns. The app's own liveness loop (every 2 s) also
+    calls it, and could move a replica between a test's go_offline() and its sweep(), leaving nothing for the test's
+    call (seen once in a loaded full run, 2026-11-27). FY-MOVE-010 runs liveness._sweep_once() itself."""
+    async def idle(interval: float = 0.0):
+        while True:
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr(liveness, "run_forever", idle)
+
+
+@pytest.fixture(autouse=True)
 def started_again():
     yield
     offline.server_started()
